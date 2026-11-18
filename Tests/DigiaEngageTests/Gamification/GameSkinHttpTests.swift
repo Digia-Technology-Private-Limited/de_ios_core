@@ -30,10 +30,14 @@ struct GameSkinHttpTests {
         #expect(GameHttpBridge.validatedPath("grantChance") == nil)
     }
 
-    @Test("only GET and POST exist")
+    @Test("only exact GET and POST exist")
     func methods() {
         #expect(GameHttpBridge.httpMethod("POST") == HTTPMethod.post)
-        #expect(GameHttpBridge.httpMethod("get") == HTTPMethod.get)
+        #expect(GameHttpBridge.httpMethod("GET") == HTTPMethod.get)
+        // Guards the exact match: lowercase answers invalid, like Android's
+        // GameHttpBridge.call — the session forwards the method verbatim.
+        #expect(GameHttpBridge.httpMethod("get") == nil)
+        #expect(GameHttpBridge.httpMethod("post") == nil)
         #expect(GameHttpBridge.httpMethod("PUT") == nil)
         #expect(GameHttpBridge.httpMethod(nil) == nil)
     }

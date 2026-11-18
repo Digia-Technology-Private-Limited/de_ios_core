@@ -52,7 +52,7 @@ final class GameSurface {
                 "Game not opened — needs a newer SDK (min=\(required))",
                 campaign: campaignKey)
             fail(
-                settle: settle, campaign: campaign,
+                settle: settle, campaign: campaign, config: config,
                 reason: GamificationSurface.causeUnsupportedSDK)
             return
         }
@@ -85,7 +85,7 @@ final class GameSurface {
                     "Game not opened — skin download failed",
                     campaign: campaignKey, error: "\(error)")
                 self.fail(
-                    settle: settle, campaign: campaign, reason: "skin_unavailable")
+                    settle: settle, campaign: campaign, config: config, reason: "skin_unavailable")
             }
         }
     }
@@ -275,6 +275,8 @@ final class GameSurface {
             onShown: { [weak self] in self?.shown(settle: settle, campaign: campaign) },
             payload: payload,
             entry: entryValue,
+            themeFontFamily: config.themeFontFamily,
+            themeFonts: config.themeFonts,
             values: config.values,
             slots: config.slots
         )
