@@ -374,17 +374,15 @@ final class GameSurface {
         }
     }
 
-    /// Asks the backend `state` after a game opened from an inline entry
-    /// closes, then keeps or hides the card — the same rule as floating. A
-    /// failed call keeps the card with its stored chance; any other
-    /// non-playable answer removes the stored chance and dismisses the card.
-    /// Inline entries never join the session hide, which is floating-only.
+    /// After a game opened from an inline entry closes: the card always
+    /// stays. `state` only refreshes its stored chance (an extra play stores
+    /// the new one). A spent chance stays stored too, so a tap reopens the
+    /// skin, whose own `state` call answers `played` and shows the reward
+    /// already won.
     private func refreshInlineEntryAfterClose(
         campaignKey: String, payload: CEPTriggerPayload
     ) {
-        refreshEntryAfterClose(campaignKey: campaignKey, payload: payload) { [weak self] in
-            self?.hideInlineEntry(campaignKey: campaignKey, payload: payload)
-        }
+        refreshEntryAfterClose(campaignKey: campaignKey, payload: payload, hide: {})
     }
 
     /// The one entry-close round-trip both entries share: with no user the
@@ -443,13 +441,5 @@ final class GameSurface {
                 hide()
             }
         }
-    }
-
-    /// Hides an inline entry after its game closed: removes the stored chance
-    /// and dismisses the card — if it still shows this delivery — as cancelled,
-    /// never as a user close.
-    private func hideInlineEntry(campaignKey: String, payload: CEPTriggerPayload) {
-        sdk.gamificationSurface.chances.removeValue(forKey: campaignKey)
-        sdk.inlineSurface.dismiss(payload)
     }
 }
