@@ -33,7 +33,12 @@ struct GameContainerView: View {
             ZStack {
                 GameWebViewHost(game: game)
                     .frame(width: geometry.size.width, height: geometry.size.height)
-                GameCloseButton { GamePresenter.dismiss() }
+                HStack(spacing: 0) {
+                    if game.request.showMute {
+                        GameMuteButton(muted: game.isMuted) { game.toggleMute() }
+                    }
+                    GameCloseButton { GamePresenter.dismiss() }
+                }
                     .frame(
                         width: geometry.size.width, height: geometry.size.height,
                         alignment: .topTrailing
@@ -72,6 +77,27 @@ struct GameContainerView: View {
             }
         }
         .ignoresSafeArea()
+    }
+}
+
+/// The native sound toggle, left of the close button; same geometry.
+private struct GameMuteButton: View {
+    let muted: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                Circle().fill(Color.black.opacity(0.6)).frame(width: 36, height: 36)
+                Image(systemName: muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.white)
+            }
+            .frame(width: 48, height: 48)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(muted ? "Unmute" : "Mute")
     }
 }
 

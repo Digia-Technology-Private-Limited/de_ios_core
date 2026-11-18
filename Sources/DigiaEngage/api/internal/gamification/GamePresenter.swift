@@ -30,6 +30,9 @@ final class GamePresentation: Identifiable, ObservableObject {
     /// True from the first close request until the exit animation ends and the
     /// session settles; the container animates out on it.
     @Published private(set) var isClosing = false
+    /// The native mute button's state: off for each new game, in memory only.
+    /// Muted sends `device.soundAllowed = false`, so the skin goes quiet.
+    @Published private(set) var isMuted = false
 
     private var didFinish = false
     private let haptics = GameHaptics()
@@ -122,6 +125,14 @@ final class GamePresentation: Identifiable, ObservableObject {
         message["type"] = "init"
         message["payload"] = initMessage
         send(message)
+        // `init` is built unmuted; a skin that re-announces itself while muted
+        // gets the muted facts right after it.
+        if isMuted, let lastDevicePush { send(["type": "device", "payload": lastDevicePush]) }
+    }
+
+    func toggleMute() {
+        isMuted.toggle()
+        pushDeviceIfChanged()
     }
 
     // MARK: - Skin requests
@@ -399,7 +410,8 @@ final class GamePresentation: Identifiable, ObservableObject {
     }
 
     private func pushDeviceIfChanged(_ info: GameDeviceInfo? = nil) {
-        let info = info ?? GameDeviceInfo.current(sdkVersion: sdkVersion)
+        var info = info ?? GameDeviceInfo.current(sdkVersion: sdkVersion)
+        if isMuted { info.soundAllowed = false }
         let push = info.pushPayload
         guard Self.devicePushChanged(push, from: lastDevicePush) else { return }
         lastDevicePush = push
@@ -449,7 +461,8 @@ final class GamePresentation: Identifiable, ObservableObject {
             skinVersion: request.skinVersion,
             values: request.values,
             slots: request.slots,
-            showMute: request.showMute,
+            // Native draws the mute button, so the skin never draws its own.
+            showMute: false,
             viewportWidth: Double(size.width),
             viewportHeight: Double(size.height),
             safeArea: safeArea,
