@@ -120,10 +120,10 @@ final class GameBridge {
               let data = text.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else {
-            let reason =
-                (body as? String)?.utf8.count.map {
-                    $0 > Self.maxMessageBytes ? "oversize" : "malformed"
-                } ?? "malformed"
+            let reason: String = {
+                guard let text = body as? String else { return "malformed" }
+                return text.utf8.count > Self.maxMessageBytes ? "oversize" : "malformed"
+            }()
             recordDrop(reason: reason)
             return
         }
