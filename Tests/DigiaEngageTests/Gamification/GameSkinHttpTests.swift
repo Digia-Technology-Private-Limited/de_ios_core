@@ -30,8 +30,8 @@ struct GameSkinHttpTests {
         #expect(GameHttpBridge.validatedPath("grantChance") == nil)
     }
 
-    @Test("HTTP 200 returns the raw envelope unchanged, refusals included")
-    func rawEnvelopePassthrough() async {
+    @Test("HTTP 200 returns the status and body unchanged, refusals included")
+    func rawBodyPassthrough() async {
         let envelope: [String: Any] = ["isSuccess": true, "data": ["response": ["refused": "busy"]]]
         let client = FakeSkinNetworkClient(result: .success(status: 200, body: envelope))
         let body = GameHttpBridge.jsonData(["chanceId": "ch_1", "playId": "p_1"])
@@ -42,9 +42,8 @@ struct GameSkinHttpTests {
         // Guards the success arm: no merging, no re-shaping.
         switch result {
         case .success(let success):
-            #expect(success.envelope["isSuccess"] as? Bool == true)
             #expect(success.status == 200)
-            let data = success.envelope["data"] as? [String: Any]
+            let data = success.body?["data"] as? [String: Any]
             let response = data?["response"] as? [String: Any]
             #expect(response?["refused"] as? String == "busy")
         case .failure(let failure):
@@ -55,9 +54,22 @@ struct GameSkinHttpTests {
         #expect(client.lastBody?["chanceId"] as? String == "ch_1")
     }
 
-    @Test("non-2xx answers by status: 429 is quota, other 4xx invalid, rest network")
-    func non200Mapping() async {
-        for status in [400, 401, 403, 404] {
+    @Test("4xx passes through with its body; 5xx is server, 3xx network")
+    func statusMapping() async {
+        for status in [400, 403, 404, 429] {
+            let client = FakeSkinNetworkClient(result: .success(status: status, body: ["reason": "r\(status)"]))
+            let result = await GameHttpBridge.send(
+                client: client, baseUrl: "https://app.digia.tech", headers: [:],
+                method: "GET", path: "rewards", body: nil)
+            // Guards the 4xx arm of the status range check.
+            guard case .success(let success) = result else {
+                Issue.record("expected passthrough for status \(status)")
+                continue
+            }
+            #expect(success.status == status)
+            #expect(success.body?["reason"] as? String == "r\(status)")
+        }
+        for (status, code) in [(500, GameBridgeErrorCode.server), (503, .server), (302, .network)] {
             let client = FakeSkinNetworkClient(result: .success(status: status, body: [:]))
             let result = await GameHttpBridge.send(
                 client: client, baseUrl: "https://app.digia.tech", headers: [:],
@@ -66,35 +78,11 @@ struct GameSkinHttpTests {
                 Issue.record("expected failure for status \(status)")
                 continue
             }
-            // Guards the 4xx arm of the status mapping — and that the real
-            // status rides along for game_http_failed.
-            #expect(failure.code == .invalid)
+            // Guards the `status >= 500` split, and that the status rides along
+            // for game_http_failed.
+            #expect(failure.code == code)
             #expect(failure.status == status)
         }
-
-        let quota = FakeSkinNetworkClient(result: .success(status: 429, body: [:]))
-        let quotaResult = await GameHttpBridge.send(
-            client: quota, baseUrl: "https://app.digia.tech", headers: [:],
-            method: "GET", path: "rewards", body: nil)
-        guard case .failure(let quotaFailure) = quotaResult else {
-            Issue.record("expected failure for status 429")
-            return
-        }
-        // Guards the 429 arm of the status mapping.
-        #expect(quotaFailure.code == .quota)
-        #expect(quotaFailure.status == 429)
-
-        let server = FakeSkinNetworkClient(result: .success(status: 500, body: [:]))
-        let serverResult = await GameHttpBridge.send(
-            client: server, baseUrl: "https://app.digia.tech", headers: [:],
-            method: "GET", path: "rewards", body: nil)
-        guard case .failure(let serverFailure) = serverResult else {
-            Issue.record("expected failure for status 500")
-            return
-        }
-        // Guards the fallback arm: only 429 and 4xx map elsewhere.
-        #expect(serverFailure.code == .network)
-        #expect(serverFailure.status == 500)
     }
 
     @Test("a lowercase method never reaches the network")
@@ -110,7 +98,7 @@ struct GameSkinHttpTests {
             Issue.record("expected failure for lowercase method")
             return
         }
-        #expect(failure.code == .invalid)
+        #expect(failure.code == .badRequest)
         #expect(client.lastURL == nil)
     }
 

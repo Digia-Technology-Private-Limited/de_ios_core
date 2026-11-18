@@ -1,10 +1,10 @@
 import CoreMotion
 import Foundation
 
-/// One skin `sensor` sample: SI units (rad/s gyroscope, m/s² accelerometer
+/// One skin `motionSample`: SI units (rad/s gyroscope, m/s² accelerometer
 /// including gravity) in the device's natural portrait frame — the same frame
 /// Android reports, so skins read one shape on both platforms. `t` is ms
-/// monotonic since the first `sensor.start` of the session.
+/// monotonic since the first `motion` subscribe of the session.
 struct GameMotionEvent: Equatable {
     var sensor: String
     var x: Double
@@ -14,12 +14,12 @@ struct GameMotionEvent: Equatable {
     var t: Double
 
     var payload: [String: Any] {
-        ["sensor": sensor, "x": x, "y": y, "z": z, "t": t]
+        ["t": t, sensor: ["x": x, "y": y, "z": z]]
     }
 }
 
 /// Streams CoreMotion data while the game is open and resumed (skin
-/// `sensor.start`/`sensor.stop`). Each sensor runs at its own requested rate
+/// `motion` subscribe/unsubscribe). Each sensor runs at its own requested rate
 /// (default 30 Hz, clamped 1…60); one timer ticks at the fastest rate and
 /// each sensor emits when its own interval has elapsed.
 ///

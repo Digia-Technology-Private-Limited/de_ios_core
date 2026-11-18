@@ -3,15 +3,14 @@ import Foundation
 /// The SDK's one logging style — see ``DigiaLogger``.
 private let log = DigiaLogger()
 
-/// Wire error codes for `{id, type:"error"}` replies.
+/// Wire error codes for `{id, type:"error"}` replies — the whole set. A skin
+/// feature-detects by sending a request and handling `unsupported`.
 enum GameBridgeErrorCode: String, Sendable, Error {
+    case unsupported
+    case badRequest = "bad_request"
     case network
     case timeout
-    case forbidden
-    case unsupported
-    case invalid
-    case quota
-    case `internal`
+    case server
     /// The session closed before the request was answered.
     case closed
 }
@@ -26,8 +25,6 @@ enum GameBridgeRequest {
     case event(id: String?, name: String, props: [String: Any])
     case log(id: String?, level: String, message: String)
     case haptics(id: String?, style: GameHapticStyle)
-    case sensorStart(id: String, sensor: String, hz: Double)
-    case sensorStop(id: String, sensor: String)
     case storageGet(id: String, key: String)
     case storageSet(id: String, key: String, value: String)
     case storageRemove(id: String?, key: String)
@@ -39,10 +36,10 @@ enum GameBridgeRequest {
     case actionClose(id: String?, reason: String?)
     case motionSubscribe(id: String, sensors: [String], hz: Double)
     case motionUnsubscribe(id: String, sensors: [String])
-    /// Canvas steps sent over the bridge (`payload.steps`, the same `onClick`
-    /// object a canvas element carries). Unknown steps never reach here — the
-    /// intake answers them as `unsupported`.
-    case actionSteps(id: String?, actions: [EngageAction])
+    /// An `action` op with no named case, parsed by the canvas action parser
+    /// as `{type: op, data: payload}` (e.g. `requestReview`). Canvas-only
+    /// actions never reach here — the intake answers them as `unsupported`.
+    case actionPassthrough(id: String?, op: String, action: EngageAction)
 }
 
 /// Owns the bridge intake: the `{id?, type, payload}` envelope, the ready
@@ -56,13 +53,13 @@ enum GameBridgeRequest {
 /// (no usable id) is dropped.
 @MainActor
 final class GameBridge {
-    /// The SDK's bridge version. Informational: any skin version is
-    /// accepted.
-    nonisolated static let bridgeVersion = 1
+    /// The SDK's bridge version, sent in `init`. A skin declaring a higher
+    /// version is refused by the presentation.
+    nonisolated static let bridgeVersion = 2
     /// Seconds from load start to `ready` before the container closes quietly.
     nonisolated static let readyTimeoutSeconds = 5.0
     /// Skin messages above this many UTF-8 bytes are dropped, never parsed. Fits a
-    /// full 16 KB `storage.set` value or `http` body plus its envelope.
+    /// full 16 KB `storage` value or `http` body plus its envelope.
     nonisolated static let maxMessageBytes = 64 * 1024
 
     /// How often an open game re-collects device facts so thermal, power-save
@@ -106,8 +103,6 @@ final class GameBridge {
     /// Message types the intake accepts by `type`. Anything else is unknown.
     private static let knownTypes: Set<String> = [
         "ready", "http", "event", "log", "haptics",
-        "sensor.start", "sensor.stop",
-        "storage.get", "storage.set", "storage.remove",
         "motion", "storage", "action",
     ]
 
@@ -149,7 +144,7 @@ final class GameBridge {
         guard let type = object["type"] as? String else {
             // No route exists, but a request still gets its exactly-once answer.
             // Without an id there is no type to report: an unroutable drop.
-            if let id { fail(id: id, code: .invalid, message: "message has no type") }
+            if let id { fail(id: id, code: .badRequest, message: "message has no type") }
             else { recordDrop(reason: "unknown") }
             return
         }
@@ -173,7 +168,7 @@ final class GameBridge {
             return
         }
         if type == "storage" {
-            handleStorageAlias(id: id, payload: payload)
+            handleStorage(id: id, payload: payload)
             return
         }
         if type == "ready" {
@@ -192,7 +187,7 @@ final class GameBridge {
             return
         }
         guard let request = Self.parse(type: type, id: id, payload: payload) else {
-            if let id { fail(id: id, code: .invalid, message: "malformed \(type) payload") }
+            if let id { fail(id: id, code: .badRequest, message: "malformed \(type) payload") }
             else { recordDrop(reason: "unknown", type: type) }
             return
         }
@@ -244,7 +239,7 @@ final class GameBridge {
     }
 
     /// Pushes a native→skin message (`init`, `lifecycle`, `viewport`,
-    /// `device`, `sensor`) — no id, no reply.
+    /// `device`, `motionSample`) — no id, no reply.
     func push(type: String, payload: [String: Any]) {
         send(["type": type, "payload": payload])
     }
@@ -298,28 +293,6 @@ final class GameBridge {
                 id: id, method: payload["method"] as? String ?? "",
                 path: payload["path"] as? String ?? "",
                 body: payload["body"] as? [String: Any])
-        case "sensor.start":
-            guard let id,
-                  let sensor = payload.nonBlankString("sensor"),
-                  sensor == GameMotionSource.gyroscopeName || sensor == GameMotionSource.accelerometerName
-            else { return nil }
-            return .sensorStart(id: id, sensor: sensor, hz: GameMotionSource.clampedHz(number(payload["hz"])))
-        case "sensor.stop":
-            guard let id,
-                  let sensor = payload.nonBlankString("sensor")
-            else { return nil }
-            return .sensorStop(id: id, sensor: sensor)
-        case "storage.get":
-            guard let id, let key = payload.nonBlankString("key") else { return nil }
-            return .storageGet(id: id, key: key)
-        case "storage.set":
-            guard let id, let key = payload.nonBlankString("key"),
-                  let value = payload["value"] as? String
-            else { return nil }
-            return .storageSet(id: id, key: key, value: value)
-        case "storage.remove":
-            guard let key = payload.nonBlankString("key") else { return nil }
-            return .storageRemove(id: id, key: key)
         default:
             return nil
         }
@@ -372,12 +345,12 @@ final class GameBridge {
         }
     }
 
-    /// The `action` intake. A `steps` payload runs through the same parser the
-    /// canvas onClick uses; single ops read `payload.op` (falling back to the
-    /// shipped `payload.action`) and map to the generic executor's actions.
-    /// A form the SDK does not know answers `unsupported` when it carries an
-    /// id (and drops with the health event otherwise); a known form with bad
-    /// fields answers `invalid` (dropping with health without an id).
+    /// The `action` intake: `{op, ...}` → `{ok:true}`. Named ops map to the
+    /// generic executor's actions; any other op goes through the canvas action
+    /// parser as `{type: op, data: payload}`, so a campaign action the SDK
+    /// already runs reaches skins with no bridge change. A missing op or a
+    /// named op with bad fields answers `bad_request`; an op the SDK cannot
+    /// run answers `unsupported` (both drop with the health event without an id).
     /// A request the skin cannot be answered for (no usable id) is dropped —
     /// an id-less action still runs, it just gets no reply.
     private func handleAction(id: String?, payload: [String: Any]) {
@@ -385,7 +358,7 @@ final class GameBridge {
         case .request(let request):
             onRequest?(request)
         case .malformed:
-            if let id { fail(id: id, code: .invalid, message: "malformed action payload") }
+            if let id { fail(id: id, code: .badRequest, message: "malformed action payload") }
             else { recordDrop(reason: "unknown", type: "action") }
         case .unknown:
             if let id { fail(id: id, code: .unsupported, message: "unsupported action") }
@@ -400,15 +373,7 @@ final class GameBridge {
     }
 
     private static func parseActionResult(id: String?, payload: [String: Any]) -> ActionParseOutcome {
-        if payload["steps"] != nil {
-            guard let steps = payload["steps"] as? [[String: Any]] else { return .malformed }
-            let parsed = EngageActionParser().parseReportingUnknown(["steps": steps])
-            if parsed.hasUnknown { return .unknown }
-            return .request(.actionSteps(id: id, actions: parsed.actions))
-        }
-        guard let op = payload.nonBlankString("op") ?? payload.nonBlankString("action") else {
-            return .unknown
-        }
+        guard let op = payload.nonBlankString("op") else { return .malformed }
         switch op {
         case "copy":
             guard let text = payload.nonBlankString("text") else { return .malformed }
@@ -436,22 +401,38 @@ final class GameBridge {
         case "close":
             return .request(.actionClose(id: id, reason: payload["reason"] as? String))
         default:
-            return .unknown
+            guard let action = passthroughAction(op: op, payload: payload) else { return .unknown }
+            return .request(.actionPassthrough(id: id, op: op, action: action))
         }
     }
 
-    /// The `motion` alias for `sensor.start` / `sensor.stop`: one subscribe
-    /// starts every listed sensor at the same rate, one unsubscribe stops the
-    /// listed sensors. Both lists must be non-empty; an empty one answers
-    /// `invalid`, like Android. An id-less motion has no reply path, so it
-    /// drops with the health event.
+    /// One canvas action for an op the bridge has no case for, or nil. Actions
+    /// that only mean something on a canvas stage (dismiss, story paging,
+    /// opening a game) stay out.
+    private static func passthroughAction(op: String, payload: [String: Any]) -> EngageAction? {
+        let parsed = EngageActionParser().parseReportingUnknown(
+            ["steps": [["type": op, "data": payload]]])
+        guard !parsed.hasUnknown, parsed.actions.count == 1, let action = parsed.actions.first else {
+            return nil
+        }
+        switch action {
+        case .dismiss, .next, .previous, .openGame, .showStory: return nil
+        default: return action
+        }
+    }
+
+    /// `motion`: one subscribe starts every listed sensor at the same rate, one
+    /// unsubscribe stops the listed sensors. A missing op, a missing or empty
+    /// sensor list, or an unknown sensor answers `bad_request`; an unknown op
+    /// `unsupported`. An id-less motion has no reply path, so it drops with
+    /// the health event.
     private func handleMotion(id: String?, payload: [String: Any]) {
         guard let id else {
             recordDrop(reason: "unknown", type: "motion")
             return
         }
         guard let op = payload.nonBlankString("op") else {
-            fail(id: id, code: .invalid, message: "malformed motion payload")
+            fail(id: id, code: .badRequest, message: "malformed motion payload")
             return
         }
         switch op {
@@ -459,7 +440,7 @@ final class GameBridge {
             guard let sensors = payload["sensors"] as? [String], !sensors.isEmpty,
                   sensors.allSatisfy(Self.isMotionSensor)
             else {
-                fail(id: id, code: .invalid, message: "malformed motion payload")
+                fail(id: id, code: .badRequest, message: "malformed motion payload")
                 return
             }
             onRequest?(.motionSubscribe(
@@ -469,7 +450,7 @@ final class GameBridge {
             guard let sensors = payload["sensors"] as? [String], !sensors.isEmpty,
                   sensors.allSatisfy(Self.isMotionSensor)
             else {
-                fail(id: id, code: .invalid, message: "malformed motion payload")
+                fail(id: id, code: .badRequest, message: "malformed motion payload")
                 return
             }
             onRequest?(.motionUnsubscribe(id: id, sensors: sensors))
@@ -478,14 +459,13 @@ final class GameBridge {
         }
     }
 
-    /// The `storage` alias for `storage.get` / `storage.set` / `storage.remove`.
-    /// Maps to the same requests, so the replies keep their shipped shape. An
-    /// id-less `remove` still runs, like Android — there is just no reply
-    /// path, so nothing is answered. Every id-less reject drops with the
-    /// health event.
-    private func handleStorageAlias(id: String?, payload: [String: Any]) {
+    /// `storage`: the per-skin key-value store, `{op: get|set|remove, key,
+    /// value?}`. An id-less `remove` still runs, like Android — there is just
+    /// no reply path, so nothing is answered. Every id-less reject drops with
+    /// the health event.
+    private func handleStorage(id: String?, payload: [String: Any]) {
         guard let op = payload.nonBlankString("op") else {
-            if let id { fail(id: id, code: .invalid, message: "malformed storage payload") }
+            if let id { fail(id: id, code: .badRequest, message: "malformed storage payload") }
             else { recordDrop(reason: "unknown", type: "storage") }
             return
         }
@@ -496,7 +476,7 @@ final class GameBridge {
                 return
             }
             guard let key = payload.nonBlankString("key") else {
-                fail(id: id, code: .invalid, message: "malformed storage payload")
+                fail(id: id, code: .badRequest, message: "malformed storage payload")
                 return
             }
             onRequest?(.storageGet(id: id, key: key))
@@ -508,13 +488,13 @@ final class GameBridge {
             guard let key = payload.nonBlankString("key"),
                   let value = payload["value"] as? String
             else {
-                fail(id: id, code: .invalid, message: "malformed storage payload")
+                fail(id: id, code: .badRequest, message: "malformed storage payload")
                 return
             }
             onRequest?(.storageSet(id: id, key: key, value: value))
         case "remove":
             guard let key = payload.nonBlankString("key") else {
-                if let id { fail(id: id, code: .invalid, message: "malformed storage payload") }
+                if let id { fail(id: id, code: .badRequest, message: "malformed storage payload") }
                 else { recordDrop(reason: "unknown", type: "storage") }
                 return
             }

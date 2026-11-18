@@ -8,8 +8,8 @@ private let log = DigiaLogger()
 /// Skins call new backend endpoints through this without an SDK update: the
 /// path allowlist, not the SDK version, is the gate. Native sends to
 /// `{baseUrl}/api/v1/engage/sdk/gamification/{path}` with the same auth and
-/// identity headers as every other engage call, and returns the raw backend
-/// JSON envelope unchanged.
+/// identity headers as every other engage call. 2xx and 4xx return the status
+/// and the backend JSON unchanged, so the skin decides what a refusal shows.
 enum GameHttpBridge {
     /// How long one skin HTTP call may take before it answers `error timeout`.
     nonisolated static let timeoutSeconds: TimeInterval = 20
@@ -19,14 +19,14 @@ enum GameHttpBridge {
 
     /// Validates a skin `http` path: one segment matching
     /// `^[a-zA-Z][a-zA-Z0-9]{0,63}$`, anything but `grantChance`.
-    /// Returns the path, or nil when the call must answer `error forbidden`.
+    /// Returns the path, or nil when the call must answer `bad_request`.
     static func validatedPath(_ raw: String?) -> String? {
         guard let path = raw, path != forbiddenPath, isSingleSegment(path) else { return nil }
         return path
     }
 
     /// Parses a skin `http` method. Only exact `GET` and `POST` exist;
-    /// anything else (including lowercase) answers `error invalid`.
+    /// anything else (including lowercase) answers `bad_request`.
     static func httpMethod(_ raw: String?) -> HTTPMethod? {
         switch raw {
         case "GET": return .get
@@ -49,11 +49,11 @@ enum GameHttpBridge {
         return data
     }
 
-    /// One skin call's outcome: the raw JSON envelope and the HTTP status
-    /// that delivered it.
+    /// One answered skin call: a 2xx or 4xx status and its JSON body, nil
+    /// when the body is empty or not a JSON object.
     struct Success {
-        let envelope: [String: Any]
         let status: Int
+        let body: [String: Any]?
     }
 
     /// One skin call's failure: the bridge error code and the HTTP status
@@ -88,12 +88,12 @@ enum GameHttpBridge {
         FailedCall(method: method, path: path, code: failure.code, status: failure.status)
     }
 
-    /// Sends one skin call and maps the outcome to a bridge answer: the raw
-    /// JSON envelope on HTTP 200 (refusals included), `network` on any other
-    /// status or transport failure, `timeout` on a timeout, `internal` when a
-    /// 200 body is not JSON at all. The method rides verbatim from the
-    /// intake; only exact `GET`/`POST` run — anything else answers `invalid`
-    /// without touching the network, like Android's `GameHttpBridge.call`.
+    /// Sends one skin call and maps the outcome to a bridge answer: `{status,
+    /// body}` on 2xx and 4xx, `server` on 5xx, `network` on any other status
+    /// or transport failure, `timeout` on a timeout. The method rides verbatim
+    /// from the intake; only exact `GET`/`POST` run — anything else answers
+    /// `bad_request` without touching the network, like Android's
+    /// `GameHttpBridge.call`.
     static func send(
         client: any NetworkClient,
         baseUrl: String,
@@ -103,10 +103,10 @@ enum GameHttpBridge {
         body: Data?
     ) async -> Result<Success, Failure> {
         guard let url = endpoint(baseUrl: baseUrl, path: path) else {
-            return .failure(Failure(code: .internal, status: nil))
+            return .failure(Failure(code: .badRequest, status: nil))
         }
         guard let httpMethod = Self.httpMethod(method) else {
-            return .failure(Failure(code: .invalid, status: nil))
+            return .failure(Failure(code: .badRequest, status: nil))
         }
         var headers = headers
         headers["Content-Type"] = "application/json"
@@ -123,24 +123,13 @@ enum GameHttpBridge {
             log.w("Game http failed (path=\(path), error=\(error))")
             return .failure(Failure(code: .network, status: nil))
         }
-        guard response.isSuccessful else {
-            return .failure(Failure(
-                code: Self.errorCode(forStatus: response.statusCode),
-                status: response.statusCode))
+        let status = response.statusCode
+        guard (200...299).contains(status) || (400...499).contains(status) else {
+            log.w("Game http failed (path=\(path), status=\(status))")
+            return .failure(Failure(code: status >= 500 ? .server : .network, status: status))
         }
-        guard let data = response.body,
-              let envelope = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return .failure(Failure(code: .internal, status: response.statusCode)) }
-        return .success(Success(envelope: envelope, status: response.statusCode))
-    }
-
-    /// Maps a non-2xx status to a bridge error code: 429 is `quota`, any other
-    /// 4xx is `invalid` (the skin sent something the backend refused), and the
-    /// rest — redirects, 5xx — is `network`.
-    private static func errorCode(forStatus status: Int) -> GameBridgeErrorCode {
-        if status == 429 { return .quota }
-        if (400...499).contains(status) { return .invalid }
-        return .network
+        let body = response.body.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+        return .success(Success(status: status, body: body))
     }
 
     /// The allowlist as a pure predicate: ASCII letters first, then ASCII

@@ -3,10 +3,10 @@ import Testing
 
 @testable import DigiaEngage
 
-/// The bridge v1 intake: the `{id?, type, payload}` envelope, typed-request
+/// The bridge v2 intake: the `{id?, type, payload}` envelope, typed-request
 /// dispatch, `result`/`error` replies, and the ready handshake. Each test names
 /// the production line that fails it.
-@Suite("Game bridge v1", .tags(.unit, .game))
+@Suite("Game bridge v2", .tags(.unit, .game))
 @MainActor
 struct GameBridgeTests {
     private func makeBridge() -> GameBridge {
@@ -205,7 +205,7 @@ struct GameBridgeTests {
         var requests: [GameBridgeRequest] = []
         bridge.onRequest = { requests.append($0) }
 
-        bridge.receive(msg("action", id: "d", payload: ["action": "openLink", "url": "medihub://cart"]))
+        bridge.receive(msg("action", id: "d", payload: ["op": "openLink", "url": "medihub://cart"]))
 
         guard case .actionOpenLink(_, let op, let url) = requests.first else {
             Issue.record("deep link was not accepted")
@@ -215,7 +215,7 @@ struct GameBridgeTests {
         #expect(url.absoluteString == "medihub://cart")
     }
 
-    @Test("invalid payloads are dropped, or answered invalid with an id")
+    @Test("invalid payloads are dropped, or answered bad_request with an id")
     func invalidPayloads() throws {
         let bridge = makeBridge()
         var requests: [GameBridgeRequest] = []
@@ -226,43 +226,52 @@ struct GameBridgeTests {
         // No id: dropped — including an unknown haptic style, which the
         // intake filters before the player, so the sink stays untouched.
         bridge.receive(msg("haptics", payload: ["style": "buzz"]))
-        bridge.receive(msg("action", payload: ["action": "openLink", "url": "javascript:alert(1)"]))
-        bridge.receive(msg("action", payload: ["action": "copy"]))
-        // With id: answered invalid.
-        bridge.receive(msg("action", id: "c", payload: ["action": "copy"]))
-        bridge.receive(msg("action", id: "s", payload: ["steps": "spin"]))
-        bridge.receive(msg("sensor.start", id: "t", payload: ["sensor": "lidar"]))
-        bridge.receive(msg("storage.get", id: "g", payload: [:]))
+        bridge.receive(msg("action", payload: ["op": "openLink", "url": "javascript:alert(1)"]))
+        bridge.receive(msg("action", payload: ["op": "copy"]))
+        // With id: answered bad_request.
+        bridge.receive(msg("action", id: "c", payload: ["op": "copy"]))
+        bridge.receive(msg("action", id: "s", payload: [:]))
+        bridge.receive(msg("motion", id: "t", payload: ["op": "subscribe", "sensors": ["lidar"]]))
+        bridge.receive(msg("storage", id: "g", payload: ["op": "get"]))
 
         #expect(requests.isEmpty)
         #expect(scripts.count == 4)
         for script in scripts {
             let reply = try received(script)
             let payload = try #require(reply["payload"] as? [String: Any])
-            #expect(payload["code"] as? String == "invalid")
+            #expect(payload["code"] as? String == "bad_request")
         }
         #expect(bridge.didRecordDrop)
     }
 
-    @Test("action steps parse through the canvas parser")
-    func actionStepsParse() {
+    @Test("an op without a named case passes through the canvas parser")
+    func actionPassthrough() throws {
         let bridge = makeBridge()
         var requests: [GameBridgeRequest] = []
+        var scripts: [String] = []
         bridge.onRequest = { requests.append($0) }
+        bridge.onSend = { scripts.append($0) }
 
-        bridge.receive(msg("action", id: "a", payload: ["steps": [
-            ["type": "Action.copyToClipBoard", "data": ["text": "CODE"]],
-            ["type": "Action.openUrl", "data": ["url": "myapp://bills"]],
-        ]]))
+        bridge.receive(msg("action", id: "a", payload: ["op": "requestReview"]))
+        // Canvas-only actions stay out: a skin cannot dismiss the stage.
+        bridge.receive(msg("action", id: "d", payload: ["op": "Action.dismiss"]))
+        bridge.receive(msg("action", id: "t", payload: ["op": "Action.teleport"]))
 
-        // Guards the steps intake: the bridge reuses the canvas onClick parser.
+        // Guards passthroughAction: the parser's action reaches the host,
+        // the excluded and unknown ops answer unsupported.
         #expect(requests.count == 1)
-        guard case .actionSteps(let id, let actions) = requests.first else {
-            Issue.record("request is not actionSteps")
+        guard case .actionPassthrough(let id, let op, let action) = requests.first else {
+            Issue.record("request is not actionPassthrough")
             return
         }
         #expect(id == "a")
-        #expect(actions == [.copyToClipboard("CODE"), .openDeeplink("myapp://bills")])
+        #expect(op == "requestReview")
+        #expect(action == .requestReview)
+        #expect(scripts.count == 2)
+        for script in scripts {
+            let payload = try #require(try received(script)["payload"] as? [String: Any])
+            #expect(payload["code"] as? String == "unsupported")
+        }
     }
 
     @Test("an action without an id runs and gets no reply")
@@ -273,17 +282,15 @@ struct GameBridgeTests {
         bridge.onRequest = { requests.append($0) }
         bridge.onSend = { scripts.append($0) }
 
-        bridge.receive(msg("action", payload: ["action": "copy", "text": "CODE"]))
-        bridge.receive(msg("action", payload: ["steps": [
-            ["type": "Action.copyToClipBoard", "data": ["text": "CODE"]],
-        ]]))
+        bridge.receive(msg("action", payload: ["op": "copy", "text": "CODE"]))
+        bridge.receive(msg("action", payload: ["op": "requestReview"]))
 
         // Guards the id-less intake: both forms dispatch, neither is answered.
         #expect(requests.count == 2)
         #expect(scripts.isEmpty)
     }
 
-    @Test("an unknown action form answers unsupported, or is ignored without an id")
+    @Test("an unknown op answers unsupported, or is dropped without an id")
     func unknownActionUnsupported() throws {
         let bridge = makeBridge()
         var requests: [GameBridgeRequest] = []
@@ -291,10 +298,10 @@ struct GameBridgeTests {
         bridge.onRequest = { requests.append($0) }
         bridge.onSend = { scripts.append($0) }
 
-        bridge.receive(msg("action", id: "u", payload: ["action": "explode"]))
-        bridge.receive(msg("action", payload: ["action": "explode"]))
+        bridge.receive(msg("action", id: "u", payload: ["op": "explode"]))
+        bridge.receive(msg("action", payload: ["op": "explode"]))
 
-        // Guards the unsupported intake: one answered error, one silent ignore.
+        // Guards the unsupported intake: one answered error, one drop.
         #expect(requests.isEmpty)
         #expect(scripts.count == 1)
         let reply = try received(scripts[0])
@@ -302,28 +309,7 @@ struct GameBridgeTests {
         #expect(payload["code"] as? String == "unsupported")
     }
 
-    @Test("an unknown action step answers unsupported")
-    func unknownStepUnsupported() throws {
-        let bridge = makeBridge()
-        var requests: [GameBridgeRequest] = []
-        var scripts: [String] = []
-        bridge.onRequest = { requests.append($0) }
-        bridge.onSend = { scripts.append($0) }
-
-        bridge.receive(msg("action", id: "u", payload: ["steps": [
-            ["type": "Action.copyToClipBoard", "data": ["text": "CODE"]],
-            ["type": "Action.teleport", "data": [:]],
-        ]]))
-
-        // Guards the steps validation: nothing runs, the skin hears unsupported.
-        #expect(requests.isEmpty)
-        #expect(scripts.count == 1)
-        let reply = try received(scripts[0])
-        let payload = try #require(reply["payload"] as? [String: Any])
-        #expect(payload["code"] as? String == "unsupported")
-    }
-
-    @Test("action op routing: spec ops and aliases reach the generic handlers")
+    @Test("action op routing: named ops reach the generic handlers")
     func actionOpRouting() throws {
         let bridge = makeBridge()
         var requests: [GameBridgeRequest] = []
@@ -331,62 +317,53 @@ struct GameBridgeTests {
         bridge.onRequest = { requests.append($0) }
         bridge.onSend = { scripts.append($0) }
 
-        // Spec ops, plus the shipped `action` names as aliases.
         bridge.receive(msg("action", payload: ["op": "copy", "text": "CODE"]))
-        bridge.receive(msg("action", payload: ["action": "copy", "text": "CODE"]))
         bridge.receive(msg("action", payload: ["op": "openUrl", "url": "https://example.com/a"]))
-        bridge.receive(msg("action", payload: ["action": "openLink", "url": "https://example.com/a"]))
         bridge.receive(msg("action", payload: ["op": "deeplink", "url": "medihub://cart"]))
         bridge.receive(msg("action", payload: ["op": "customKV", "payload": ["screen": "cart"]]))
         bridge.receive(msg("action", payload: ["op": "share", "text": "won!"]))
         bridge.receive(msg("action", payload: ["op": "close", "reason": "done"]))
-        // Spec request aliases.
+        // Motion and storage requests.
         bridge.receive(msg("motion", id: "m1", payload: [
             "op": "subscribe", "sensors": ["gyroscope"], "hz": 30,
         ]))
         bridge.receive(msg("motion", id: "m2", payload: ["op": "unsubscribe", "sensors": ["gyroscope"]]))
         bridge.receive(msg("storage", id: "s1", payload: ["op": "get", "key": "hi.score"]))
-        // Unknown op answers unsupported; a missing field answers invalid.
+        // Unknown op answers unsupported; a missing field answers bad_request.
         bridge.receive(msg("action", id: "u", payload: ["op": "explode"]))
         bridge.receive(msg("action", id: "c", payload: ["op": "copy"]))
         bridge.receive(msg("storage", id: "s2", payload: ["op": "wipe"]))
 
-        #expect(requests.count == 11)
+        #expect(requests.count == 9)
         if case .actionCopy(_, let text) = requests[0] { #expect(text == "CODE") }
         else { Issue.record("request 0 is not copy") }
-        if case .actionCopy(_, let text) = requests[1] { #expect(text == "CODE") }
-        else { Issue.record("request 1 is not legacy copy") }
-        if case .actionOpenLink(_, let op, let url) = requests[2] {
+        if case .actionOpenLink(_, let op, let url) = requests[1] {
             #expect(op == "openUrl")
             #expect(url.absoluteString == "https://example.com/a")
-        } else { Issue.record("request 2 is not openUrl") }
-        if case .actionOpenLink(_, let op, let url) = requests[3] {
-            #expect(op == "openLink")
-            #expect(url.absoluteString == "https://example.com/a")
-        } else { Issue.record("request 3 is not legacy openLink") }
-        if case .actionOpenDeeplink(_, let url) = requests[4] {
+        } else { Issue.record("request 1 is not openUrl") }
+        if case .actionOpenDeeplink(_, let url) = requests[2] {
             #expect(url.absoluteString == "medihub://cart")
-        } else { Issue.record("request 4 is not deeplink") }
-        if case .actionCustomKV(_, let payload) = requests[5] {
+        } else { Issue.record("request 2 is not deeplink") }
+        if case .actionCustomKV(_, let payload) = requests[3] {
             #expect(payload == ["screen": "cart"])
-        } else { Issue.record("request 5 is not customKV") }
-        if case .actionShare(_, let text) = requests[6] { #expect(text == "won!") }
-        else { Issue.record("request 6 is not share") }
-        if case .actionClose(_, let reason) = requests[7] { #expect(reason == "done") }
-        else { Issue.record("request 7 is not close") }
-        if case .motionSubscribe(let id, let sensors, let hz) = requests[8] {
+        } else { Issue.record("request 3 is not customKV") }
+        if case .actionShare(_, let text) = requests[4] { #expect(text == "won!") }
+        else { Issue.record("request 4 is not share") }
+        if case .actionClose(_, let reason) = requests[5] { #expect(reason == "done") }
+        else { Issue.record("request 5 is not close") }
+        if case .motionSubscribe(let id, let sensors, let hz) = requests[6] {
             #expect(id == "m1")
             #expect(sensors == ["gyroscope"])
             #expect(hz == 30)
-        } else { Issue.record("request 8 is not motion subscribe") }
-        if case .motionUnsubscribe(let id, let sensors) = requests[9] {
+        } else { Issue.record("request 6 is not motion subscribe") }
+        if case .motionUnsubscribe(let id, let sensors) = requests[7] {
             #expect(id == "m2")
             #expect(sensors == ["gyroscope"])
-        } else { Issue.record("request 9 is not motion unsubscribe") }
-        if case .storageGet(let id, let key) = requests[10] {
+        } else { Issue.record("request 7 is not motion unsubscribe") }
+        if case .storageGet(let id, let key) = requests[8] {
             #expect(id == "s1")
             #expect(key == "hi.score")
-        } else { Issue.record("request 10 is not storage get") }
+        } else { Issue.record("request 8 is not storage get") }
 
         #expect(scripts.count == 3)
         var codes: [String] = []
@@ -395,37 +372,7 @@ struct GameBridgeTests {
             let payload = try #require(message["payload"] as? [String: Any])
             codes.append(try #require(payload["code"] as? String))
         }
-        #expect(codes == ["unsupported", "invalid", "unsupported"])
-    }
-
-    @Test("sensor start clamps hz and reports availability names")
-    func sensorStartClampsHz() throws {
-        let bridge = makeBridge()
-        var requests: [GameBridgeRequest] = []
-        bridge.onRequest = { requests.append($0) }
-
-        bridge.receive(msg("sensor.start", id: "1", payload: ["sensor": "gyroscope", "hz": 100]))
-        bridge.receive(msg("sensor.start", id: "2", payload: ["sensor": "accelerometer"]))
-        bridge.receive(msg("sensor.stop", id: "3", payload: ["sensor": "gyroscope"]))
-
-        #expect(requests.count == 3)
-        if case .sensorStart(_, let sensor, let hz) = requests[0] {
-            #expect(sensor == "gyroscope")
-            #expect(hz == 60)
-        } else {
-            Issue.record("request 0 is not sensor.start")
-        }
-        if case .sensorStart(_, _, let hz) = requests[1] {
-            #expect(hz == 30)
-        } else {
-            Issue.record("request 1 is not sensor.start")
-        }
-        if case .sensorStop(let id, let sensor) = requests[2] {
-            #expect(id == "3")
-            #expect(sensor == "gyroscope")
-        } else {
-            Issue.record("request 2 is not sensor.stop")
-        }
+        #expect(codes == ["unsupported", "bad_request", "unsupported"])
     }
 
     @Test("answer and fail shape the result and error replies")
@@ -436,7 +383,7 @@ struct GameBridgeTests {
 
         bridge.receive(msg("ready"))
         bridge.answer(id: "a", payload: ["started": true])
-        bridge.fail(id: "b", code: .forbidden, message: "forbidden path")
+        bridge.fail(id: "b", code: .badRequest, message: "path not allowed")
 
         #expect(scripts.count == 2)
         let result = try received(scripts[0])
@@ -449,11 +396,11 @@ struct GameBridgeTests {
         #expect(error["id"] as? String == "b")
         #expect(error["type"] as? String == "error")
         let errorPayload = try #require(error["payload"] as? [String: Any])
-        #expect(errorPayload["code"] as? String == "forbidden")
+        #expect(errorPayload["code"] as? String == "bad_request")
         #expect((errorPayload["message"] as? String)?.isEmpty == false)
     }
 
-    @Test("init payload carries the v1 shape through __receive")
+    @Test("init payload carries the v2 shape through __receive")
     func initMessageShape() throws {
         let bridge = makeBridge()
         var scripts: [String] = []
@@ -471,7 +418,6 @@ struct GameBridgeTests {
             skinId: "wheel", skinVersion: 3,
             values: ["label": .string("Spin")],
             slots: [GamificationSlotConfig(outcomeKey: "win", values: ["color": "red"])],
-            showMute: false,
             viewportWidth: 412, viewportHeight: 915,
             safeArea: GameSafeArea(top: 24, right: 0, bottom: 16, left: 0),
             colorScheme: "light", fontFamily: nil, themeFonts: [],
@@ -483,7 +429,7 @@ struct GameBridgeTests {
         #expect(message["type"] as? String == "init")
         let body = try #require(message["payload"] as? [String: Any])
         #expect(body["bridgeVersion"] as? Int == GameBridge.bridgeVersion)
-        #expect((body["capabilities"] as? [String])?.contains("http") == true)
+        #expect(body["capabilities"] == nil)
         #expect(body["chanceId"] as? String == "ch_1")
         let campaign = try #require(body["campaign"] as? [String: Any])
         #expect(campaign["skinVersion"] as? Int == 3)

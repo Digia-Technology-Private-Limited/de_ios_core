@@ -133,7 +133,7 @@ struct GameBridgeCasesTests {
             // A skin re-announcing itself on an open game gets the current
             // state again: init, then resume — the host mirror of the B2 fix.
             pushes.append(Push(type: "init", payload: initMessage))
-            pushes.append(Push(type: "lifecycle", payload: ["state": "resume"]))
+            pushes.append(Push(type: "lifecycle", payload: ["state": "resumed"]))
         }
 
         func handleRequests() {
@@ -153,18 +153,16 @@ struct GameBridgeCasesTests {
                     handleStorageSet(id: id, key: key, value: value)
                 case .storageRemove(let id, let key):
                     guard GameSkinStorage.isValidKey(key) else {
-                        if let id { fail(id: id, code: .invalid) }
+                        if let id { fail(id: id, code: .badRequest) }
                         return
                     }
                     storage.remove(key)
                     if let id { answer(id: id) }
                     else { failOnHarness("storage.remove without id must not answer") }
-                case .sensorStop(let id, _):
-                    answer(id: id)
                 case .actionClose(let id, _):
                     // The host mirror: pause goes out first, then the host
                     // closes — the B3/B24 session leg.
-                    pushes.append(Push(type: "lifecycle", payload: ["state": "pause"]))
+                    pushes.append(Push(type: "lifecycle", payload: ["state": "paused"]))
                     if let id { answer(id: id, payload: ["ok": true]) }
                     bridge.close()
                 default:
@@ -198,7 +196,7 @@ struct GameBridgeCasesTests {
                     code: failed.code.rawValue, status: failed.status))
             }
             guard !method.isEmpty, !path.isEmpty else {
-                reject(code: .invalid)
+                reject(code: .badRequest)
                 return
             }
             httpCalls.append((method, path, body))
@@ -207,16 +205,8 @@ struct GameBridgeCasesTests {
                 failOutcome(GameHttpBridge.Failure(code: .timeout, status: nil))
             case "network":
                 failOutcome(GameHttpBridge.Failure(code: .network, status: nil))
-            case "forbidden":
-                failOutcome(GameHttpBridge.Failure(code: .forbidden, status: nil))
-            case "invalid":
-                failOutcome(GameHttpBridge.Failure(code: .invalid, status: nil))
-            case "quota":
-                failOutcome(GameHttpBridge.Failure(code: .quota, status: nil))
-            case "internal":
-                failOutcome(GameHttpBridge.Failure(code: .internal, status: nil))
             default:
-                answer(id: id, payload: ["isSuccess": true])
+                answer(id: id, payload: ["status": 200, "body": ["isSuccess": true]])
             }
         }
 
@@ -226,7 +216,7 @@ struct GameBridgeCasesTests {
 
         private func handleStorageGet(id: String, key: String) {
             guard GameSkinStorage.isValidKey(key) else {
-                fail(id: id, code: .invalid)
+                fail(id: id, code: .badRequest)
                 return
             }
             if let value = storage.get(key) {
@@ -237,8 +227,8 @@ struct GameBridgeCasesTests {
         }
 
         private func handleStorageSet(id: String, key: String, value: String) {
-            if let code = storage.set(key, value: value) {
-                fail(id: id, code: code)
+            if storage.set(key, value: value) != nil {
+                fail(id: id, code: .badRequest)
             } else {
                 answer(id: id)
             }
@@ -378,7 +368,6 @@ struct GameBridgeCasesTests {
             skinVersion: fixture["skinVersion"] as? Int ?? 0,
             values: values,
             slots: [],
-            showMute: fixture["showMute"] as? Bool ?? false,
             viewportWidth: viewport["width"] as? Double ?? 0,
             viewportHeight: viewport["height"] as? Double ?? 0,
             safeArea: GameSafeArea(

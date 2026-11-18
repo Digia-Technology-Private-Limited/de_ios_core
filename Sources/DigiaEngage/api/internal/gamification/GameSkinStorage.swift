@@ -5,7 +5,7 @@ import Foundation
 ///
 /// The namespace is one UserDefaults key prefix, so every version of a skin
 /// shares it and one user never sees another's values. Reads and writes never
-/// throw: violations answer `invalid` (bad key) or `quota` (over budget).
+/// throw: violations answer `bad_request` with the reason.
 /// The namespace separator is `/`, exactly like Android's
 /// `project/skinId/identity` — never `.`, which a key may itself contain.
 final class GameSkinStorage: @unchecked Sendable {
@@ -56,15 +56,15 @@ final class GameSkinStorage: @unchecked Sendable {
         defaults.string(forKey: storageKey(key))
     }
 
-    /// Stores `value` under `key`. Returns nil on success, else the bridge
-    /// error the caller answers with. Re-setting the same value is free: only
+    /// Stores `value` under `key`. Returns nil on success, else the reason
+    /// the caller answers `bad_request` with. Re-setting the same value is free: only
     /// the delta counts against the namespace budget.
-    func set(_ key: String, value: String) -> GameBridgeErrorCode? {
-        guard Self.isValidKey(key) else { return .invalid }
+    func set(_ key: String, value: String) -> String? {
+        guard Self.isValidKey(key) else { return "invalid key" }
         let bytes = value.utf8.count
-        guard bytes <= Self.valueMaxBytes else { return .quota }
+        guard bytes <= Self.valueMaxBytes else { return "storage quota exceeded" }
         let delta = bytes - (defaults.string(forKey: storageKey(key))?.utf8.count ?? 0)
-        guard storedBytes() + delta <= Self.namespaceMaxBytes else { return .quota }
+        guard storedBytes() + delta <= Self.namespaceMaxBytes else { return "storage quota exceeded" }
         defaults.set(value, forKey: storageKey(key))
         return nil
     }

@@ -57,13 +57,6 @@ struct GameInitPayload {
     /// The one surface value the skin ever sees.
     static let surface = "fullScreen"
 
-    /// What the skin may feature-detect on. Versions never gate features.
-    static let capabilities = [
-        "http", "event", "log", "haptics", "sensor", "storage",
-        "action.copy", "action.openLink", "action.close", "action.steps",
-        "viewport", "device", "lifecycle",
-    ]
-
     var chanceId: String
     var campaignId: String
     /// The campaign key, for skins that call `state` with it.
@@ -72,7 +65,6 @@ struct GameInitPayload {
     var skinVersion: Int
     var values: [String: JSONValue]
     var slots: [GamificationSlotConfig]
-    var showMute: Bool
     var viewportWidth: Double
     var viewportHeight: Double
     var safeArea: GameSafeArea
@@ -86,7 +78,6 @@ struct GameInitPayload {
         if let fontFamily { theme["fontFamily"] = fontFamily }
         return [
             "bridgeVersion": GameBridge.bridgeVersion,
-            "capabilities": Self.capabilities,
             "chanceId": chanceId,
             // Flat beside `type` for skins built before the envelope: the
             // whole message repeats flat there in `sendInit`.
@@ -98,7 +89,6 @@ struct GameInitPayload {
             "values": Self.jsonObject(values),
             "slots": slots.map { ["outcomeKey": $0.outcomeKey, "values": $0.values] },
             "surface": Self.surface,
-            "showMute": showMute,
             "viewport": [
                 "width": viewportWidth, "height": viewportHeight,
                 "safeArea": safeArea.payload,
@@ -151,9 +141,9 @@ struct GameOpenRequest {
     /// `GameOpenRequest.onClose`.
     var onClose: (@MainActor (String) -> Void)?
     var onFailure: (@MainActor (GameFailure) -> Void)?
-    /// Fires once the skin's CTA op (or `{steps:[...]}` run) has run, with the
-    /// op (`copy`, `openLink`, `share`, ...; `steps` for a steps run). The
-    /// caller reports the click. A skin `close` never fires this.
+    /// Fires once the skin's CTA op has run, with the op as the skin sent it
+    /// (`copy`, `openLink`, `share`, or a passthrough op like `requestReview`).
+    /// The caller reports the click. A skin `close` never fires this.
     var onCta: (@MainActor (String) -> Void)?
     /// Fires once when the skin sends `ready` and the game becomes visible.
     var onShown: (@MainActor () -> Void)?

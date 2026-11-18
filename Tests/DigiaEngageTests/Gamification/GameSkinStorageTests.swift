@@ -36,7 +36,7 @@ struct GameSkinStorageTests {
         #expect(storage.get("score") == nil)
     }
 
-    @Test("values over 16 KB answer quota")
+    @Test("values over 16 KB answer bad_request")
     func valueBudget() {
         let (storage, _) = makeStorage()
         let max = String(repeating: "a", count: 16 * 1024)
@@ -44,11 +44,11 @@ struct GameSkinStorageTests {
         #expect(storage.set("big", value: max) == nil)
         #expect(storage.get("big") == max)
         // Guards the per-value check in set: one byte over fails.
-        #expect(storage.set("big", value: max + "a") == .quota)
+        #expect(storage.set("big", value: max + "a") == "storage quota exceeded")
         #expect(storage.get("big") == max)
     }
 
-    @Test("namespaces over 64 KB answer quota; rewriting the same value is free")
+    @Test("namespaces over 64 KB answer bad_request; rewriting the same value is free")
     func namespaceBudget() {
         let (storage, _) = makeStorage()
         let quarter = String(repeating: "a", count: 64 * 1024 / 4)
@@ -60,7 +60,7 @@ struct GameSkinStorageTests {
         // Rewriting an existing key charges only the delta: free here.
         #expect(storage.set("k1", value: quarter) == nil)
         // One more byte over the namespace total fails, on the total check.
-        #expect(storage.set("k5", value: "b") == .quota)
+        #expect(storage.set("k5", value: "b") == "storage quota exceeded")
         // Guards the namespace-total check in set: freed room works again.
         storage.remove("k1")
         #expect(storage.set("k5", value: "b") == nil)
