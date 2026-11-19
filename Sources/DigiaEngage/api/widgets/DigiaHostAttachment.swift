@@ -22,6 +22,7 @@ enum DigiaHostAttachment {
 
     static func attach(to window: UIWindow) {
         self.window = window
+        HostRegistry.shared.enforce()
         ensure()
     }
 

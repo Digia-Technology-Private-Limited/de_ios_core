@@ -127,6 +127,42 @@ struct DigiaHostViewTests {
         #expect(newRoot.view.subviews.last is DigiaHostView)
     }
 
+    // Fails if: `DigiaHost` stops gating its overlays on `HostRegistry.isActive` (`shownIf(drawsOverlays)`):
+    // both hosts would draw the dialog. Or if `HostRegistry.unmount` stops handing over to the host
+    // mounted before: nothing would draw once the newer host goes.
+    @Test("with attach in use, only the latest host draws a campaign, and the earlier one takes over when it goes")
+    func onlyTheLatestHostDraws() async throws {
+        let sdk = try await SdkHarness.start(loadCampaign("campaigns/nudge_dialog/nudge_dialog.json"))
+        defer { sdk.tearDown() }
+        let root = AppScreen()
+        let window = makeWindow(root: root, sdk)
+        Digia.attach(to: window)
+        ComponentTestHost.drainRunLoop(for: 0.3)
+        let attached = try #require(root.view.subviews.last as? DigiaHostView)
+
+        // A SwiftUI screen with its own `DigiaHost`, added after `attach`.
+        let screen = UIHostingController(rootView: DigiaHost { Color.clear })
+        root.addChild(screen)
+        screen.view.frame = root.view.bounds
+        screen.view.backgroundColor = .clear
+        root.view.insertSubview(screen.view, belowSubview: attached)
+        screen.didMove(toParent: root)
+        try await sdk.settle(0.3)
+
+        try sdk.deliver("test_nudge_dialog")
+        try await sdk.waitUntil("the dialog is on screen") { sdk.isShowing("Dialog Test Nudge") }
+        let shows: (UIView) -> Bool = { host in
+            SdkHarness.find(in: host) { SdkHarness.shownText(of: $0)?.contains("Dialog Test Nudge") == true } != nil
+        }
+        #expect(shows(screen.view))
+        #expect(!shows(attached))
+
+        screen.willMove(toParent: nil)
+        screen.view.removeFromSuperview()
+        screen.removeFromParent()
+        try await sdk.waitUntil("the attached host draws the dialog") { shows(attached) }
+    }
+
     private final class PortraitScreen: UIViewController {
         override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .portrait }
         override var preferredStatusBarStyle: UIStatusBarStyle { .lightContent }

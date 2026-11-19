@@ -27,6 +27,7 @@ import UIKit
 public final class DigiaHostView: UIView {
     private let log = DigiaLogger()
     private var hostingController: UIHostingController<DigiaHost<EmptyView>>?
+    private let hostId = UUID()
 
     public override init(frame: CGRect) {
         super.init(frame: frame)
@@ -56,6 +57,8 @@ public final class DigiaHostView: UIView {
     /// space). Their frames are in SwiftUI's global space, which is the window's.
     public override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         guard let hostedView = hostingController?.view else { return nil }
+        // Another host is drawing (`HostRegistry`): this one has nothing on screen.
+        guard HostRegistry.shared.isActive(hostId) else { return nil }
         let hit = hostedView.hitTest(convert(point, to: hostedView), with: event)
         let windowPoint = convert(point, to: nil)
         let claimed =
@@ -75,7 +78,7 @@ public final class DigiaHostView: UIView {
                     + "window), so campaigns cannot be drawn")
             return
         }
-        let controller = UIHostingController(rootView: DigiaHost { EmptyView() })
+        let controller = UIHostingController(rootView: DigiaHost(hostId: hostId) { EmptyView() })
         controller.view.backgroundColor = .clear
         controller.view.translatesAutoresizingMaskIntoConstraints = false
 

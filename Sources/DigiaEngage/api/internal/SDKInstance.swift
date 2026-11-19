@@ -1385,12 +1385,15 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         debugOverlayController
     }
 
-    func onHostMounted() {
+    func onHostMounted(_ id: UUID) {
+        HostRegistry.shared.mount(id)
         isHostMounted = true
     }
 
-    func onHostUnmounted() {
-        isHostMounted = false
+    /// "Mounted" while any host is left, not just until the first one goes (`HostRegistry`).
+    func onHostUnmounted(_ id: UUID) {
+        HostRegistry.shared.unmount(id)
+        isHostMounted = !HostRegistry.shared.isEmpty
     }
 
     /// The app replaced its window's root under the host `Digia.attach(to:)` added, so the host, and every
@@ -2290,6 +2293,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         hostActionExecutor.clearHandlers()
         sdkState = .notInitialized
         isHostMounted = false
+        HostRegistry.shared.reset()
         font = DigiaFont()
         currentDesignTokens = .empty
         currentTimeAnchor = nil
