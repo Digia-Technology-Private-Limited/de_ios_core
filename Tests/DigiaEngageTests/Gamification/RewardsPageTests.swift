@@ -94,6 +94,25 @@ struct RewardsPageTests {
                 == .openGame(chanceId: "c1", campaignId: "k1"))
     }
 
+    @Test("navState parses a real boolean only")
+    func navState() {
+        #expect(RewardsBridge.parse(action("navState", ["canGoBack": true])) == .navState(canGoBack: true))
+        #expect(RewardsBridge.parse(action("navState", ["canGoBack": false])) == .navState(canGoBack: false))
+        #expect(RewardsBridge.parse(action("navState", ["canGoBack": 1])) == nil)
+        #expect(RewardsBridge.parse(action("navState")) == nil)
+    }
+
+    @Test("back goes to the page only while it is shown and can go back")
+    func backDecision() {
+        typealias Page = RewardsPageViewController
+        #expect(Page.shouldGoBack(canGoBack: true, state: .ready))
+        #expect(!Page.shouldGoBack(canGoBack: false, state: .ready))
+        #expect(!Page.shouldGoBack(canGoBack: true, state: .loading))
+        #expect(!Page.shouldGoBack(canGoBack: true, state: .offline))
+        #expect(RewardsBridge.script(for: RewardsBridge.backMessage)
+            == "window.DigiaBridge.__receive(\"{\\\"payload\\\":{},\\\"type\\\":\\\"back\\\"}\")")
+    }
+
     @Test("malformed, incomplete and unknown page messages are dropped")
     func dropsBadMessages() {
         #expect(RewardsBridge.parse(nil) == nil)

@@ -38,6 +38,19 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
     }
 
     private(set) var state: State = .loading
+    /// The page's last `navState`. False unless the page is shown. A pushed
+    /// page can gate the navigation controller's `interactivePopGestureRecognizer`
+    /// on this through `onCanGoBackChange`.
+    private(set) var canGoBack = false {
+        didSet { if canGoBack != oldValue { onCanGoBackChange?(canGoBack) } }
+    }
+    var onCanGoBackChange: ((Bool) -> Void)?
+
+    /// Whether a back request goes to the page: only while it is shown and said
+    /// it has a screen to go back to. Otherwise the swipe does nothing.
+    static func shouldGoBack(canGoBack: Bool, state: State) -> Bool {
+        canGoBack && state == .ready
+    }
     private let resolveURL: () async -> URL
     private var pageURL: URL?
     private var loadToken = 0
@@ -75,6 +88,12 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.allowsLinkPreview = false
+        // The web view's own back-forward swipe stays off: the page owns its screens.
+        webView.allowsBackForwardNavigationGestures = false
+        let edge = UIScreenEdgePanGestureRecognizer(target: self, action: #selector(edgeSwiped(_:)))
+        edge.edges = .left
+        edge.cancelsTouchesInView = false
+        view.addGestureRecognizer(edge)
         webView.isHidden = true
         [webView, loadingView, offlineView, closeButton].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
@@ -170,6 +189,7 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
         loadingView.isHidden = next != .loading
         offlineView.isHidden = next != .offline
         closeButton.isHidden = next == .ready
+        if next != .ready { canGoBack = false }
     }
 
     // MARK: - Loading
@@ -229,6 +249,13 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
     private func sendInit() {
         guard let context = Self.liveContext() else { return }
         push(RewardsBridge.initMessage(context))
+    }
+
+    @objc private func edgeSwiped(_ gesture: UIScreenEdgePanGestureRecognizer) {
+        guard gesture.state == .recognized || gesture.state == .ended,
+              Self.shouldGoBack(canGoBack: canGoBack, state: state)
+        else { return }
+        push(RewardsBridge.backMessage)
     }
 
     private func pushRefresh() {
@@ -305,6 +332,8 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
             ActionPlatform.current.copy(text)
         case .close:
             closePage()
+        case .navState(let flag):
+            canGoBack = state == .ready && flag
         }
     }
 

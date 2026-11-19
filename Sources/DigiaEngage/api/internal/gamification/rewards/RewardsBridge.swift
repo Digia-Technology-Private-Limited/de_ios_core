@@ -10,6 +10,8 @@ enum RewardsPageMessage: Equatable {
     case openLink(String)
     case copy(String)
     case close
+    /// Whether the page can go back one screen (My rewards, details).
+    case navState(canGoBack: Bool)
 }
 
 /// The rewards variant of the games bridge: parsing what the page sends and
@@ -60,6 +62,11 @@ enum RewardsBridge {
             return .openGame(chanceId: chanceId, campaignId: campaignId)
         case "openLink":
             return nonBlank(payload["url"]).map(RewardsPageMessage.openLink)
+        case "navState":
+            guard let flag = payload["canGoBack"] as? NSNumber,
+                  CFGetTypeID(flag) == CFBooleanGetTypeID()
+            else { return nil }
+            return .navState(canGoBack: flag.boolValue)
         case "copy":
             guard let text = payload["text"] as? String, !text.isEmpty else { return nil }
             return .copy(text)
@@ -92,6 +99,9 @@ enum RewardsBridge {
     }
 
     static var refreshMessage: [String: Any] { ["type": "refresh", "payload": [String: Any]()] }
+
+    /// Asks the page to go back one screen.
+    static var backMessage: [String: Any] { ["type": "back", "payload": [String: Any]()] }
 
     /// The script that delivers `message` to `window.DigiaBridge.__receive`,
     /// the same double-encoding the games bridge uses.
