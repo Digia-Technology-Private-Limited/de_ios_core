@@ -13,6 +13,11 @@ extension Notification.Name {
     static let digiaRewardsGameClosed = Notification.Name("tech.digia.engage.rewardsGameClosed")
 }
 
+/// The page's web view: no selection or edit menu, whatever the page's CSS does.
+private final class RewardsWebView: WKWebView {
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool { false }
+}
+
 /// Hosts the web rewards page. Presented full screen by `present`, but it
 /// assumes nothing about how it is shown: it closes by dismissing or popping.
 ///
@@ -108,8 +113,11 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
         configuration.userContentController.add(proxy, name: "digia")
         configuration.userContentController.add(proxy, name: "digiaPageError")
         configuration.userContentController.addUserScript(WKUserScript(
+            source: "var s = document.createElement('style'); s.textContent = '* { -webkit-user-select: none !important; -webkit-touch-callout: none !important; }'; (document.head || document.documentElement).appendChild(s);",
+            injectionTime: .atDocumentEnd, forMainFrameOnly: true))
+        configuration.userContentController.addUserScript(WKUserScript(
             source: Self.errorForwardScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
-        self.webView = WKWebView(frame: .zero, configuration: configuration)
+        self.webView = RewardsWebView(frame: .zero, configuration: configuration)
         super.init(nibName: nil, bundle: nil)
         proxy.target = self
     }
