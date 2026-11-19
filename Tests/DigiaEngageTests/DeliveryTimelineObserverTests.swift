@@ -27,6 +27,7 @@ struct DeliveryTimelineObserverTests {
         #expect(stageOf(.hostSuppressed) == .gating)
 
         #expect(stageOf(.invalidConfig) == .render)
+        #expect(stageOf(.hostModalOpen) == .gating)
         #expect(stageOf(.anchorNotRegistered) == .render)
         #expect(stageOf(.hostNotMounted) == .render)
         #expect(stageOf(.timeout) == .render)
@@ -38,6 +39,6 @@ struct DeliveryTimelineObserverTests {
 
         // Total by construction — if a reason is ever added, this count fails
         // before the mapping can silently acquire a default branch.
-        #expect(DropReason.allCases.count == 18)
+        #expect(DropReason.allCases.count == 19)
     }
 }

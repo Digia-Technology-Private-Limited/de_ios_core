@@ -1,3 +1,4 @@
+import SwiftUI
 import UIKit
 
 /// What `Digia.attach(to:)` does: keeps one `DigiaHostView` as the last subview of the window's
@@ -19,6 +20,28 @@ enum DigiaHostAttachment {
     private static weak var warnedRoot: UIViewController?
     /// Whether the host was added to a root and has not been found missing since.
     private static var attached = false
+
+    /// Whether the app called `Digia.attach(to:)`, for a window that still exists.
+    static var isInUse: Bool { window != nil }
+
+    /// Whether the attached host is in the window's current root, on screen.
+    static var hasHost: Bool {
+        guard attached, let host, let root = window?.rootViewController else { return false }
+        return host.superview === root.view && host.window != nil
+    }
+
+    /// The first controller the app itself presented in the attached window, if any. Digia's own debug
+    /// screen is skipped; its nudge covers, surveys and stories are told apart by their state instead.
+    static func appPresentation() -> UIViewController? {
+        var presented = window?.rootViewController?.presentedViewController
+        while let current = presented {
+            if !(current is UIHostingController<DigiaDebugSettingsView>) {
+                return current
+            }
+            presented = current.presentedViewController
+        }
+        return nil
+    }
 
     static func attach(to window: UIWindow) {
         self.window = window

@@ -163,6 +163,51 @@ struct DigiaHostViewTests {
         try await sdk.waitUntil("the attached host draws the dialog") { shows(attached) }
     }
 
+    private func dropReason(_ presentation: CampaignPresentation, _ sdk: SdkHarness) -> DropReason? {
+        guard case .dropped(let reason, _)? = sdk.outcome(of: presentation) else { return nil }
+        return reason
+    }
+
+    // Fails if: the router's host gate stops asking `attachedHostUnavailable`, or that stops answering
+    // `host_not_mounted` when `attach` found no root it can use. The dialog would then wait for the
+    // 15 s watchdog and end as `timeout`.
+    @Test("with attach on a navigation root, a campaign is dropped at once as host_not_mounted")
+    func noUsableRootDropsAsHostNotMounted() async throws {
+        let sdk = try await SdkHarness.start(loadCampaign("campaigns/nudge_dialog/nudge_dialog.json"))
+        defer { sdk.tearDown() }
+        let window = makeWindow(root: UINavigationController(rootViewController: AppScreen()), sdk)
+        Digia.attach(to: window)
+        ComponentTestHost.drainRunLoop(for: 0.3)
+
+        let presentation = try sdk.deliver("test_nudge_dialog")
+
+        #expect(dropReason(presentation, sdk) == .hostNotMounted)
+    }
+
+    // Fails if: `attachedHostUnavailable` stops answering `host_modal_open` while the app presents a
+    // controller of its own. The dialog would be drawn under the app's modal and count an impression.
+    @Test("with attach, a dialog triggered while the app presents its own modal is dropped at once as host_modal_open")
+    func appModalDropsAsHostModalOpen() async throws {
+        let sdk = try await SdkHarness.start(loadCampaign("campaigns/nudge_dialog/nudge_dialog.json"))
+        defer { sdk.tearDown() }
+        let root = AppScreen()
+        let window = makeWindow(root: root, sdk)
+        Digia.attach(to: window)
+        root.present(AppScreen(), animated: false)
+        ComponentTestHost.drainRunLoop(for: 0.3)
+
+        let blocked = try sdk.deliver("test_nudge_dialog")
+
+        #expect(dropReason(blocked, sdk) == .hostModalOpen)
+        try await sdk.settle(0.5)
+        #expect(try await sdk.eventNames(of: "test_nudge_dialog").contains("Digia Experience Viewed") == false)
+
+        root.dismiss(animated: false)
+        try await sdk.settle(0.5)  // yield: UIKit finishes the dismissal between main-actor jobs
+        let shown = try sdk.deliver("test_nudge_dialog")
+        try await sdk.waitUntil("the dialog shows once the modal is closed") { shown.state == .displaying }
+    }
+
     private final class PortraitScreen: UIViewController {
         override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .portrait }
         override var preferredStatusBarStyle: UIStatusBarStyle { .lightContent }
