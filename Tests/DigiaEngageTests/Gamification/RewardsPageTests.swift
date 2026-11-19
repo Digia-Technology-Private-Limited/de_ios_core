@@ -21,9 +21,19 @@ struct RewardsPageTests {
         }
     }
 
-    @Test("a custom scheme link is internal")
+    @Test("a link on one of the app's own schemes is internal")
     func customSchemeInternal() {
-        #expect(RewardsLinkRouter.route("myapp://offers/12") == .internal(URL(string: "myapp://offers/12")!))
+        let mine: Set<String> = ["myapp"]
+        #expect(RewardsLinkRouter.route("myapp://offers/12", appSchemes: mine) == .internal(URL(string: "myapp://offers/12")!))
+        #expect(RewardsLinkRouter.route("MyApp://offers/12", appSchemes: mine) == .internal(URL(string: "MyApp://offers/12")!))
+    }
+
+    @Test("other schemes (tel, mailto, other apps) are external")
+    func foreignSchemeExternal() {
+        let mine: Set<String> = ["myapp"]
+        for raw in ["tel:+911234567890", "mailto:a@b.com", "whatsapp://send?text=hi", "otherapp://x"] {
+            #expect(RewardsLinkRouter.route(raw, appSchemes: mine) == .external(URL(string: raw)!), "\(raw)")
+        }
     }
 
     @Test("an http(s) link on an app link host is internal, others are external")
@@ -31,8 +41,8 @@ struct RewardsPageTests {
         let hosts: Set<String> = ["app.example.com"]
         let own = URL(string: "https://App.example.com/offers")!
         let other = URL(string: "https://shop.example.org/x")!
-        #expect(RewardsLinkRouter.route(own.absoluteString, appLinkHosts: hosts) == .internal(own))
-        #expect(RewardsLinkRouter.route(other.absoluteString, appLinkHosts: hosts) == .external(other))
+        #expect(RewardsLinkRouter.route(own.absoluteString, appSchemes: [], appLinkHosts: hosts) == .internal(own))
+        #expect(RewardsLinkRouter.route(other.absoluteString, appSchemes: [], appLinkHosts: hosts) == .external(other))
         #expect(RewardsLinkRouter.route("http://shop.example.org") == .external(URL(string: "http://shop.example.org")!))
     }
 

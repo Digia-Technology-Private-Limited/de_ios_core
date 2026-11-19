@@ -167,11 +167,26 @@ final class GamificationOrchestrator: ObservableObject {
         }
     }
 
-    /// Refreshes the rewards, then resolves the page address: the backend's
-    /// `page.url`, else the default for the environment.
+    /// Longest the page waits for the rewards refresh before using the cached
+    /// `page.url`, or the environment default.
+    static let pageURLWaitSeconds = 4.0
+
+    /// Refreshes the rewards (waiting at most `pageURLWaitSeconds`), then
+    /// resolves the page address: the backend's `page.url`, else the default
+    /// for the environment.
     func rewardsPageURL() async -> URL {
         refreshRewards()
-        await rewardsRefreshTask?.value
+        if let refresh = rewardsRefreshTask {
+            let race = FirstOf()
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                race.continuation = continuation
+                Task { @MainActor in await refresh.value; race.finish() }
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: UInt64(Self.pageURLWaitSeconds * 1_000_000_000))
+                    race.finish()
+                }
+            }
+        }
         return RewardsPageURL.resolve(
             pageUrl: rewardsResponse?.pageUrl,
             environment: sdk.config?.environment ?? .production)
@@ -373,5 +388,16 @@ final class GamificationOrchestrator: ObservableObject {
     private func cancelPrefetches() {
         for task in prefetchTasks.values { task.cancel() }
         prefetchTasks.removeAll()
+    }
+}
+
+/// Resumes its continuation once, for whichever of two tasks finishes first.
+@MainActor
+private final class FirstOf {
+    var continuation: CheckedContinuation<Void, Never>?
+
+    func finish() {
+        continuation?.resume()
+        continuation = nil
     }
 }

@@ -42,6 +42,7 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
     private var pageURL: URL?
     private var loadToken = 0
     private var readyTimer: DispatchWorkItem?
+    private var loadTask: Task<Void, Never>?
     private var isVisible = false
     private var observers: [NSObjectProtocol] = []
 
@@ -109,6 +110,13 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
         isVisible = false
     }
 
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        if isBeingDismissed || isMovingFromParent || navigationController?.isBeingDismissed == true {
+            tearDown()
+        }
+    }
+
     private func buildLoadingView() {
         let spinner = UIActivityIndicatorView(style: .medium)
         spinner.translatesAutoresizingMaskIntoConstraints = false
@@ -167,27 +175,40 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
     // MARK: - Loading
 
     /// Starts (or restarts) a load: resolves the URL, loads it, and gives the
-    /// page `readyTimeoutSeconds` to send `ready`. A newer load makes every
-    /// older step a no-op.
+    /// page `readyTimeoutSeconds` from the moment the load starts to send
+    /// `ready`. A newer load makes every older step a no-op. The task never
+    /// holds the page across the URL lookup.
     private func startLoad() {
         loadToken += 1
         let token = loadToken
         show(.loading)
         readyTimer?.cancel()
-        let timer = DispatchWorkItem { [weak self] in
-            guard let self, self.state == .loading else { return }
-            log.w("Rewards page sent no ready in time")
-            self.showOffline()
-        }
-        readyTimer = timer
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.readyTimeoutSeconds, execute: timer)
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            let url = await self.resolveURL()
-            guard token == self.loadToken else { return }
+        loadTask?.cancel()
+        let resolve = resolveURL
+        loadTask = Task { @MainActor [weak self] in
+            let url = await resolve()
+            guard let self, !Task.isCancelled, token == self.loadToken else { return }
             self.pageURL = url
             self.webView.load(URLRequest(url: url))
+            let timer = DispatchWorkItem { [weak self] in
+                guard let self, self.state == .loading else { return }
+                log.w("Rewards page sent no ready in time")
+                self.showOffline()
+            }
+            self.readyTimer = timer
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.readyTimeoutSeconds, execute: timer)
         }
+    }
+
+    /// Stops everything that could keep the page alive once it is gone.
+    private func tearDown() {
+        loadToken += 1
+        loadTask?.cancel()
+        readyTimer?.cancel()
+        webView.stopLoading()
+        observers.forEach(NotificationCenter.default.removeObserver)
+        observers = []
+        if Self.current === self { Self.current = nil }
     }
 
     private func showOffline() {
@@ -296,8 +317,12 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
                 SDKInstance.shared.gamification.openRewardDeepLink(url.absoluteString)
             }
         case .external(let url):
-            let safari = SFSafariViewController(url: url)
-            ViewControllerUtil.topViewController(base: self)?.present(safari, animated: true)
+            if url.scheme?.lowercased() == "http" || url.scheme?.lowercased() == "https" {
+                let safari = SFSafariViewController(url: url)
+                ViewControllerUtil.topViewController(base: self)?.present(safari, animated: true)
+            } else {
+                ActionPlatform.current.open(url)
+            }
         }
     }
 
