@@ -88,7 +88,10 @@ struct NudgeOverlayView: View {
     private var gameCoverBinding: Binding<GamePresentation?> {
         Binding(
             get: {
-                controller.activeGame
+                // A game the open rewards page owns shows over the page instead.
+                controller.activeGame.flatMap {
+                    GameLayerOwner.layer(for: ObjectIdentifier($0)) == .root ? $0 : nil
+                }
             },
             set: { newValue in
                 if newValue == nil { GamePresenter.dismiss() }
@@ -139,6 +142,15 @@ private struct NudgeCoverPresenter: View {
     }
 }
 
+/// The game surface, shared by the root cover and the rewards page.
+struct GameLayerView: View {
+    let game: GamePresentation
+
+    var body: some View {
+        GameContainerView(game: game, safeAreaInsets: activeWindowSafeAreaInsets).id(game.id)
+    }
+}
+
 /// Isolates the game full-screen-cover transaction like `NudgeCoverPresenter`
 /// does for nudges. The game fills the window over a clear presentation
 /// background and closes through the native button or the skin, never through
@@ -152,11 +164,10 @@ private struct GameCoverPresenter: View {
                 // `.id(game.id)`: a direct swap between two games (no nil in
                 // between) must still create a fresh presentation view.
                 if #available(iOS 16.4, *) {
-                    GameContainerView(game: game, safeAreaInsets: activeWindowSafeAreaInsets)
+                    GameLayerView(game: game)
                         .presentationBackground(.clear)
-                        .id(game.id)
                 } else {
-                    GameContainerView(game: game, safeAreaInsets: activeWindowSafeAreaInsets).id(game.id)
+                    GameLayerView(game: game)
                 }
             }
             .transaction { $0.disablesAnimations = true }

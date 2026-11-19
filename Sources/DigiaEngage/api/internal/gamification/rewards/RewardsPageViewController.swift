@@ -1,4 +1,6 @@
+import Combine
 import SafariServices
+import SwiftUI
 import UIKit
 import WebKit
 
@@ -58,6 +60,9 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
     private var loadTask: Task<Void, Never>?
     private var isVisible = false
     private var observers: [NSObjectProtocol] = []
+    private var layerToken: Int?
+    private var gameWatch: AnyCancellable?
+    private var gameHost: UIViewController?
 
     private let webView: WKWebView
     private let loadingView = UIView()
@@ -128,6 +133,7 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
         closeButton.accessibilityLabel = "Close"
         closeButton.addAction(UIAction { [weak self] _ in self?.closePage() }, for: .touchUpInside)
         observe()
+        claimGameLayer()
         startLoad()
     }
 
@@ -242,6 +248,9 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
         webView.stopLoading()
         observers.forEach(NotificationCenter.default.removeObserver)
         observers = []
+        gameWatch = nil
+        if let layerToken { GameLayerOwner.release(layerToken) }
+        layerToken = nil
         if Self.current === self { Self.current = nil }
     }
 
@@ -297,6 +306,33 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
             appVersion: headers["x-app-version"] ?? "",
             deviceId: services.identityManager.deviceId,
             locale: RewardsBridge.bcp47Locale())
+    }
+
+    /// Owns the game layer while the page is open, so a game opened from the
+    /// page shows over it instead of replacing it. A game already open stays
+    /// on the app's root cover.
+    private func claimGameLayer() {
+        let controller = SDKInstance.shared.controller
+        layerToken = GameLayerOwner.claim(existingGame: controller.activeGame.map(ObjectIdentifier.init))
+        gameWatch = controller.$activeGame.receive(on: DispatchQueue.main).sink { [weak self] game in
+            self?.gameChanged(game)
+        }
+    }
+
+    private func gameChanged(_ game: GamePresentation?) {
+        guard let game, GameLayerOwner.layer(for: ObjectIdentifier(game)) == .rewards else {
+            // Closing goes through `GamePresenter.dismiss`, so the session
+            // already settled; only the cover is removed here.
+            gameHost?.dismiss(animated: false)
+            gameHost = nil
+            return
+        }
+        gameHost?.dismiss(animated: false)
+        let host = UIHostingController(rootView: GameLayerView(game: game))
+        host.modalPresentationStyle = .overFullScreen
+        host.view.backgroundColor = .clear
+        gameHost = host
+        ViewControllerUtil.topViewController(base: self)?.present(host, animated: false)
     }
 
     private func observe() {

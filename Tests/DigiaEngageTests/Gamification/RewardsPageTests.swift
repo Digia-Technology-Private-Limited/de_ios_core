@@ -72,6 +72,36 @@ struct RewardsPageTests {
         }
     }
 
+    // MARK: - Game layer ownership
+
+    @Test("the root cover shows games unless a rewards page owns the layer")
+    func gameLayerOwnership() {
+        GameLayerOwner.resetForTesting()
+        defer { GameLayerOwner.resetForTesting() }
+        let gameObject = NSObject(), openObject = NSObject()
+        let game = ObjectIdentifier(gameObject), open = ObjectIdentifier(openObject)
+        defer { withExtendedLifetime((gameObject, openObject)) {} }
+        #expect(GameLayerOwner.layer(for: game) == .root)
+        let token = GameLayerOwner.claim(existingGame: open)
+        #expect(GameLayerOwner.layer(for: game) == .rewards)
+        #expect(GameLayerOwner.layer(for: open) == .root)
+        GameLayerOwner.release(token)
+        #expect(GameLayerOwner.layer(for: game) == .root)
+    }
+
+    @Test("a stale page cannot release a newer claim")
+    func staleRelease() {
+        GameLayerOwner.resetForTesting()
+        defer { GameLayerOwner.resetForTesting() }
+        let game = ObjectIdentifier(NSObject())
+        let old = GameLayerOwner.claim(existingGame: nil)
+        let new = GameLayerOwner.claim(existingGame: nil)
+        GameLayerOwner.release(old)
+        #expect(GameLayerOwner.layer(for: game) == .rewards)
+        GameLayerOwner.release(new)
+        #expect(GameLayerOwner.layer(for: game) == .root)
+    }
+
     // MARK: - Bridge
 
     private func page(_ object: [String: Any]) -> String {
