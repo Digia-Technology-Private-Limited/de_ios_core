@@ -208,6 +208,30 @@ struct DigiaHostViewTests {
         try await sdk.waitUntil("the dialog shows once the modal is closed") { shown.state == .displaying }
     }
 
+    // Fails if: `showStoryOverlay` under attach records the story as open before the present was
+    // accepted, or `present(checked:)` stops refusing a presenter mid-transition. The SDK would then
+    // believe a story is open with nothing on screen, and `hasActiveOverlay` would block the app.
+    @Test("with attach, a story opened while the top screen is still being presented is not recorded as open")
+    func storyIntoATransitionIsNotRecordedAsOpen() async throws {
+        let sdk = try await SdkHarness.start(loadCampaign("campaigns/nudge_dialog/nudge_dialog.json"))
+        defer { sdk.tearDown() }
+        let root = AppScreen()
+        let window = makeWindow(root: root, sdk)
+        Digia.attach(to: window)
+        ComponentTestHost.drainRunLoop(for: 0.3)
+        root.present(AppScreen(), animated: true)  // still being presented until its animation ends
+
+        let shown = SDKInstance.shared.controller.showStoryOverlay(
+            config: InlineStoryConfig(slotKey: "story_slot", items: []), initialIndex: 0,
+            payload: CEPTriggerPayload(cepCampaignId: "cep-story", campaignKey: "story_test", cepMetadata: [:]))
+
+        #expect(!shown)
+        #expect(SDKInstance.shared.controller.activeStoryOverlay == nil)
+        #expect(!Digia.hasActiveOverlay)
+        #expect(sdk.records("story_test", reason: TimelineReason.storyPresentFailed).first?.extras["cause"]
+            == "presenter_transitioning")
+    }
+
     private final class PortraitScreen: UIViewController {
         override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .portrait }
         override var preferredStatusBarStyle: UIStatusBarStyle { .lightContent }
