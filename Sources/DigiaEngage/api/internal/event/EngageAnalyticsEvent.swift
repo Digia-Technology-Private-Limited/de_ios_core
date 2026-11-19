@@ -734,13 +734,13 @@ enum FloaterEvent {
 /// to the CEP, keeping the server's `eventId` (a UUIDv5, so a re-send dedupes),
 /// `occurredAt` and `campaignId`. ADR 0002.
 struct ChanceAnalyticsEvent: EngageAnalyticsEvent, Equatable, Sendable {
-    /// A property value the server may send: a string, number, boolean or null.
+    /// A property value the server may send: a string, number or boolean. A null is
+    /// dropped, as Android drops it.
     enum Value: Equatable, Sendable {
         case string(String)
         case int(Int64)
         case double(Double)
         case bool(Bool)
-        case null
     }
 
     let eventName: String
@@ -756,7 +756,6 @@ struct ChanceAnalyticsEvent: EngageAnalyticsEvent, Equatable, Sendable {
             case .int(let i): return i
             case .double(let d): return d
             case .bool(let b): return b
-            case .null: return NSNull()
             }
         }
     }

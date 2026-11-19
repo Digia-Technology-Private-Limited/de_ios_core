@@ -10,7 +10,7 @@ private let log = DigiaLogger()
 /// Never throws. A missing or non-array value is no events; an item without a
 /// non-blank `name`, `eventId`, `occurredAt` and `campaignId` is skipped and
 /// logged. Unknown fields are ignored, and a property keeps only a string,
-/// number, boolean or null value.
+/// number or boolean value; a null is dropped, as on Android.
 func chanceEventsOf(_ raw: Any?, campaignKey: String? = nil) -> [ChanceAnalyticsEvent] {
     guard let items = raw as? [Any] else { return [] }
     var out: [ChanceAnalyticsEvent] = []
@@ -67,8 +67,6 @@ private func propertiesOf(_ raw: Any?) -> [String: ChanceAnalyticsEvent.Value] {
     var out: [String: ChanceAnalyticsEvent.Value] = [:]
     for (key, value) in json {
         switch value {
-        case is NSNull:
-            out[key] = .null
         case let s as String:
             out[key] = .string(s)
         case let n as NSNumber:
