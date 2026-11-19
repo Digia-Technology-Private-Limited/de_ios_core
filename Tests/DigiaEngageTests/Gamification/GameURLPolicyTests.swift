@@ -64,4 +64,20 @@ struct GameURLPolicyTests {
             #expect(!allow(raw))
         }
     }
+
+    @Test("an http bundle is allowed only from the API base origin")
+    func httpBundleOnlyFromApiBase() {
+        let mock = "http://localhost:8080"
+        let skin = "/gamification/skins/w/1/index.html"
+        func allowed(_ raw: String, _ base: String = mock) -> Bool {
+            GameURLPolicy.allowsBundle(URL(string: raw)!, apiBaseUrl: base)
+        }
+        // Guards the origin match: only the mock's own origin may serve http.
+        #expect(allowed("HTTP://LocalHost:8080\(skin)"))
+        #expect(allowed("http://localhost:80\(skin)", "http://localhost"))
+        #expect(!allowed("http://127.0.0.1:8080\(skin)"))
+        #expect(!allowed("http://localhost:9090\(skin)"))
+        #expect(!allowed("http://app.digia.tech\(skin)", "https://app.digia.tech"))
+        #expect(allowed("https://cdn.example.com\(skin)"))
+    }
 }

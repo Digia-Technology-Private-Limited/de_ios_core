@@ -160,13 +160,13 @@ struct SkinFileCache: Sendable {
     // MARK: - Fetch
 
     /// Downloads `bundleUrl` (the skin's single self-contained `index.html`)
-    /// and stores it under `skinId`/`version`. Throws on an unusable URL, a
+    /// and stores it under `skinId`/`version`. Throws on an unusable URL (not
+    /// https, nor http from the API base origin — see `GameURLPolicy.allowsBundle`), a
     /// transport failure, a non-2xx status, or an empty or over-budget body.
     /// Already-cached entries are not re-downloaded.
     func download(bundleUrl: String, skinId: String, version: Int) async throws -> URL {
         if let cached = cachedFile(skinId: skinId, version: version) { return cached }
-        guard let url = URL(string: bundleUrl),
-              url.scheme == "http" || url.scheme == "https"
+        guard let url = URL(string: bundleUrl), GameURLPolicy.allowsBundle(url)
         else { throw SkinFileCacheError.badURL }
         let response = try await networkClient.execute(request: NetworkRequest(
             url: url, method: .get, connectTimeout: 30, readTimeout: 30))
