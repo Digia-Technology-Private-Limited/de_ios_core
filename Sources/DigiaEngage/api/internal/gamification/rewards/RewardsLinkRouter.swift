@@ -34,7 +34,12 @@ enum RewardsLinkRouter {
         guard scheme == "http" || scheme == "https" else {
             return appSchemes.contains(scheme) ? .internal(url) : .external(url)
         }
-        guard let host = url.host?.lowercased(), !host.isEmpty else { return .refused }
+        // The raw host: `url.host` is percent-decoded, so `evil.com%2F.app.com`
+        // would otherwise read as a host that matches `*.app.com`.
+        guard let host = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .percentEncodedHost?.lowercased(), !host.isEmpty
+        else { return .refused }
+        guard !host.contains("%"), isHostname(host) else { return .external(url) }
         return matches(host: host, domains: appLinkHosts) ? .internal(url) : .external(url)
     }
 

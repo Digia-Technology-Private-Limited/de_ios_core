@@ -63,6 +63,10 @@ struct RewardsPageTests {
         #expect(!internalLink("https://evilmedihub.com/x", ["medihub.com"]))
         #expect(!internalLink("https://medihub.com.evil.com/x", ["*.medihub.com"]))
         #expect(!internalLink("https://partner.com/x", ["*.medihub.com"]))
+        for encoded in ["https://evil.com%2F.medihub.com/x", "https://evil.com%23.medihub.com/x",
+                        "https://evil%2Ecom.medihub.com/x", "https://medihub%2Ecom/x"] {
+            #expect(!internalLink(encoded, ["*.medihub.com", "medihub.com"]), "\(encoded)")
+        }
         for bad in ["", "*", "*.", "https://medihub.com", "medihub.com/x", "medihub.com:8080", "med hub.com", "localhost"] {
             #expect(!internalLink("https://medihub.com/x", [bad]), "\(bad)")
         }
