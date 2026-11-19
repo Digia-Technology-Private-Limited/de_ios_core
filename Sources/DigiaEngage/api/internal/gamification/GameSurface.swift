@@ -193,8 +193,9 @@ final class GameSurface {
     /// The close policy: a direct game dismisses as before, an inline card
     /// stays, a game opened from a floating entry asks the backend `state`
     /// and keeps or hides the floater. Every close reports the funnel
-    /// Dismissed to Digia and a CEP Dismissed for every presentation (direct,
-    /// inline or floating) — and every presentation policy refreshes rewards only when
+    /// Dismissed to Digia; only a direct game sends a CEP Dismissed, since an
+    /// inline or floating entry's CEP presentation is the entry, which stays
+    /// on screen. Matches Android. Every presentation policy refreshes rewards only when
     /// the page is already loaded, while a rewards game always refreshes.
     private func closed(settle: GameSettle, campaign: CampaignModel, reason: String, dismissed: GameEvent.Dismissed) {
         switch settle {
@@ -204,7 +205,9 @@ final class GameSurface {
             guard reason != GamePresentation.cancelledReason else { return }
             sdk.events.toDigia(dismissed, payload: payload)
             // The coordinator settles once, so the CEP hears one Dismissed.
-            sdk.coordinator.handle(.dismissed(reason: Self.dismissReason(closeReason: reason)), payload: payload)
+            if entry != .inlineTeaser, entry != .floating {
+                sdk.coordinator.handle(.dismissed(reason: Self.dismissReason(closeReason: reason)), payload: payload)
+            }
             sdk.gamification.refreshRewardsIfLoaded()
             switch entry {
             case .inlineTeaser:
@@ -268,12 +271,13 @@ final class GameSurface {
         }
     }
 
-    /// The `dismiss_reason` analytics value for a game close: `skin`, `cta`
-    /// and `failure` pass through, anything else is the user's. Matches
-    /// Android's `gameDismissReasonOf`.
+    /// The `dismiss_reason` analytics value for a game close: `skin`, `cta`,
+    /// `failure` and `superseded` (a test send replaced the game) pass
+    /// through, anything else is the user's. Matches Android's
+    /// `gameDismissReasonOf`.
     static func gameDismissReason(closeReason: String) -> String {
         switch closeReason {
-        case "skin", "cta", "failure": return closeReason
+        case "skin", "cta", "failure", "superseded": return closeReason
         default: return "user"
         }
     }
@@ -388,8 +392,9 @@ final class GameSurface {
                 }
                 self.sdk.events.toDigia(
                     dismissed("failure"), payload: Self.payload(settle: settle, campaign: campaign))
-                // A game that displayed and then died ends its presentation.
-                if case .presentation(let payload, _) = settle {
+                // A direct game that displayed and then died ends its
+                // presentation; an entry's teaser stays.
+                if case .presentation(let payload, let entry) = settle, entry != .inlineTeaser, entry != .floating {
                     self.settleDirectFailure(payload: payload, reason: failure.wireValue)
                 }
             },

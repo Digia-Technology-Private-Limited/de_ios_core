@@ -131,10 +131,11 @@ struct GameChanceEventsAndCepTests {
         #expect(clicked.map { ($0["properties"] as? [String: Any])?["element_id"] as? String } == ["copy"])
     }
 
-    // Guards the `coordinator.handle(.dismissed(...))` line in `closed`, now run
-    // for every entry kind: an inline game's close reaches the CEP once.
-    @Test("closing an inline game dismisses its presentation to the CEP once")
-    func inlineGameCloseDismissesToCepOnce() async throws {
+    // Guards the direct-only check around `coordinator.handle(.dismissed(...))`
+    // in `closed`: an inline game's CEP presentation is its teaser, which
+    // stays, so its close goes to Digia only.
+    @Test("closing an inline game does not dismiss its presentation to the CEP")
+    func inlineGameCloseDoesNotDismissToCep() async throws {
         let (sdk, recorder) = try await rig()
         sdk.coordinator.handle(.impressed, payload: recorder.payload)
         let request = try directOpenRequest(sdk, recorder: recorder, entry: .inlineTeaser)
@@ -142,7 +143,7 @@ struct GameChanceEventsAndCepTests {
         request.onClose?("skin")
         request.onClose?("user")
 
-        #expect(recorder.dismissReason == .userClose)
+        #expect(recorder.dismissReason == nil)
         let dismissed = named("Digia Experience Dismissed", in: try await digiaEvents(sdk))
         #expect(dismissed.count == 2)
     }
