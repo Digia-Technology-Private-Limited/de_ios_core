@@ -73,11 +73,6 @@ final class FloaterStoryOrchestrator: ObservableObject {
 
     var now: () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) }
 
-    /// A generic user-close hook, wired by `SDKInstance` to the gamification
-    /// surface's `entryClosed`. It must stay gamification-free: the
-    /// orchestrator reports only the closed campaign's key.
-    var onUserClose: ((String) -> Void)?
-
     private let onDismissed: (ActiveFloaterStoryState, FloaterDismissReason, FloaterMetrics, Bool) -> Void
     private let onCompleted: (ActiveFloaterStoryState) -> Void
     private let onStepViewed: (ActiveFloaterStoryState) -> Void
@@ -264,9 +259,6 @@ final class FloaterStoryOrchestrator: ObservableObject {
     func dismiss(_ reason: FloaterDismissReason) {
         guard let active = state, !closing else { return }
 
-        if reason == .userClose {
-            onUserClose?(active.campaign.campaignKey)
-        }
         autoDismissTask?.cancel()
         autoDismissTask = nil
         // Closes out any open story span first, so `engagedMs` is whole when the snapshot

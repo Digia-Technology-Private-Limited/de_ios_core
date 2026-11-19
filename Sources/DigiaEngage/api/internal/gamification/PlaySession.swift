@@ -169,7 +169,7 @@ enum CloseDecision: Equatable, Sendable {
     /// Keep the floater. A non-nil replacement replaces the stored chance (a
     /// fresh `playable` answer); nil keeps the stored one (a failed call).
     case keep(GrantedChance?)
-    /// Hide the floater for the rest of the session.
+    /// Dismiss the floater and forget its spent chance; a later trigger can show it again.
     case hide
 }
 

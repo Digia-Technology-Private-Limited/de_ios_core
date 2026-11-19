@@ -35,12 +35,6 @@ final class GamificationSurface: CampaignSurface {
         return false
     }
 
-    /// Campaign keys whose entry the user closed with its X this app session,
-    /// or that the after-close check hid. Memory only: the entry comes back on
-    /// the next launch, and the chance stays unplayed either way. Floating
-    /// only — an inline card is never hidden.
-    private(set) var hiddenEntries = Set<String>()
-
     /// The granted chance stored at the trigger, keyed by campaign key. A tap
     /// opens the game with this, never with a new grant.
     var chances = [String: GrantedChance]()
@@ -126,20 +120,6 @@ final class GamificationSurface: CampaignSurface {
     private func startEntry(_ request: CampaignRequest, _ config: GamificationConfig) -> RoutingVerdict {
         let campaign = request.campaign
         let key = campaign.campaignKey
-        // A test trigger bypasses the session hide: a live test never respects
-        // caps (SourcePolicy), and a test-mode build (Test Kit deep link) never
-        // caps either. Production behaviour is unchanged.
-        let capsApply =
-            request.driver.policy.respectsFrequencyCaps && !DigiaEndpoints.isTestMode
-        // The hidden set is floating only: an inline card is never hidden.
-        if config.entryKind == .floating, capsApply, hiddenEntries.contains(key) {
-            let detail = "gamification entry hidden for this session"
-            gamificationSurfaceLog.d("Dropped — \(detail)", campaign: key)
-            request.driver.policy.onDropped(DropReason.frequencyCapped, detail)
-            return .dropped(
-                reason: .frequencyCapped, detail: detail,
-                deliveryDetail: ["cap_rule": "closed_for_session"])
-        }
         switch config.entryKind {
         case .inlineTeaser:
             guard case .inline = config.entryCanvas else {
@@ -282,32 +262,17 @@ final class GamificationSurface: CampaignSurface {
         game.dismiss(reason: GamePresentation.cancelledReason)
     }
 
-    /// Hides a floating entry for the rest of the session: removes its stored
-    /// chance and records its key, so a re-trigger drops.
+    /// Forgets a floating entry's spent chance. A later trigger asks
+    /// `grantChance` again, which decides whether the entry shows.
     func hideFloatingEntry(campaignKey: String) {
         chances.removeValue(forKey: campaignKey)
-        hiddenEntries.insert(campaignKey)
     }
 
     /// Clears the session entry state for a user change: the next user must
-    /// not inherit hidden entries or stored chances. Called from the user
+    /// not inherit stored chances. Called from the user
     /// change listener in `SDKInstance.initialize`.
     func clearForUserChange() {
-        hiddenEntries.removeAll()
         chances.removeAll()
         entryCampaigns.removeAll()
-    }
-
-    /// The floater's user close, wired to the orchestrator's `onUserClose`: a
-    /// closed floater hides its entry for the rest of the session, but only
-    /// when its campaign is a gamification one.
-    func entryClosed(campaignKey: String) {
-        let isGamification = sdk.campaignStore.find(campaignKey)?.gamificationConfig != nil
-            || entryCampaigns[campaignKey]?.gamificationConfig != nil
-            || sdk.liveTestCampaigns.values.contains {
-                $0.campaignKey == campaignKey && $0.gamificationConfig != nil
-            }
-        guard isGamification else { return }
-        hiddenEntries.insert(campaignKey)
     }
 }

@@ -457,7 +457,7 @@ final class GameSurface {
     }
 
     /// Hides a floating entry after its game closed: removes the stored
-    /// chance, hides the entry for the rest of the session, and dismisses the
+    /// chance and dismisses the
     /// floater — if it still shows this payload — as completed, never as a
     /// user close.
     private func hideFloatingEntry(campaignKey: String, payload: CEPTriggerPayload) {

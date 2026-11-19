@@ -398,11 +398,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
         floaterOrchestrator.isCoveredByBlockingCampaign = coveredByBlocking
         floaterStoryOrchestrator.isCoveredByBlockingCampaign = coveredByBlocking
-        // A user-closed story floater hides its gamification entry for the
-        // rest of the session; any other campaign is not hidden.
-        floaterStoryOrchestrator.onUserClose = { [weak self] campaignKey in
-            self?.gamificationSurface.entryClosed(campaignKey: campaignKey)
-        }
         // The rewards views observe this instance, so the orchestrator's
         // updates are forwarded.
         gamification.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }
