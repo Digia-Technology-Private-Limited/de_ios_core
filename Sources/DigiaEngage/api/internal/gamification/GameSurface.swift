@@ -38,6 +38,21 @@ final class GameSurface {
         // overwrites the live game. `GamePresenter.open` re-checks this
         // as the backstop for a race between the check and the handoff.
         guard !GamePresenter.isBusy else {
+            // A dashboard test send replaces the game on screen; a real
+            // campaign keeps busy-and-drop.
+            if case .presentation(let payload, _) = settle, isLiveTestCepId(payload.cepCampaignId) {
+                log.d("Test send replaces the open game", campaign: campaignKey)
+                GamePresenter.replace(
+                    open: { [weak self] in
+                        self?.open(campaign: campaign, config: config, chanceId: chanceId, settle: settle)
+                    },
+                    drop: { [weak self] in
+                        self?.fail(
+                            settle: settle, campaign: campaign, config: config,
+                            reason: PlayDropReason.busy, chanceId: chanceId)
+                    })
+                return
+            }
             log.w("Game not opened — another game is already open", campaign: campaignKey)
             fail(settle: settle, campaign: campaign, config: config, reason: PlayDropReason.busy, chanceId: chanceId)
             return
@@ -178,8 +193,8 @@ final class GameSurface {
     /// The close policy: a direct game dismisses as before, an inline card
     /// stays, a game opened from a floating entry asks the backend `state`
     /// and keeps or hides the floater. Every close reports the funnel
-    /// Dismissed to Digia — but a CEP Dismissed only for a direct game, like
-    /// Android — and every presentation policy refreshes rewards only when
+    /// Dismissed to Digia and a CEP Dismissed for every presentation (direct,
+    /// inline or floating) — and every presentation policy refreshes rewards only when
     /// the page is already loaded, while a rewards game always refreshes.
     private func closed(settle: GameSettle, campaign: CampaignModel, reason: String, dismissed: GameEvent.Dismissed) {
         switch settle {
@@ -188,13 +203,15 @@ final class GameSurface {
             // reported the presentation; it emits nothing more.
             guard reason != GamePresentation.cancelledReason else { return }
             sdk.events.toDigia(dismissed, payload: payload)
+            // The coordinator settles once, so the CEP hears one Dismissed.
+            sdk.coordinator.handle(.dismissed(reason: Self.dismissReason(closeReason: reason)), payload: payload)
             sdk.gamification.refreshRewardsIfLoaded()
             switch entry {
             case .inlineTeaser:
                 refreshInlineEntryAfterClose(
                     campaignKey: campaign.campaignKey, payload: payload)
             case .direct, .unknown:
-                sdk.coordinator.handle(.dismissed(reason: Self.dismissReason(closeReason: reason)), payload: payload)
+                break
             case .floating:
                 refreshFloatingEntryAfterClose(
                     campaignKey: campaign.campaignKey, payload: payload)
@@ -207,8 +224,7 @@ final class GameSurface {
     }
 
     /// A skin CTA op ran: the funnel Clicked to Digia only, like Android's
-    /// `onCta`. The CEP click is the first play of a direct game, or the
-    /// entry tap, never a CTA.
+    /// `onCta`. The only CEP click is the entry tap: never a play or a CTA.
     private func cta(op: String, chanceId: String, settle: GameSettle, campaign: CampaignModel) {
         switch settle {
         case .presentation(let payload, _):
@@ -247,6 +263,7 @@ final class GameSurface {
         switch closeReason {
         case "user", "skin": return .userClose
         case "cta": return .ctaAction
+        case "superseded": return .superseded
         default: return .cancelled
         }
     }
@@ -319,8 +336,6 @@ final class GameSurface {
         // What this window did, for `Dismissed`: one per open, so play again
         // and play next keep counting into the same window.
         let stats = GameWindowStats(openChanceId: chanceId)
-        // A direct game's CEP click is its first answered `play`, once per open.
-        var playClicked = false
         let dismissed: (String) -> GameEvent.Dismissed = { reason in
             GameEvent.Dismissed(
                 reason: reason, dwellMs: stats.dwellMs(), chanceId: stats.chanceId,
@@ -373,8 +388,8 @@ final class GameSurface {
                 }
                 self.sdk.events.toDigia(
                     dismissed("failure"), payload: Self.payload(settle: settle, campaign: campaign))
-                // A direct game that displayed and then died ends its presentation.
-                if case .presentation(let payload, let entry) = settle, entry != .inlineTeaser, entry != .floating {
+                // A game that displayed and then died ends its presentation.
+                if case .presentation(let payload, _) = settle {
                     self.settleDirectFailure(payload: payload, reason: failure.wireValue)
                 }
             },
@@ -396,12 +411,6 @@ final class GameSurface {
                 self.sdk.events.forwardChanceEvents(
                     chanceEventsOfAnswer(response, campaignKey: campaignKey),
                     payload: Self.payload(settle: settle, campaign: campaign))
-                if case .presentation(let presentationPayload, let entry) = settle,
-                   entry == .direct || entry == .unknown, !playClicked
-                {
-                    playClicked = true
-                    self.sdk.events.clicked(payload: presentationPayload, elementId: "play")
-                }
             },
             onForeground: { stats.setForeground($0) },
             payload: payload,

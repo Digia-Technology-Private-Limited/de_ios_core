@@ -4,7 +4,7 @@ import Testing
 @testable import DigiaEngage
 
 /// Chance events the server returns go to Digia analytics only, never the CEP,
-/// and a direct game marks one CEP click, on its first play. Each test names
+/// a play or a CTA never marks a CEP click, and every game close reaches the CEP. Each test names
 /// the production line it guards. Mirrors Android's `GameChanceEventsAndCepTest`.
 @MainActor
 @Suite("Game chance events and CEP", .tags(.unit, .gamification))
@@ -36,9 +36,9 @@ struct GameChanceEventsAndCepTests {
         events.filter { $0["event_name"] as? String == name }
     }
 
-    /// A direct game's open request, as `GameSurface.open` builds it.
+    /// A game's open request, as `GameSurface.open` builds it.
     private func directOpenRequest(
-        _ sdk: SDKInstance, recorder: PresentationRecorder
+        _ sdk: SDKInstance, recorder: PresentationRecorder, entry: GamificationEntryKind = .direct
     ) throws -> GameOpenRequest {
         let config = try #require(GamificationConfig.fromJson([
             "skinId": "wheel", "skinVersion": 2,
@@ -51,7 +51,7 @@ struct GameChanceEventsAndCepTests {
         return sdk.gameSurface.makeGameOpenRequest(
             file: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("index.html"),
             chanceId: "ch-1", config: config, campaign: campaign, payload: recorder.payload,
-            userId: "u_123", settle: .presentation(payload: recorder.payload, entry: .direct))
+            userId: "u_123", settle: .presentation(payload: recorder.payload, entry: entry))
     }
 
     // Guards `chanceEventsOf(response["events"], ...)` in `HttpGameOutcomeSource.grantChance`
@@ -113,12 +113,12 @@ struct GameChanceEventsAndCepTests {
 
         let granted = named("Chance Granted", in: try await digiaEvents(sdk))
         #expect(granted.map { $0["event_id"] as? String } == ["evt-2"])
-        #expect(recorder.clickedElementIds == ["play"])
+        #expect(recorder.clickedElementIds.isEmpty)
     }
 
-    // Guards `!playClicked` in `onHttpAnswer`, and the CTA path's removed CEP click.
-    @Test("a direct showing marks one CEP click, on its first play")
-    func cepClickOncePerDirectShowingOnFirstPlay() async throws {
+    // Guards the removed play click in `onHttpAnswer`, and the CTA path's removed CEP click.
+    @Test("a play or a CTA never marks a CEP click")
+    func playAndCtaNeverMarkCepClick() async throws {
         let (sdk, recorder) = try await rig()
         let request = try directOpenRequest(sdk, recorder: recorder)
 
@@ -126,8 +126,24 @@ struct GameChanceEventsAndCepTests {
         request.onHttpAnswer?("play", nil, nil)
         request.onCta?("copy")
 
-        #expect(recorder.clickedElementIds == ["play"])
+        #expect(recorder.clickedElementIds.isEmpty)
         let clicked = named("Digia Experience Clicked", in: try await digiaEvents(sdk))
         #expect(clicked.map { ($0["properties"] as? [String: Any])?["element_id"] as? String } == ["copy"])
+    }
+
+    // Guards the `coordinator.handle(.dismissed(...))` line in `closed`, now run
+    // for every entry kind: an inline game's close reaches the CEP once.
+    @Test("closing an inline game dismisses its presentation to the CEP once")
+    func inlineGameCloseDismissesToCepOnce() async throws {
+        let (sdk, recorder) = try await rig()
+        sdk.coordinator.handle(.impressed, payload: recorder.payload)
+        let request = try directOpenRequest(sdk, recorder: recorder, entry: .inlineTeaser)
+
+        request.onClose?("skin")
+        request.onClose?("user")
+
+        #expect(recorder.dismissReason == .userClose)
+        let dismissed = named("Digia Experience Dismissed", in: try await digiaEvents(sdk))
+        #expect(dismissed.count == 2)
     }
 }

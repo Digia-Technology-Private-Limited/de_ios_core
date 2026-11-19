@@ -105,7 +105,7 @@ private struct GameMuteButton: View {
             ZStack {
                 Circle().fill(Color.black.opacity(0.6)).frame(width: GameChrome.circle, height: GameChrome.circle)
                 Image(systemName: muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(size: 18, weight: .semibold))
                     .foregroundColor(.white)
             }
             .frame(width: GameChrome.hitBox, height: GameChrome.hitBox)

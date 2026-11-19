@@ -616,6 +616,11 @@ final class GamePresentation: Identifiable, ObservableObject {
         }
         SDKInstance.shared.controller.dismissGame()
         report()
+        // A test send that superseded this game opens now that it is gone.
+        if !GamePresenter.isBusy, let next = GamePresenter.pendingTestOpen {
+            GamePresenter.pendingTestOpen = nil
+            next.open()
+        }
     }
 
     /// A visible game plays its exit animation first, then settles once.
@@ -687,6 +692,18 @@ enum GamePresenter {
         log.d("Game loading", campaign: request.campaignKey)
         loading = presentation
         presentation.preload()
+    }
+
+    /// A dashboard test send waiting for the game it replaces to finish closing.
+    static var pendingTestOpen: (open: () -> Void, drop: () -> Void)?
+
+    /// Replaces the open game with a dashboard test send: closes the open game
+    /// as `superseded` and opens the test once it is gone. A newer test send
+    /// drops an older one still waiting.
+    static func replace(open: @escaping () -> Void, drop: @escaping () -> Void) {
+        pendingTestOpen?.drop()
+        pendingTestOpen = (open, drop)
+        dismiss(reason: "superseded")
     }
 
     /// Closes the open game, if any. Fires `onClose` exactly once; a failure
