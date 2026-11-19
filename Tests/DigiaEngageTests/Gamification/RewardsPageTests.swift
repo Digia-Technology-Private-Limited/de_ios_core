@@ -182,14 +182,18 @@ struct RewardsPageTests {
 
     private let context = RewardsBridge.Context(
         apiBase: "https://app.digia.tech/api/v1", projectId: "p1", userId: "u1", userHash: "h1",
-        platform: "ios", sdkVersion: "1.2.3", appVersion: "4.5", deviceId: "d1", locale: "en-US")
+        platform: "ios", sdkVersion: "1.2.3", appVersion: "4.5", deviceId: "d1", locale: "en-US",
+        insets: .init(top: 47, bottom: 34, left: 0, right: 0))
 
     @Test("init carries every field the page reads")
     func initShape() throws {
         let message = RewardsBridge.initMessage(context)
         #expect(message["type"] as? String == "init")
-        let payload = try #require(message["payload"] as? [String: String])
-        #expect(payload == [
+        let payload = try #require(message["payload"] as? [String: Any])
+        let insets = try #require(payload["insets"] as? [String: Double])
+        #expect(insets == ["top": 47, "bottom": 34, "left": 0, "right": 0])
+        let strings = payload.filter { $0.key != "insets" }.compactMapValues { $0 as? String }
+        #expect(strings == [
             "apiBase": "https://app.digia.tech/api/v1", "projectId": "p1", "userId": "u1",
             "userHash": "h1", "platform": "ios", "sdkVersion": "1.2.3", "appVersion": "4.5",
             "deviceId": "d1", "locale": "en-US",
@@ -202,8 +206,8 @@ struct RewardsPageTests {
         bare = RewardsBridge.Context(
             apiBase: bare.apiBase, projectId: bare.projectId, userId: bare.userId, userHash: nil,
             platform: bare.platform, sdkVersion: bare.sdkVersion, appVersion: bare.appVersion,
-            deviceId: bare.deviceId, locale: bare.locale)
-        let payload = try #require(RewardsBridge.initMessage(bare)["payload"] as? [String: String])
+            deviceId: bare.deviceId, locale: bare.locale, insets: bare.insets)
+        let payload = try #require(RewardsBridge.initMessage(bare)["payload"] as? [String: Any])
         #expect(payload["userHash"] == nil)
     }
 
@@ -214,6 +218,13 @@ struct RewardsPageTests {
         #expect(initScript.contains("apiBase"))
         let refresh = try #require(RewardsBridge.script(for: RewardsBridge.refreshMessage))
         #expect(refresh == "window.DigiaBridge.__receive(\"{\\\"payload\\\":{},\\\"type\\\":\\\"refresh\\\"}\")")
+    }
+
+    @Test("insets go out as their own message")
+    func insetsMessage() throws {
+        let message = RewardsBridge.insetsMessage(.init(top: 59, bottom: 34, left: 0, right: 0))
+        #expect(message["type"] as? String == "insets")
+        #expect(message["payload"] as? [String: Double] == ["top": 59, "bottom": 34, "left": 0, "right": 0])
     }
 
     @Test("the locale is a BCP-47 tag")

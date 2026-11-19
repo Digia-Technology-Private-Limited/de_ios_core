@@ -77,6 +77,8 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
     private var loadTask: Task<Void, Never>?
     private var isVisible = false
     private var observers: [NSObjectProtocol] = []
+    private var didFinishLoading = false
+    private var initInsets: RewardsBridge.Insets?
     private var layerToken: Int?
     private var gameWatch: AnyCancellable?
     private var gameHost: UIViewController?
@@ -123,6 +125,8 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.allowsLinkPreview = false
+        // Edge to edge: the page pads itself with the insets it is sent.
+        webView.scrollView.contentInsetAdjustmentBehavior = .never
         // The web view's own back-forward swipe stays off: the page owns its screens.
         webView.allowsBackForwardNavigationGestures = false
         let edge = UIScreenEdgePanGestureRecognizer(target: self, action: #selector(edgeSwiped(_:)))
@@ -241,6 +245,8 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
     private func startLoad() {
         loadToken += 1
         let token = loadToken
+        didFinishLoading = false
+        initInsets = nil
         show(.loading)
         readyTimer?.cancel()
         loadTask?.cancel()
@@ -291,9 +297,33 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
 
     // MARK: - Bridge
 
-    private func sendInit() {
-        guard let context = Self.liveContext() else { return }
+    /// Sends `init` once the page has loaded and the view has laid out in a
+    /// window, so the insets are real.
+    private func sendInitIfReady() {
+        guard didFinishLoading, initInsets == nil, view.window != nil else { return }
+        view.layoutIfNeeded()
+        let insets = currentInsets
+        guard let context = Self.liveContext(insets: insets) else { return }
+        initInsets = insets
         push(RewardsBridge.initMessage(context))
+    }
+
+    private var currentInsets: RewardsBridge.Insets {
+        let inset = view.safeAreaInsets
+        return RewardsBridge.Insets(
+            top: inset.top, bottom: inset.bottom, left: inset.left, right: inset.right)
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        sendInitIfReady()
+    }
+
+    override func viewSafeAreaInsetsDidChange() {
+        super.viewSafeAreaInsetsDidChange()
+        guard let sent = initInsets, sent != currentInsets else { return }
+        initInsets = currentInsets
+        push(RewardsBridge.insetsMessage(currentInsets))
     }
 
     @objc private func edgeSwiped(_ gesture: UIScreenEdgePanGestureRecognizer) {
@@ -314,7 +344,7 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
     }
 
     /// Identity and context from the live SDK. Nil when the SDK is not set up.
-    private static func liveContext() -> RewardsBridge.Context? {
+    private static func liveContext(insets: RewardsBridge.Insets) -> RewardsBridge.Context? {
         let sdk = SDKInstance.shared
         guard let services = sdk.services else { return nil }
         let headers = services.requestHeaders
@@ -327,7 +357,7 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
             sdkVersion: sdk.sdkVersion ?? DigiaSdkVersion.value,
             appVersion: headers["x-app-version"] ?? "",
             deviceId: services.identityManager.deviceId,
-            locale: RewardsBridge.bcp47Locale())
+            locale: RewardsBridge.bcp47Locale(), insets: insets)
     }
 
     /// Owns the game layer while the page is open, so a game opened from the
@@ -476,7 +506,8 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        sendInit()
+        didFinishLoading = true
+        sendInitIfReady()
     }
 
     func webView(

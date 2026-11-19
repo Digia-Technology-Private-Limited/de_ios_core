@@ -17,6 +17,13 @@ enum RewardsPageMessage: Equatable {
 /// The rewards variant of the games bridge: parsing what the page sends and
 /// building what the SDK pushes. Pure, so it is tested without a web view.
 enum RewardsBridge {
+    /// System bar / safe-area insets in points (= CSS px).
+    struct Insets: Equatable {
+        let top: Double, bottom: Double, left: Double, right: Double
+
+        var payload: [String: Any] { ["top": top, "bottom": bottom, "left": left, "right": right] }
+    }
+
     /// Facts the page needs to call the backend itself.
     struct Context: Equatable {
         let apiBase: String
@@ -28,6 +35,7 @@ enum RewardsBridge {
         let appVersion: String
         let deviceId: String
         let locale: String
+        let insets: Insets
     }
 
     /// Parses one page message. Anything oversize, malformed or unknown is nil.
@@ -93,9 +101,14 @@ enum RewardsBridge {
             "appVersion": context.appVersion,
             "deviceId": context.deviceId,
             "locale": context.locale,
+            "insets": context.insets.payload,
         ]
         if let userHash = context.userHash, !userHash.isEmpty { payload["userHash"] = userHash }
         return ["type": "init", "payload": payload]
+    }
+
+    static func insetsMessage(_ insets: Insets) -> [String: Any] {
+        ["type": "insets", "payload": insets.payload]
     }
 
     static var refreshMessage: [String: Any] { ["type": "refresh", "payload": [String: Any]()] }
