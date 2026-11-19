@@ -785,17 +785,14 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
 
     /// The latest `getRewards` answer, driving the rewards page and widget.
     var rewardsResponse: GameRewardsResponse? { gamification.rewardsResponse }
-    /// True while the first fetch is in flight (the page shows a spinner).
-    var rewardsLoading: Bool { gamification.rewardsLoading }
 
     /// Fetches `getRewards` and stores it for the page and the widget.
     func refreshRewards() {
         gamification.refreshRewards()
     }
 
-    /// Opens the native rewards page. The app calls this from its own button
-    /// or menu — or maps its own deep link to it (see `Digia.openRewards`) —
-    /// and the page refreshes on appear.
+    /// Opens the hosted rewards page. The app calls this from its own button
+    /// or menu — or maps its own deep link to it (see `Digia.openRewards`).
     func openRewards() {
         gamification.openRewards()
     }

@@ -1,0 +1,377 @@
+import SafariServices
+import UIKit
+import WebKit
+
+/// The SDK's one logging style — see ``DigiaLogger``.
+private let log = DigiaLogger()
+
+extension Notification.Name {
+    /// Posted when a game opened for a rewards chance closes, so an open
+    /// rewards page can refresh itself.
+    static let digiaRewardsGameClosed = Notification.Name("tech.digia.engage.rewardsGameClosed")
+}
+
+/// Hosts the web rewards page. Presented full screen by `present`, but it
+/// assumes nothing about how it is shown: it closes by dismissing or popping.
+///
+/// A native loading view covers the web view until the page sends `ready`.
+/// A native offline view replaces it on any failure, so the user never sees a
+/// WebKit error page. Both carry a close button.
+@MainActor
+final class RewardsPageViewController: UIViewController, WKNavigationDelegate, WKUIDelegate,
+    WKScriptMessageHandler
+{
+    static let readyTimeoutSeconds = 10.0
+
+    enum State: Equatable { case loading, ready, offline }
+
+    private static weak var current: RewardsPageViewController?
+
+    /// Presents the page full screen over the top-most view controller. A page
+    /// already open stays the only one.
+    static func present(resolveURL: @escaping () async -> URL) {
+        guard current == nil else { return }
+        let page = RewardsPageViewController(resolveURL: resolveURL)
+        page.modalPresentationStyle = .fullScreen
+        current = page
+        ViewControllerUtil.present(page)
+    }
+
+    private(set) var state: State = .loading
+    private let resolveURL: () async -> URL
+    private var pageURL: URL?
+    private var loadToken = 0
+    private var readyTimer: DispatchWorkItem?
+    private var isVisible = false
+    private var observers: [NSObjectProtocol] = []
+
+    private let webView: WKWebView
+    private let loadingView = UIView()
+    private let offlineView = UIView()
+    private let closeButton = UIButton(type: .system)
+
+    init(resolveURL: @escaping () async -> URL) {
+        self.resolveURL = resolveURL
+        let proxy = WeakScriptMessageProxy(target: nil)
+        let configuration = WKWebViewConfiguration()
+        // The default store keeps the page's hashed assets cached between opens.
+        configuration.websiteDataStore = .default()
+        configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+        configuration.userContentController.add(proxy, name: "digia")
+        self.webView = WKWebView(frame: .zero, configuration: configuration)
+        super.init(nibName: nil, bundle: nil)
+        proxy.target = self
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    // MARK: - View
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .systemBackground
+        if #available(iOS 16.4, *) { webView.isInspectable = SDKInstance.shared.isDebugBuild }
+        webView.navigationDelegate = self
+        webView.uiDelegate = self
+        webView.allowsLinkPreview = false
+        webView.isHidden = true
+        [webView, loadingView, offlineView, closeButton].forEach {
+            $0.translatesAutoresizingMaskIntoConstraints = false
+            view.addSubview($0)
+        }
+        NSLayoutConstraint.activate([
+            webView.topAnchor.constraint(equalTo: view.topAnchor),
+            webView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            closeButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
+            closeButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -8),
+            closeButton.widthAnchor.constraint(equalToConstant: 44),
+            closeButton.heightAnchor.constraint(equalToConstant: 44),
+        ])
+        buildLoadingView()
+        buildOfflineView()
+        closeButton.setImage(UIImage(systemName: "xmark"), for: .normal)
+        closeButton.tintColor = .label
+        closeButton.accessibilityLabel = "Close"
+        closeButton.addAction(UIAction { [weak self] _ in self?.closePage() }, for: .touchUpInside)
+        observe()
+        startLoad()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        isVisible = true
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        isVisible = false
+    }
+
+    private func buildLoadingView() {
+        let spinner = UIActivityIndicatorView(style: .medium)
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        spinner.startAnimating()
+        loadingView.backgroundColor = .systemBackground
+        loadingView.addSubview(spinner)
+        pin(loadingView)
+        NSLayoutConstraint.activate([
+            spinner.centerXAnchor.constraint(equalTo: loadingView.centerXAnchor),
+            spinner.centerYAnchor.constraint(equalTo: loadingView.centerYAnchor),
+        ])
+    }
+
+    private func buildOfflineView() {
+        let title = UILabel()
+        title.text = "You're offline"
+        title.font = .preferredFont(forTextStyle: .headline)
+        title.textColor = .label
+        let retry = UIButton(type: .system)
+        retry.setTitle("Retry", for: .normal)
+        retry.addAction(UIAction { [weak self] _ in self?.startLoad() }, for: .touchUpInside)
+        let stack = UIStackView(arrangedSubviews: [title, retry])
+        stack.axis = .vertical
+        stack.spacing = 12
+        stack.alignment = .center
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        offlineView.backgroundColor = .systemBackground
+        offlineView.isHidden = true
+        offlineView.addSubview(stack)
+        pin(offlineView)
+        NSLayoutConstraint.activate([
+            stack.centerXAnchor.constraint(equalTo: offlineView.centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: offlineView.centerYAnchor),
+        ])
+    }
+
+    private func pin(_ child: UIView) {
+        NSLayoutConstraint.activate([
+            child.topAnchor.constraint(equalTo: view.topAnchor),
+            child.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            child.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            child.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+        ])
+        // The close button stays above the native views.
+        view.bringSubviewToFront(closeButton)
+    }
+
+    private func show(_ next: State) {
+        state = next
+        webView.isHidden = next != .ready
+        loadingView.isHidden = next != .loading
+        offlineView.isHidden = next != .offline
+        closeButton.isHidden = next == .ready
+    }
+
+    // MARK: - Loading
+
+    /// Starts (or restarts) a load: resolves the URL, loads it, and gives the
+    /// page `readyTimeoutSeconds` to send `ready`. A newer load makes every
+    /// older step a no-op.
+    private func startLoad() {
+        loadToken += 1
+        let token = loadToken
+        show(.loading)
+        readyTimer?.cancel()
+        let timer = DispatchWorkItem { [weak self] in
+            guard let self, self.state == .loading else { return }
+            log.w("Rewards page sent no ready in time")
+            self.showOffline()
+        }
+        readyTimer = timer
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.readyTimeoutSeconds, execute: timer)
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let url = await self.resolveURL()
+            guard token == self.loadToken else { return }
+            self.pageURL = url
+            self.webView.load(URLRequest(url: url))
+        }
+    }
+
+    private func showOffline() {
+        loadToken += 1
+        readyTimer?.cancel()
+        webView.stopLoading()
+        show(.offline)
+    }
+
+    private func didBecomeReady() {
+        guard state == .loading else { return }
+        readyTimer?.cancel()
+        show(.ready)
+    }
+
+    // MARK: - Bridge
+
+    private func sendInit() {
+        guard let context = Self.liveContext() else { return }
+        push(RewardsBridge.initMessage(context))
+    }
+
+    private func pushRefresh() {
+        guard state == .ready else { return }
+        push(RewardsBridge.refreshMessage)
+    }
+
+    private func push(_ message: [String: Any]) {
+        guard let script = RewardsBridge.script(for: message) else { return }
+        webView.evaluateJavaScript(script)
+    }
+
+    /// Identity and context from the live SDK. Nil when the SDK is not set up.
+    private static func liveContext() -> RewardsBridge.Context? {
+        let sdk = SDKInstance.shared
+        guard let services = sdk.services else { return nil }
+        let headers = services.requestHeaders
+        return RewardsBridge.Context(
+            apiBase: "\(DigiaEndpoints.baseUrl)/api/v1",
+            projectId: headers["X-Digia-Project-Id"] ?? "",
+            userId: services.identityManager.userId ?? "",
+            userHash: services.identityManager.userHash,
+            platform: "ios",
+            sdkVersion: sdk.sdkVersion ?? DigiaSdkVersion.value,
+            appVersion: headers["x-app-version"] ?? "",
+            deviceId: services.identityManager.deviceId,
+            locale: RewardsBridge.bcp47Locale())
+    }
+
+    private func observe() {
+        let center = NotificationCenter.default
+        observers = [
+            center.addObserver(
+                forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    guard let self, self.isVisible else { return }
+                    self.pushRefresh()
+                }
+            },
+            center.addObserver(
+                forName: .digiaRewardsGameClosed, object: nil, queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in self?.pushRefresh() }
+            },
+        ]
+    }
+
+    func userContentController(
+        _ userContentController: WKUserContentController, didReceive message: WKScriptMessage
+    ) {
+        guard message.frameInfo.isMainFrame,
+              RewardsPageURL.isSameOrigin(message.frameInfo.request.url, as: pageURL),
+              let page = RewardsBridge.parse(message.body)
+        else { return }
+        handle(page)
+    }
+
+    private func handle(_ message: RewardsPageMessage) {
+        switch message {
+        case .ready:
+            didBecomeReady()
+        case .loadFailed:
+            showOffline()
+        case .openGame(let chanceId, let campaignId):
+            guard state == .ready else { return }
+            SDKInstance.shared.gamification.openGameForRewardsChance(
+                GameRewardChance(
+                    chanceId: chanceId, campaignId: campaignId, format: nil,
+                    rewardsPageTitle: nil, expiresAt: nil, playable: true))
+        case .openLink(let raw):
+            open(link: raw)
+        case .copy(let text):
+            ActionPlatform.current.copy(text)
+        case .close:
+            closePage()
+        }
+    }
+
+    private func open(link raw: String) {
+        switch RewardsLinkRouter.route(raw) {
+        case .refused:
+            log.w("Rewards link refused")
+        case .internal(let url):
+            closePage {
+                SDKInstance.shared.gamification.openRewardDeepLink(url.absoluteString)
+            }
+        case .external(let url):
+            let safari = SFSafariViewController(url: url)
+            ViewControllerUtil.topViewController(base: self)?.present(safari, animated: true)
+        }
+    }
+
+    /// Dismisses the page, or pops it when it was pushed.
+    func closePage(completion: (() -> Void)? = nil) {
+        if let navigation = navigationController, navigation.viewControllers.first !== self {
+            navigation.popViewController(animated: true)
+            completion?()
+        } else {
+            dismiss(animated: true, completion: completion)
+        }
+    }
+
+    // MARK: - WKNavigationDelegate
+
+    func webView(
+        _ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+    ) {
+        guard let url = navigationAction.request.url else {
+            decisionHandler(.cancel)
+            return
+        }
+        decisionHandler(
+            RewardsPageURL.allowNavigation(
+                url: url, pageURL: pageURL, hasTargetFrame: navigationAction.targetFrame != nil)
+                ? .allow : .cancel)
+    }
+
+    func webView(
+        _ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse,
+        decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void
+    ) {
+        if navigationResponse.isForMainFrame, RewardsPageURL.isHttpError(navigationResponse.response) {
+            showOffline()
+            decisionHandler(.cancel)
+            return
+        }
+        decisionHandler(.allow)
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        sendInit()
+    }
+
+    func webView(
+        _ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!,
+        withError error: Error
+    ) {
+        failed(error)
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        failed(error)
+    }
+
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        showOffline()
+    }
+
+    /// Our own cancels (policy, http error) land here too; only a real failure
+    /// shows the offline view.
+    private func failed(_ error: Error) {
+        guard (error as NSError).code != NSURLErrorCancelled else { return }
+        log.w("Rewards page failed to load", error: error.localizedDescription)
+        showOffline()
+    }
+
+    // MARK: - WKUIDelegate
+
+    func webView(
+        _ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
+        for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures
+    ) -> WKWebView? {
+        nil
+    }
+}

@@ -41,7 +41,7 @@ enum GameURLPolicy {
     }
 
     /// `scheme://host[:port]`, lowercased, default port dropped; nil unless http(s) with a host.
-    private static func normalizedOrigin(_ url: URL) -> String? {
+    static func normalizedOrigin(_ url: URL) -> String? {
         guard let scheme = url.scheme?.lowercased(),
               let host = url.host?.lowercased(), !host.isEmpty
         else { return nil }

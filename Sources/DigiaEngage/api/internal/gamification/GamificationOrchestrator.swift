@@ -39,8 +39,6 @@ final class GamificationOrchestrator: ObservableObject {
     /// The latest `getRewards` answer, driving the rewards page and widget.
     /// Nil until the first fetch; a failed fetch keeps the previous one.
     @Published private(set) var rewardsResponse: GameRewardsResponse?
-    /// True while the first fetch is in flight (the page shows a spinner).
-    @Published private(set) var rewardsLoading = false
     /// Campaigns from the latest `getRewards` that are paused or ended — and
     /// so not in the bundle. Keyed by campaign key.
     private var rewardsCampaigns: [String: CampaignModel] = [:]
@@ -92,11 +90,10 @@ final class GamificationOrchestrator: ObservableObject {
             clearRewardsForUserChange()
             return
         }
-        rewardsLoading = rewardsResponse == nil
         rewardsRefreshTask = Task { @MainActor [weak self] in
             guard let self else { return }
             let start = Date()
-            defer { self.rewardsRefreshTask = nil; self.rewardsLoading = false }
+            defer { self.rewardsRefreshTask = nil }
             switch await self.gameOutcomeSource.getRewards() {
             case .success(let response):
                 self.storeRewards(response)
@@ -146,7 +143,6 @@ final class GamificationOrchestrator: ObservableObject {
         rewardsRefreshTask?.cancel()
         rewardsRefreshTask = nil
         rewardsResponse = nil
-        rewardsLoading = false
         rewardsCampaigns.removeAll()
     }
 
@@ -156,23 +152,29 @@ final class GamificationOrchestrator: ObservableObject {
         rewardsRefreshTask?.cancel()
         rewardsRefreshTask = nil
         rewardsResponse = nil
-        rewardsLoading = false
         rewardsCampaigns.removeAll()
     }
 
-    /// The rewards page title for a chance's campaign: the bundle first, then
-    /// the paused/ended campaigns the response carried.
-    func rewardsCampaignTitle(for campaignKey: String) -> String? {
-        sdk.campaignStore.find(campaignKey)?.gamificationConfig?.rewardsPageTitle
-            ?? rewardsCampaigns[campaignKey]?.gamificationConfig?.rewardsPageTitle
+    /// Opens the hosted rewards page full screen. The app calls this from its
+    /// own button or menu — or maps its own deep link to it (see
+    /// `Digia.openRewards`). The page shows its loading view while the rewards
+    /// refresh, which also gives the SDK the campaign designs it needs to open
+    /// games from the page.
+    func openRewards() {
+        RewardsPageViewController.present { [weak self] in
+            guard let self else { return RewardsPageURL.resolve(pageUrl: nil, environment: .production) }
+            return await self.rewardsPageURL()
+        }
     }
 
-    /// Opens the native rewards page. The app calls this from its own button
-    /// or menu — or maps its own deep link to it (see `Digia.openRewards`) —
-    /// and the page refreshes on appear.
-    func openRewards() {
+    /// Refreshes the rewards, then resolves the page address: the backend's
+    /// `page.url`, else the default for the environment.
+    func rewardsPageURL() async -> URL {
         refreshRewards()
-        GameRewardsPresenter.presentPage()
+        await rewardsRefreshTask?.value
+        return RewardsPageURL.resolve(
+            pageUrl: rewardsResponse?.pageUrl,
+            environment: sdk.config?.environment ?? .production)
     }
 
     /// Follows the widget's tap action: opens one chance the way an entry
@@ -189,8 +191,8 @@ final class GamificationOrchestrator: ObservableObject {
         }
     }
 
-    /// Opens the game for a rewards chance the same way an entry does, then
-    /// dismisses the page (if open) and refreshes on close. The busy, SDK,
+    /// Opens the game for a rewards chance the same way an entry does. The
+    /// rewards page, if open, stays underneath and refreshes on close. The busy, SDK,
     /// skin and user checks live in `GameSurface`, which settles failures as
     /// the reason-coded `game_open_failed` event — never a toast.
     ///
@@ -208,7 +210,6 @@ final class GamificationOrchestrator: ObservableObject {
             log.w("Game skipped — unknown rewards campaign (campaignId=\(chance.campaignId))")
             return
         }
-        NotificationCenter.default.post(name: .digiaDismissRewardsPage, object: nil)
         sdk.gameSurface.open(
             campaign: campaign, config: config, chanceId: chance.chanceId,
             settle: .rewards(chanceId: chance.chanceId))

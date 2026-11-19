@@ -252,6 +252,8 @@ struct GameRewardsResponse {
     let expiredChances: [GameExpiredChance]
     let widget: GameRewardsWidget?
     let emptyMessage: String?
+    /// `page.url`: where the hosted rewards page lives for this environment.
+    var pageUrl: String? = nil
 
     var isEmpty: Bool {
         chances.isEmpty && active.isEmpty && used.isEmpty
@@ -273,7 +275,8 @@ struct GameRewardsResponse {
             expiredGrants: expired.objectArray("grants").compactMap(GameReward.fromJson),
             expiredChances: expired.objectArray("chances").compactMap(GameExpiredChance.fromJson),
             widget: raw.object("widget").map(GameRewardsWidget.fromJson),
-            emptyMessage: raw.nonBlankString("emptyMessage")
+            emptyMessage: raw.nonBlankString("emptyMessage"),
+            pageUrl: raw.object("page")?.nonBlankString("url")
         )
     }
 

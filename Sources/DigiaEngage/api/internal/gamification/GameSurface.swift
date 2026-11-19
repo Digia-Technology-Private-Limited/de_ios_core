@@ -227,6 +227,7 @@ final class GameSurface {
             sdk.events.toDigia(
                 dismissed, payload: Self.rewardsPayload(chanceId: chanceId, campaign: campaign))
             sdk.gamification.refreshRewards()
+            NotificationCenter.default.post(name: .digiaRewardsGameClosed, object: nil)
         }
     }
 

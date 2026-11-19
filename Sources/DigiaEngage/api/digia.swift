@@ -109,8 +109,8 @@ public enum Digia {
             || trimmed.hasSuffix("/\(rewardsDeepLinkPath)")
     }
 
-    /// Opens the native rewards page: waiting chances and won rewards from
-    /// `getRewards`, refreshing on appear and after every game close.
+    /// Opens the hosted rewards page full screen over the top-most view
+    /// controller. Games open over the page and it refreshes when they close.
     ///
     /// Call this from the app's own button or menu, or map the app's own deep
     /// link to it in the host's deep-link handling. No-op below iOS 17.
