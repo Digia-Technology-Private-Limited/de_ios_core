@@ -64,6 +64,16 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
     private let offlineView = UIView()
     private let closeButton = UIButton(type: .system)
 
+    /// The native views are always light, whatever the system appearance.
+    private enum Palette {
+        static let background = UIColor(red: 1, green: 1, blue: 1, alpha: 1)
+        static let spinner = UIColor(red: 0x9C / 255, green: 0xA3 / 255, blue: 0xAF / 255, alpha: 1)
+        static let text = UIColor(red: 0x11 / 255, green: 0x18 / 255, blue: 0x27 / 255, alpha: 1)
+        static let control = UIColor(red: 0x37 / 255, green: 0x41 / 255, blue: 0x51 / 255, alpha: 1)
+    }
+
+    override var preferredStatusBarStyle: UIStatusBarStyle { .darkContent }
+
     init(resolveURL: @escaping () async -> URL) {
         self.resolveURL = resolveURL
         let proxy = WeakScriptMessageProxy(target: nil)
@@ -83,7 +93,7 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemBackground
+        view.backgroundColor = Palette.background
         if #available(iOS 16.4, *) { webView.isInspectable = SDKInstance.shared.isDebugBuild }
         webView.navigationDelegate = self
         webView.uiDelegate = self
@@ -95,6 +105,8 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
         edge.cancelsTouchesInView = false
         view.addGestureRecognizer(edge)
         webView.isHidden = true
+        // Light only on the native views; the web view keeps the system appearance.
+        [loadingView, offlineView, closeButton].forEach { $0.overrideUserInterfaceStyle = .light }
         [webView, loadingView, offlineView, closeButton].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview($0)
@@ -112,7 +124,7 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
         buildLoadingView()
         buildOfflineView()
         closeButton.setImage(UIImage(systemName: "xmark"), for: .normal)
-        closeButton.tintColor = .label
+        closeButton.tintColor = Palette.control
         closeButton.accessibilityLabel = "Close"
         closeButton.addAction(UIAction { [weak self] _ in self?.closePage() }, for: .touchUpInside)
         observe()
@@ -140,7 +152,8 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
         let spinner = UIActivityIndicatorView(style: .medium)
         spinner.translatesAutoresizingMaskIntoConstraints = false
         spinner.startAnimating()
-        loadingView.backgroundColor = .systemBackground
+        loadingView.backgroundColor = Palette.background
+        spinner.color = Palette.spinner
         loadingView.addSubview(spinner)
         pin(loadingView)
         NSLayoutConstraint.activate([
@@ -153,16 +166,17 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
         let title = UILabel()
         title.text = "You're offline"
         title.font = .preferredFont(forTextStyle: .headline)
-        title.textColor = .label
+        title.textColor = Palette.text
         let retry = UIButton(type: .system)
         retry.setTitle("Retry", for: .normal)
+        retry.setTitleColor(Palette.control, for: .normal)
         retry.addAction(UIAction { [weak self] _ in self?.startLoad() }, for: .touchUpInside)
         let stack = UIStackView(arrangedSubviews: [title, retry])
         stack.axis = .vertical
         stack.spacing = 12
         stack.alignment = .center
         stack.translatesAutoresizingMaskIntoConstraints = false
-        offlineView.backgroundColor = .systemBackground
+        offlineView.backgroundColor = Palette.background
         offlineView.isHidden = true
         offlineView.addSubview(stack)
         pin(offlineView)
