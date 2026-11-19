@@ -158,6 +158,13 @@ private final class CoverAnchor: UIViewController {
     private weak var cover: UIViewController?
     private var shownId: String?
 
+    /// Only presents; it sits full size in the host above the guide and floater layers, so it must not
+    /// take their touches. The cover it presents is its own controller and takes touches as usual.
+    override func loadView() {
+        view = UIView()
+        view.isUserInteractionEnabled = false
+    }
+
     func show(_ nudge: DigiaNudgePresentation?, content: (DigiaNudgePresentation) -> AnyView) {
         let id = nudge.map { $0.payload.presentationId ?? $0.id }
         guard id != shownId else { return }
