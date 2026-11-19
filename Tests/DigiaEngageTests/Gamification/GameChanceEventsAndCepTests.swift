@@ -5,9 +5,9 @@ import Testing
 
 /// The SDK builds a game's chance events from the server's answer facts (the
 /// server sends no events) and sends them to Digia analytics only. A test
-/// invocation reports none. Every `/play` is a Digia-only Clicked (`play`, then
-/// `play_again`) unless the game opened from an inline or floating entry, whose
-/// tap was the click; a CTA is not a click; every direct game close reaches the CEP.
+/// invocation reports none. Every `/play` is a Clicked (`play`, then `play_again`)
+/// unless the game opened from an inline or floating entry, whose tap was the
+/// click; a Direct game's click also reaches the CEP; a CTA is not a click; every direct game close reaches the CEP.
 /// Each test names the production line it guards. Mirrors Android's
 /// `GameChanceEventsAndCepTest`.
 @MainActor
@@ -131,9 +131,9 @@ struct GameChanceEventsAndCepTests {
     // Fails if plays stop being numbered per window or reported from the answer:
     // the `stats.nextPlayNumber()` / `forwardChanceEvents(playEventsOf(...))` lines in
     // `makeGameOpenRequest`'s `onHttpAnswer`, the `isNew` gate in `playEventsOf`, or
-    // the `playNumber == 1` click choice.
-    @Test("plays report Clicked and Played per answer, to Digia only")
-    func playsReportClickedAndPlayedPerAnswer_toDigiaOnly() async throws {
+    // the `playNumber == 1` click choice, or the `openedDirect` CEP click.
+    @Test("plays report Clicked and Played per answer; a Direct click also reaches the CEP")
+    func playsReportClickedAndPlayedPerAnswer_directClickReachesCep() async throws {
         let (sdk, recorder) = try await rig()
         let first = Self.envelope([
             "outcomeKey": "slot-2", "kind": "reward", "rewardId": "rw-1",
@@ -178,8 +178,7 @@ struct GameChanceEventsAndCepTests {
         #expect(played["grant_id"] as? String == "g-1")
         #expect((played["value_minor"] as? NSNumber)?.intValue == 5000)
         #expect(played["currency"] as? String == "INR")
-        #expect(recorder.clickedElementIds.isEmpty)
-        #expect(recorder.signals.isEmpty)
+        #expect(recorder.clickedElementIds == ["play", "play_again", "play_again"])
     }
 
     // Fails if a window double-counts or a CTA clicks again: the `guard !shown`
@@ -249,6 +248,8 @@ struct GameChanceEventsAndCepTests {
 
             let afterReplay = try await digiaEvents(sdk)
             #expect(named("Digia Experience Clicked", in: afterReplay).count == 1, "\(entry)")
+            // The entry's slot is already released: plays never reach the CEP.
+            #expect(recorder.clickedElementIds.isEmpty, "\(entry)")
         }
     }
 }

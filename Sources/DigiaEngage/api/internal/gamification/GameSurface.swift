@@ -364,6 +364,12 @@ final class GameSurface {
         } else {
             openedFromEntry = false
         }
+        let openedDirect: Bool
+        if case .presentation(_, .direct) = settle {
+            openedDirect = true
+        } else {
+            openedDirect = false
+        }
         return GameOpenRequest(
             campaignKey: campaignKey,
             campaignId: campaign.id,
@@ -414,7 +420,9 @@ final class GameSurface {
                 guard let self, path == "play" else { return }
                 let payload = Self.payload(settle: settle, campaign: campaign)
                 // Every `/play` is a Digia click: `play` first, `play_again` after.
-                // Not a CEP click: the CEP hears only Impressed and Dismissed for a game.
+                // A Direct game also tells its CEP: the window holds the CEP slot until
+                // it closes, so the click can still land. An entry-opened game's slot is
+                // already released, so its plays stay Digia-only.
                 let playNumber = stats.nextPlayNumber()
                 // A game opened from an inline or floating entry already reported
                 // the entry tap as its click, so its first play is not a click again;
@@ -424,6 +432,9 @@ final class GameSurface {
                     self.sdk.events.toDigia(
                         GameEvent.Clicked(elementId: elementId, chanceId: stats.chanceId),
                         payload: payload)
+                    if openedDirect {
+                        self.sdk.events.clicked(payload: payload, elementId: elementId)
+                    }
                 }
                 // Game Played (and an extra play's Chance Granted) from the answer's
                 // facts, to Digia only, never for a test invocation.
