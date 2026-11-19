@@ -120,9 +120,10 @@ public enum Digia {
     /// Digia.attach(to: window)
     /// ```
     ///
-    /// The SDK adds its layer as a child of the window's root view controller and keeps it there: after
-    /// you replace the root (`window.rootViewController = …`), it moves to the new root on its own.
-    /// Call it again only for a new `UIWindow`.
+    /// The SDK adds its layer as a child of the window's root view controller. After you replace the root
+    /// (`window.rootViewController = …`), it moves to the new root before the next campaign shows; a
+    /// campaign that was on screen when you replaced the root is ended. Call it again only for a new
+    /// `UIWindow`.
     ///
     /// The root must be a plain view controller. A `UINavigationController`, `UITabBarController`,
     /// `UISplitViewController` or `UIPageViewController` root is not supported, because it would treat

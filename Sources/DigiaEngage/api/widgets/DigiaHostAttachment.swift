@@ -4,10 +4,9 @@ import UIKit
 /// *current* root view controller, so its SwiftUI layer is that root's child controller.
 ///
 /// The app calls `attach` once. A root swap (`window.rootViewController = …`) removes the host with the
-/// old root, so it is put back twice over: right after the swap, by observing the window's root, and
-/// again before each campaign is routed (`ensure()`), because UIKit does not promise that observation.
-/// A campaign that was on screen in the old root is ended first (`endCampaignsForHostTeardown`): it left
-/// the screen with that root, and is not redrawn in the new one.
+/// old root; it is put back before the next campaign is routed (`ensure()`). A campaign that was on
+/// screen in the old root is ended at that point (`endCampaignsForHostTeardown`): it left the screen with
+/// that root, and is not redrawn in the new one.
 ///
 /// A navigation, tab bar, split view or page view controller root is not supported: each of them
 /// treats any child controller as one of its own screens (a pushed page, an extra tab). There the host
@@ -17,28 +16,21 @@ enum DigiaHostAttachment {
     private static let log = DigiaLogger()
     private static weak var window: UIWindow?
     private static var host: DigiaHostView?
-    private static var rootObservation: NSKeyValueObservation?
     private static weak var warnedRoot: UIViewController?
-    /// The root the host was last added to. An identity, not a reference: the old root is usually gone by
-    /// the time the swap is noticed, and a weak reference would then read as "never attached".
-    private static var attachedRoot: ObjectIdentifier?
+    /// Whether the host was added to a root and has not been found missing since.
+    private static var attached = false
 
     static func attach(to window: UIWindow) {
-        if self.window !== window {
-            self.window = window
-            rootObservation = window.observe(\.rootViewController) { _, _ in
-                // On the next turn, once UIKit has put the new root's view in the window.
-                DispatchQueue.main.async { MainActor.assumeIsolated { ensure() } }
-            }
-        }
+        self.window = window
         ensure()
     }
 
     /// Puts the host back in the current root, or on top of it, if it is not already there.
     static func ensure() {
         guard let window, let root = window.rootViewController else { return }
-        if let attached = attachedRoot, attached != ObjectIdentifier(root) {
-            attachedRoot = nil
+        if attached, host?.superview !== root.view {
+            // The host is no longer in the window's root: the app replaced the root.
+            attached = false
             SDKInstance.shared.endCampaignsForHostTeardown()
         }
         guard !root.managesItsChildren else {
@@ -63,6 +55,6 @@ enum DigiaHostAttachment {
         } else if root.view.subviews.last !== host {
             root.view.bringSubviewToFront(host)
         }
-        attachedRoot = ObjectIdentifier(root)
+        attached = true
     }
 }
