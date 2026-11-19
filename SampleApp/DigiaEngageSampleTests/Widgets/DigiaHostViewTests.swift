@@ -232,6 +232,33 @@ struct DigiaHostViewTests {
             == "presenter_transitioning")
     }
 
+    // Fails if: `AppAppearanceHostingController` stops answering status bar style and orientation with
+    // the app root's choices (or NudgeCoverPresenter stops using it under attach): the cover would then
+    // flip the status bar and let a portrait-only app rotate while the sheet is up.
+    @Test("with attach, a bottom-sheet nudge keeps the app's status bar style and orientation lock")
+    func bottomSheetKeepsTheAppsStatusBarAndOrientation() async throws {
+        let sdk = try await SdkHarness.start(
+            loadCampaign("campaigns/nudge_bottomsheet/nudge_bottomsheet_backdrop_on.json"))
+        defer { sdk.tearDown() }
+        let root = PortraitScreen()
+        let window = makeWindow(root: root, sdk)
+        Digia.attach(to: window)
+        ComponentTestHost.drainRunLoop(for: 0.3)
+
+        let presentation = try sdk.deliver("test_nudge_bottomsheet_backdrop_on")
+        try await sdk.waitUntil("the sheet is presented") {
+            presentation.state == .displaying && root.presentedViewController != nil
+        }
+
+        try await sdk.waitUntil("the sheet is drawn") { sdk.isShowing("Backdrop Tap Dismiss On") }
+        let cover = try #require(root.presentedViewController)
+        #expect(cover.preferredStatusBarStyle == .lightContent)
+        #expect(cover.supportedInterfaceOrientations == .portrait)
+
+        Digia.dismissActiveNudge()
+        try await sdk.waitUntil("the cover is gone") { root.presentedViewController == nil }
+    }
+
     private final class PortraitScreen: UIViewController {
         override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .portrait }
         override var preferredStatusBarStyle: UIStatusBarStyle { .lightContent }

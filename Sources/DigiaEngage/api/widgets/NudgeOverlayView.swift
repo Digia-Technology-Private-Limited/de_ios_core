@@ -99,6 +99,16 @@ private struct NudgeCoverPresenter: View {
     let presentation: Binding<DigiaNudgePresentation?>
 
     var body: some View {
+        if DigiaHostAttachment.isInUse {
+            // Under `Digia.attach(to:)` the cover keeps the app's status bar and orientation, which a
+            // SwiftUI `fullScreenCover` cannot be told to do.
+            Color.clear.background(AppAppearanceCover(presentation: presentation) { AnyView(content($0)) })
+        } else {
+            swiftUICover
+        }
+    }
+
+    private var swiftUICover: some View {
         Color.clear
             .fullScreenCover(item: presentation) { nudge in
                 // `.id(nudge.id)`: a direct swap between two active nudges (no
@@ -122,6 +132,79 @@ private struct NudgeCoverPresenter: View {
         } else {
             NudgeSheetView(presentation: nudge)
         }
+    }
+}
+
+/// Presents a bottom-sheet or full-screen nudge from UIKit, in a controller that answers status bar
+/// style, status bar visibility and orientation with the app's own choices, read from the window's
+/// root. Like the SwiftUI cover it replaces: clear background, no animation, a fresh controller per
+/// presentation, and dismissing it is driven by the binding going nil.
+private struct AppAppearanceCover: UIViewControllerRepresentable {
+    let presentation: Binding<DigiaNudgePresentation?>
+    let content: (DigiaNudgePresentation) -> AnyView
+
+    func makeUIViewController(context: Context) -> CoverAnchor { CoverAnchor() }
+
+    func updateUIViewController(_ anchor: CoverAnchor, context: Context) {
+        anchor.show(presentation.wrappedValue, content: content)
+    }
+
+    static func dismantleUIViewController(_ anchor: CoverAnchor, coordinator: ()) {
+        anchor.show(nil, content: { _ in AnyView(EmptyView()) })
+    }
+}
+
+private final class CoverAnchor: UIViewController {
+    private weak var cover: UIViewController?
+    private var shownId: String?
+
+    func show(_ nudge: DigiaNudgePresentation?, content: (DigiaNudgePresentation) -> AnyView) {
+        let id = nudge.map { $0.payload.presentationId ?? $0.id }
+        guard id != shownId else { return }
+        shownId = id
+        if let cover {
+            self.cover = nil
+            cover.presentingViewController?.dismiss(animated: false)
+        }
+        guard let nudge else { return }
+        let controller = AppAppearanceHostingController(
+            rootView: content(nudge), appRoot: view.window?.rootViewController)
+        controller.view.backgroundColor = .clear
+        controller.modalPresentationStyle = .overFullScreen
+        cover = controller
+        present(controller, animated: false)
+    }
+}
+
+private final class AppAppearanceHostingController: UIHostingController<AnyView> {
+    private weak var appRoot: UIViewController?
+
+    init(rootView: AnyView, appRoot: UIViewController?) {
+        self.appRoot = appRoot
+        super.init(rootView: rootView)
+    }
+
+    @MainActor required dynamic init?(coder aDecoder: NSCoder) {
+        super.init(coder: aDecoder)
+    }
+
+    /// The controller the app lets decide, following the root's own delegation.
+    private func owner(_ next: (UIViewController) -> UIViewController?) -> UIViewController? {
+        var current = appRoot
+        while let candidate = current, let child = next(candidate) { current = child }
+        return current
+    }
+
+    override var preferredStatusBarStyle: UIStatusBarStyle {
+        owner { $0.childForStatusBarStyle }?.preferredStatusBarStyle ?? .default
+    }
+
+    override var prefersStatusBarHidden: Bool {
+        owner { $0.childForStatusBarHidden }?.prefersStatusBarHidden ?? false
+    }
+
+    override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
+        appRoot?.supportedInterfaceOrientations ?? .all
     }
 }
 
