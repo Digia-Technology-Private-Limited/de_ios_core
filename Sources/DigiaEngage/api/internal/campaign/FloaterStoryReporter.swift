@@ -42,7 +42,13 @@ final class FloaterStoryReporter {
         _ state: ActiveFloaterStoryState, _ reason: FloaterDismissReason,
         _ metrics: FloaterMetrics, _ wasVisible: Bool
     ) {
-        if !wasVisible {
+        // A floating game entry that ends because its game was spent (`.completed`, sent
+        // only by `GameSurface.hideFloatingEntry`) already reported the game's own Digia
+        // Dismissed; a second one here doubles the close. The CEP still hears that its
+        // presentation ended.
+        let gameEntrySpent = reason == .completed
+        if !wasVisible || gameEntrySpent {
+            if gameEntrySpent { _ = ctx.dwell.consumeDwellMs(state.payload.cepCampaignId) }
             ctx.events.toCep(.dismissed(reason: reason.presentationReason), payload: state.payload)
             return
         }

@@ -303,7 +303,10 @@ final class GamificationOrchestrator: ObservableObject {
         case .drop(let reason, let denyReason, _):
             let dropReason: DropReason
             let detail: String
-            var deliveryDetail: [String: Any] = [:]
+            // The play decision rides on the Dropped event, so a drop names
+            // its cause (`not_shown`, `busy`, `denied`, ...) rather than only
+            // the coarse drop reason.
+            var deliveryDetail: [String: Any] = ["gamification_reason": reason]
             switch reason {
             case PlayDropReason.denied:
                 dropReason = .frequencyCapped
@@ -334,7 +337,7 @@ final class GamificationOrchestrator: ObservableObject {
             }
             sdk.coordinator.drop(
                 payload, reason: dropReason, detail: detail,
-                deliveryDetail: deliveryDetail.isEmpty ? nil : deliveryDetail)
+                deliveryDetail: deliveryDetail)
         }
     }
 

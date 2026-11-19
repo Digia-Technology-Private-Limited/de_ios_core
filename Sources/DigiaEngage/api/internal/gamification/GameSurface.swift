@@ -279,7 +279,11 @@ final class GameSurface {
     /// presentation.
     private func shown(settle: GameSettle, campaign: CampaignModel, viewed: GameEvent.Viewed) {
         switch settle {
-        case .presentation(let payload, _):
+        case .presentation(let payload, let entry):
+            // A game opened from an inline or floating entry was already Viewed
+            // (and Impressed to the CEP) when its entry rendered: a second Viewed
+            // would count one presentation twice.
+            if entry == .inlineTeaser || entry == .floating { return }
             sdk.events.toBoth(.impressed, viewed, payload: payload)
         case .rewards(let chanceId):
             sdk.events.toDigia(
@@ -354,6 +358,12 @@ final class GameSurface {
             openTestInvocationId = nil
             entryValue = "rewards"
         }
+        let openedFromEntry: Bool
+        if case .presentation(_, let entry) = settle, entry == .inlineTeaser || entry == .floating {
+            openedFromEntry = true
+        } else {
+            openedFromEntry = false
+        }
         return GameOpenRequest(
             campaignKey: campaignKey,
             campaignId: campaign.id,
@@ -406,10 +416,15 @@ final class GameSurface {
                 // Every `/play` is a Digia click: `play` first, `play_again` after.
                 // Not a CEP click: the CEP hears only Impressed and Dismissed for a game.
                 let playNumber = stats.nextPlayNumber()
-                let elementId = playNumber == 1 ? Self.clickPlay : Self.clickPlayAgain
-                self.sdk.events.toDigia(
-                    GameEvent.Clicked(elementId: elementId, chanceId: stats.chanceId),
-                    payload: payload)
+                // A game opened from an inline or floating entry already reported
+                // the entry tap as its click, so its first play is not a click again;
+                // a play again is a fresh tap on the game's own button.
+                if !openedFromEntry || playNumber > 1 {
+                    let elementId = playNumber == 1 ? Self.clickPlay : Self.clickPlayAgain
+                    self.sdk.events.toDigia(
+                        GameEvent.Clicked(elementId: elementId, chanceId: stats.chanceId),
+                        payload: payload)
+                }
                 // Game Played (and an extra play's Chance Granted) from the answer's
                 // facts, to Digia only, never for a test invocation.
                 if openTestInvocationId == nil {

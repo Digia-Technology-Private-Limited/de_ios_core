@@ -6,7 +6,8 @@ import Testing
 /// The SDK builds a game's chance events from the server's answer facts (the
 /// server sends no events) and sends them to Digia analytics only. A test
 /// invocation reports none. Every `/play` is a Digia-only Clicked (`play`, then
-/// `play_again`); a CTA is not a click; every direct game close reaches the CEP.
+/// `play_again`) unless the game opened from an inline or floating entry, whose
+/// tap was the click; a CTA is not a click; every direct game close reaches the CEP.
 /// Each test names the production line it guards. Mirrors Android's
 /// `GameChanceEventsAndCepTest`.
 @MainActor
@@ -223,5 +224,31 @@ struct GameChanceEventsAndCepTests {
         #expect(recorder.dismissReason == nil)
         let dismissed = named("Digia Experience Dismissed", in: try await digiaEvents(sdk))
         #expect(dismissed.count == 2)
+    }
+
+    // Fails if the entry's tap is counted twice or a replay is not counted: the
+    // `!openedFromEntry || playNumber > 1` gate around the play Clicked, and the
+    // entry check in `shown` that skips a second Viewed.
+    @Test("an entry-opened game sends no second Viewed, no first-play Clicked, one replay Clicked")
+    func entryOpenedGameCountsOnlyThePlayAgainAsAClickAndNoSecondViewed() async throws {
+        for entry in [GamificationEntryKind.inlineTeaser, .floating] {
+            let (sdk, recorder) = try await rig()
+            let request = try directOpenRequest(sdk, recorder: recorder, entry: entry)
+
+            request.onShown?()
+            request.onHttpAnswer?(
+                "play", ["chanceId": "ch-1"], Self.envelope(["outcomeKey": "slot-1", "isNew": true]))
+
+            let firstPlay = try await digiaEvents(sdk)
+            #expect(named("Digia Experience Viewed", in: firstPlay).isEmpty, "\(entry)")
+            #expect(named("Digia Experience Clicked", in: firstPlay).isEmpty, "\(entry)")
+            #expect(named("Digia Game Played", in: firstPlay).count == 1, "\(entry)")
+
+            request.onHttpAnswer?(
+                "play", ["chanceId": "ch-2"], Self.envelope(["outcomeKey": "slot-1", "isNew": true]))
+
+            let afterReplay = try await digiaEvents(sdk)
+            #expect(named("Digia Experience Clicked", in: afterReplay).count == 1, "\(entry)")
+        }
     }
 }
