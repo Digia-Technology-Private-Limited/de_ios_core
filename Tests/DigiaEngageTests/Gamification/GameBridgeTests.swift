@@ -156,6 +156,25 @@ struct GameBridgeTests {
         #expect(payload["code"] as? String == "unsupported")
     }
 
+    @Test("motion with an unknown sensor replies bad_request")
+    func motionUnknownSensorBadRequest() throws {
+        let bridge = makeBridge()
+        var scripts: [String] = []
+        var requests: [GameBridgeRequest] = []
+        bridge.onSend = { scripts.append($0) }
+        bridge.onRequest = { requests.append($0) }
+
+        bridge.receive(msg("motion", id: "7", payload: ["op": "unsubscribe", "sensors": ["magnet"]]))
+
+        // Guards the sensor-name check in handleMotion's unsubscribe case: an
+        // unknown name answers bad_request and nothing is stopped.
+        #expect(scripts.count == 1)
+        let reply = try received(scripts[0])
+        let payload = try #require(reply["payload"] as? [String: Any])
+        #expect(payload["code"] as? String == "bad_request")
+        #expect(requests.isEmpty)
+    }
+
     @Test("unknown type without an id drops with the health event")
     func unknownTypeWithoutIdDrops() throws {
         let bridge = makeBridge()
