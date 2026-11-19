@@ -68,8 +68,6 @@ final class GamePresentation: Identifiable, ObservableObject {
     /// Why the game is closing (`user`, `skin` or `cta`): set by `dismiss`,
     /// read by `didClose` for the funnel's Dismissed reason.
     private var closeReason = "user"
-    /// When this open started, for the `[gami-timing]` debug logs.
-    private let openedAt = Date()
 
     init?(request: GameOpenRequest) {
         var isDirectory: ObjCBool = false
@@ -343,7 +341,7 @@ final class GamePresentation: Identifiable, ObservableObject {
                 ])
                 self.request.onHttpAnswer?(validated, body, response.body)
                 if validated == "state", let body = response.body {
-                    self.recordStateAnswer(body, since: start)
+                    self.recordStateAnswer(body)
                 }
             case .failure(let failure):
                 self.bridge.fail(id: id, code: failure.code, message: self.httpErrorMessage(failure.code))
@@ -360,13 +358,10 @@ final class GamePresentation: Identifiable, ObservableObject {
     }
 
     /// A successful skin `state` answer feeds the next open's `init.chanceState`.
-    private func recordStateAnswer(_ envelope: [String: Any], since start: Date) {
+    private func recordStateAnswer(_ envelope: [String: Any]) {
         guard envelope["isSuccess"] as? Bool == true,
               let response = (envelope["data"] as? [String: Any])?["response"] as? [String: Any]
         else { return }
-        log.d(
-            "[gami-timing] state ok in \(Int(Date().timeIntervalSince(start) * 1000)) ms (skin)",
-            campaign: request.campaignKey)
         GameChanceStateCache.shared.record(campaignKey: request.campaignKey, response: response)
     }
 
@@ -605,10 +600,7 @@ final class GamePresentation: Identifiable, ObservableObject {
         request.onShown?()
         // `ready` can land while the app is inactive; resume waits for didBecomeActive.
         pushLifecycle(UIApplication.shared.applicationState == .active ? "resumed" : "paused")
-        log.d("[gami-timing] ready in \(msSinceOpen) ms", campaign: request.campaignKey)
     }
-
-    private var msSinceOpen: Int { Int(Date().timeIntervalSince(openedAt) * 1000) }
 
     /// Ends the session on every path. A game that never became visible has no
     /// container to tear the web view down, so it is torn down here.
