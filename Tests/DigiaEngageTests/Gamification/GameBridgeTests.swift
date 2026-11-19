@@ -436,7 +436,7 @@ struct GameBridgeTests {
             chanceId: "ch_1", campaignId: "c_1", campaignKey: "bill_pay_spin",
             skinId: "wheel", skinVersion: 3,
             values: ["label": .string("Spin")],
-            slots: [GamificationSlotConfig(outcomeKey: "win", values: ["color": "red"])],
+            slots: [GamificationSlotConfig(outcomeKey: "win", values: ["color": .string("red")])],
             viewportWidth: 412, viewportHeight: 915,
             safeArea: GameSafeArea(top: 24, right: 0, bottom: 16, left: 0),
             colorScheme: "light", fontFamily: nil, themeFonts: [],

@@ -5,7 +5,8 @@ private let log = DigiaLogger()
 
 struct GamificationSlotConfig: Equatable, Sendable {
     let outcomeKey: String
-    let values: [String: String]
+    /// Passed to the skin untouched: the dashboard owns these keys and types.
+    let values: [String: JSONValue]
 }
 
 /// The entry canvas of a non-direct campaign: the card the host draws in an
@@ -134,13 +135,13 @@ struct GamificationConfig: Equatable {
                 log.d("Gamification slot dropped — missing outcomeKey")
                 continue
             }
-            var slotValues: [String: String] = [:]
+            var slotValues: [String: JSONValue] = [:]
             for (key, raw) in (rawSlot["values"] as? [String: Any]) ?? [:] {
-                guard let string = raw as? String else {
-                    log.d("Gamification slot value dropped — not a string (key=\(key))")
+                guard let mapped = GamificationJSON.value(raw) else {
+                    log.d("Gamification slot value dropped — not JSON (key=\(key))")
                     continue
                 }
-                slotValues[key] = string
+                slotValues[key] = mapped
             }
             slots.append(GamificationSlotConfig(outcomeKey: outcomeKey, values: slotValues))
         }

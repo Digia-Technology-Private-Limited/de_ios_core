@@ -91,7 +91,7 @@ struct GameInitPayload {
                 "skinId": skinId, "skinVersion": skinVersion,
             ],
             "values": Self.jsonObject(values),
-            "slots": slots.map { ["outcomeKey": $0.outcomeKey, "values": $0.values] },
+            "slots": slots.map { ["outcomeKey": $0.outcomeKey, "values": Self.jsonObject($0.values)] },
             "surface": Self.surface,
             "viewport": [
                 "width": viewportWidth, "height": viewportHeight,
