@@ -102,6 +102,30 @@ struct RewardsPageTests {
         #expect(GameLayerOwner.layer(for: game) == .root)
     }
 
+    @Test("a claim whose page is gone is dropped and the root cover shows games")
+    func deadClaimIsDropped() {
+        GameLayerOwner.resetForTesting()
+        defer { GameLayerOwner.resetForTesting() }
+        let gameObject = NSObject()
+        let game = ObjectIdentifier(gameObject)
+        defer { withExtendedLifetime(gameObject) {} }
+        var live = true
+        _ = GameLayerOwner.claim(existingGame: nil, isLive: { live })
+        #expect(GameLayerOwner.layer(for: game) == .rewards)
+        live = false
+        #expect(GameLayerOwner.layer(for: game) == .root)
+        live = true
+        #expect(GameLayerOwner.layer(for: game) == .root)
+    }
+
+    @Test("the page error forwarder sends message, source and line only")
+    func errorForwarder() {
+        let script = RewardsPageViewController.errorForwardScript
+        #expect(script.contains("digiaPageError"))
+        #expect(script.contains("unhandledrejection"))
+        #expect(script.contains("e.filename") && script.contains("e.lineno"))
+    }
+
     // MARK: - Bridge
 
     private func page(_ object: [String: Any]) -> String {

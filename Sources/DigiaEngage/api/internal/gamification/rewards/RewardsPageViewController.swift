@@ -39,6 +39,23 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
         ViewControllerUtil.present(page)
     }
 
+    /// Forwards the page's script errors (message, source, line only) so a
+    /// broken page is visible in the logs.
+    static let errorForwardScript = """
+        (function () {
+          function send(m, s, l) {
+            try {
+              window.webkit.messageHandlers.digiaPageError.postMessage(JSON.stringify(
+                { m: String(m).slice(0, 200), s: String(s || '').slice(0, 200), l: l || 0 }));
+            } catch (e) {}
+          }
+          window.addEventListener('error', function (e) { send(e.message, e.filename, e.lineno); });
+          window.addEventListener('unhandledrejection', function (e) {
+            var r = e.reason; send(r && r.message ? r.message : r, 'promise', 0);
+          });
+        })();
+        """
+
     private(set) var state: State = .loading
     /// The page's last `navState`. False unless the page is shown. A pushed
     /// page can gate the navigation controller's `interactivePopGestureRecognizer`
@@ -87,6 +104,9 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
         configuration.websiteDataStore = .default()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
         configuration.userContentController.add(proxy, name: "digia")
+        configuration.userContentController.add(proxy, name: "digiaPageError")
+        configuration.userContentController.addUserScript(WKUserScript(
+            source: Self.errorForwardScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         self.webView = WKWebView(frame: .zero, configuration: configuration)
         super.init(nibName: nil, bundle: nil)
         proxy.target = self
@@ -251,6 +271,8 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
         gameWatch = nil
         if let layerToken { GameLayerOwner.release(layerToken) }
         layerToken = nil
+        // A game still open falls back to the root cover: have it re-read the gate.
+        SDKInstance.shared.controller.objectWillChange.send()
         if Self.current === self { Self.current = nil }
     }
 
@@ -313,7 +335,12 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
     /// on the app's root cover.
     private func claimGameLayer() {
         let controller = SDKInstance.shared.controller
-        layerToken = GameLayerOwner.claim(existingGame: controller.activeGame.map(ObjectIdentifier.init))
+        layerToken = GameLayerOwner.claim(
+            existingGame: controller.activeGame.map(ObjectIdentifier.init),
+            isLive: { [weak self] in
+                guard let self else { return false }
+                return self.view.window != nil || self.presentingViewController != nil || self.parent != nil
+            })
         gameWatch = controller.$activeGame.receive(on: DispatchQueue.main).sink { [weak self] game in
             self?.gameChanged(game)
         }
@@ -357,6 +384,10 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
     func userContentController(
         _ userContentController: WKUserContentController, didReceive message: WKScriptMessage
     ) {
+        if message.name == "digiaPageError" {
+            if let text = message.body as? String { log.w("Rewards page script error", error: String(text.prefix(450))) }
+            return
+        }
         guard message.frameInfo.isMainFrame,
               RewardsPageURL.isSameOrigin(message.frameInfo.request.url, as: pageURL),
               let page = RewardsBridge.parse(message.body)
