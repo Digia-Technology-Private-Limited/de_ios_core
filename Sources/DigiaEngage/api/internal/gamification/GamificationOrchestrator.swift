@@ -269,6 +269,9 @@ final class GamificationOrchestrator: ObservableObject {
     ) {
         let campaignKey = campaign.campaignKey
         let cepCampaignId = payload.cepCampaignId
+        // The grant answer's chance events go to Digia analytics only, whatever
+        // the decision (ADR 0002).
+        sdk.events.forwardChanceEvents(decision.chanceEvents, payload: payload)
         switch decision {
         case .open(let chance):
             log.d(
@@ -295,7 +298,7 @@ final class GamificationOrchestrator: ObservableObject {
             sdk.gamificationSurface.showEntry(
                 campaign: campaign, config: config, payload: payload,
                 chance: chance, driver: driver)
-        case .drop(let reason, let denyReason):
+        case .drop(let reason, let denyReason, _):
             let dropReason: DropReason
             let detail: String
             var deliveryDetail: [String: Any] = [:]

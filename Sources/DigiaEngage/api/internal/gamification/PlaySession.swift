@@ -59,9 +59,9 @@ final class PlaySession {
             if chance.show {
                 return .open(chance)
             }
-            return .drop(reason: PlayDropReason.notShown, denyReason: nil)
-        case .denied(let reason):
-            return .drop(reason: PlayDropReason.denied, denyReason: reason)
+            return .drop(reason: PlayDropReason.notShown, denyReason: nil, events: chance.events)
+        case .denied(let reason, let events):
+            return .drop(reason: PlayDropReason.denied, denyReason: reason, events: events)
         case .failure(let error):
             switch error {
             case .transport, .httpStatus:
@@ -138,8 +138,9 @@ enum PlayDecision: Equatable, Sendable {
     /// Direct trigger, granted with `show`: open the game now.
     case open(GrantedChance)
     /// Anything else: log, report the live test, emit `game_open_failed`,
-    /// and settle the presentation as dropped.
-    case drop(reason: String, denyReason: String?)
+    /// and settle the presentation as dropped. `events` are the chance events
+    /// a granted-but-not-shown or denied answer carried (ADR 0002).
+    case drop(reason: String, denyReason: String?, events: [ChanceAnalyticsEvent] = [])
 }
 
 /// What a tap on a shown entry decided. No network call.

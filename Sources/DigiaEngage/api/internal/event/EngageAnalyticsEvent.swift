@@ -728,6 +728,40 @@ enum FloaterEvent {
     }
 }
 
+/// A chance event the gamification server built and returned in its `grantChance` or
+/// `play` answer (`Digia Chance Granted`, `Digia Gamification Assigned`, `Digia Chance
+/// Denied`, `Digia Game Played`). The SDK only forwards it, to Digia analytics and never
+/// to the CEP, keeping the server's `eventId` (a UUIDv5, so a re-send dedupes),
+/// `occurredAt` and `campaignId`. ADR 0002.
+struct ChanceAnalyticsEvent: EngageAnalyticsEvent, Equatable, Sendable {
+    /// A property value the server may send: a string, number, boolean or null.
+    enum Value: Equatable, Sendable {
+        case string(String)
+        case int(Int64)
+        case double(Double)
+        case bool(Bool)
+        case null
+    }
+
+    let eventName: String
+    let eventId: String
+    let occurredAt: String
+    let campaignId: String
+    let values: [String: Value]
+
+    var properties: [String: Any] {
+        values.mapValues { value -> Any in
+            switch value {
+            case .string(let s): return s
+            case .int(let i): return i
+            case .double(let d): return d
+            case .bool(let b): return b
+            case .null: return NSNull()
+            }
+        }
+    }
+}
+
 // ── Delivery (every campaign type; ai_docs/campaign-delivery-events.md) ──────
 
 enum DeliveryEvent {

@@ -206,18 +206,16 @@ final class GameSurface {
         }
     }
 
-    /// A skin CTA op ran: the funnel Clicked to Digia and the click to the
-    /// CEP, like Android's `onCta` — for a rewards game the CEP leg no-ops
-    /// on its synthetic payload, as its Impressed already does.
+    /// A skin CTA op ran: the funnel Clicked to Digia only, like Android's
+    /// `onCta`. The CEP click is the first play of a direct game, or the
+    /// entry tap, never a CTA.
     private func cta(op: String, chanceId: String, settle: GameSettle, campaign: CampaignModel) {
         switch settle {
         case .presentation(let payload, _):
             sdk.events.toDigia(GameEvent.Clicked(elementId: op, chanceId: chanceId), payload: payload)
-            sdk.events.clicked(payload: payload, elementId: op)
         case .rewards(let rewardsChanceId):
             let payload = Self.rewardsPayload(chanceId: rewardsChanceId, campaign: campaign)
             sdk.events.toDigia(GameEvent.Clicked(elementId: op, chanceId: chanceId), payload: payload)
-            sdk.events.clicked(payload: payload, elementId: op)
         }
     }
 
@@ -303,8 +301,8 @@ final class GameSurface {
     /// rewards chances. Only the settle closures differ. The funnel counts a
     /// shown game: `shown` arms the failure Dismissed, so a game that never
     /// displayed reports only its open failure, never a Dismissed without a
-    /// Viewed — like Android's `openRequest`.
-    private func makeGameOpenRequest(
+    /// Viewed — like Android's `openRequest`. Internal for tests.
+    func makeGameOpenRequest(
         file: URL,
         chanceId: String,
         config: GamificationConfig,
@@ -321,6 +319,8 @@ final class GameSurface {
         // What this window did, for `Dismissed`: one per open, so play again
         // and play next keep counting into the same window.
         let stats = GameWindowStats(openChanceId: chanceId)
+        // A direct game's CEP click is its first answered `play`, once per open.
+        var playClicked = false
         let dismissed: (String) -> GameEvent.Dismissed = { reason in
             GameEvent.Dismissed(
                 reason: reason, dwellMs: stats.dwellMs(), chanceId: stats.chanceId,
@@ -388,8 +388,20 @@ final class GameSurface {
                 stats.start()
                 self?.shown(settle: settle, campaign: campaign, viewed: viewed)
             },
-            onHttpAnswer: { path, request, response in
+            onHttpAnswer: { [weak self] path, request, response in
                 stats.recordHttp(path: path, request: request, response: response)
+                guard let self, path == "play" else { return }
+                // The play answer's chance events go to Digia only (ADR 0002);
+                // the skin already got the body unchanged.
+                self.sdk.events.forwardChanceEvents(
+                    chanceEventsOfAnswer(response, campaignKey: campaignKey),
+                    payload: Self.payload(settle: settle, campaign: campaign))
+                if case .presentation(let presentationPayload, let entry) = settle,
+                   entry == .direct || entry == .unknown, !playClicked
+                {
+                    playClicked = true
+                    self.sdk.events.clicked(payload: presentationPayload, elementId: "play")
+                }
             },
             onForeground: { stats.setForeground($0) },
             payload: payload,

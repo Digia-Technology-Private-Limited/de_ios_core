@@ -26,13 +26,15 @@ struct GrantedChance: Equatable, Sendable {
     let chanceId: String
     let expiresAt: String?
     let show: Bool
+    /// Chance events the grant answer carried, for Digia analytics only (ADR 0002).
+    var events: [ChanceAnalyticsEvent] = []
 }
 
 enum GrantChanceResult: Equatable, Sendable {
     case granted(GrantedChance)
     /// Held-out and denied chances alike: nothing visible. `reason` is the
     /// server's `denyReason`, opaque, for logs only.
-    case denied(reason: String?)
+    case denied(reason: String?, events: [ChanceAnalyticsEvent] = [])
     case failure(GameOutcomeError)
 }
 
@@ -149,6 +151,7 @@ final class HttpGameOutcomeSource: GameOutcomeSource, Sendable {
                 log.e("grantChance unreadable — missing granted flag")
                 return .failure(.invalidResponse("missing granted flag"))
             }
+            let events = chanceEventsOf(response["events"], campaignKey: request.campaignKey)
             if granted {
                 guard let chanceId = response.nonBlankString("chanceId") else {
                     log.e("grantChance unreadable — granted without a chanceId")
@@ -158,10 +161,11 @@ final class HttpGameOutcomeSource: GameOutcomeSource, Sendable {
                     GrantedChance(
                         chanceId: chanceId,
                         expiresAt: response["expiresAt"] as? String,
-                        show: Self.bool(response["show"]) ?? false
+                        show: Self.bool(response["show"]) ?? false,
+                        events: events
                     ))
             }
-            return .denied(reason: response["denyReason"] as? String)
+            return .denied(reason: response["denyReason"] as? String, events: events)
         }
     }
 

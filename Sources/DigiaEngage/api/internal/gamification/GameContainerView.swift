@@ -30,23 +30,24 @@ struct GameContainerView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            ZStack {
-                GameWebViewHost(game: game)
-                    .frame(width: geometry.size.width, height: geometry.size.height)
-                HStack(spacing: 0) {
-                    if game.request.showMute {
-                        GameMuteButton(muted: game.isMuted) { game.toggleMute() }
+            // The controls overlay the full-size web view, so their padding
+            // can never grow the layout. They used to sit in a ZStack with
+            // the padding outside a full-size frame: the ZStack grew by the
+            // padding and the outer frame re-centred it, shifting the
+            // controls by half the inset — and the 6pt hit-box margin around
+            // each circle was never subtracted.
+            GameWebViewHost(game: game)
+                .frame(width: geometry.size.width, height: geometry.size.height)
+                .overlay(alignment: .topTrailing) {
+                    HStack(spacing: GameChrome.gap - 2 * GameChrome.hitInset) {
+                        if game.request.showMute {
+                            GameMuteButton(muted: game.isMuted) { game.toggleMute() }
+                        }
+                        GameCloseButton { GamePresenter.dismiss() }
                     }
-                    GameCloseButton { GamePresenter.dismiss() }
+                    .padding(.top, safeAreaInsets.top + GameChrome.top - GameChrome.hitInset)
+                    .padding(.trailing, safeAreaInsets.right + GameChrome.trailing - GameChrome.hitInset)
                 }
-                    .frame(
-                        width: geometry.size.width, height: geometry.size.height,
-                        alignment: .topTrailing
-                    )
-                    .padding(.top, safeAreaInsets.top + 8)
-                    .padding(.trailing, safeAreaInsets.right + 8)
-            }
-            .frame(width: geometry.size.width, height: geometry.size.height)
             .contentShape(Rectangle())
             .onTapGesture {}
             .opacity(visible ? 1 : 0)
@@ -80,6 +81,20 @@ struct GameContainerView: View {
     }
 }
 
+/// The fixed close/mute geometry, not configurable: each control is a
+/// `circle` inside a `hitBox`, the close circle sits `top` below the top safe
+/// inset and `trailing` in from the right one, and the mute circle sits `gap`
+/// to its left.
+enum GameChrome {
+    static let circle: CGFloat = 36
+    static let hitBox: CGFloat = 48
+    static let top: CGFloat = 8
+    static let trailing: CGFloat = 12
+    static let gap: CGFloat = 8
+    /// The hit box's margin around the circle on each side.
+    static let hitInset: CGFloat = (hitBox - circle) / 2
+}
+
 /// The native sound toggle, left of the close button; same geometry.
 private struct GameMuteButton: View {
     let muted: Bool
@@ -88,12 +103,12 @@ private struct GameMuteButton: View {
     var body: some View {
         Button(action: action) {
             ZStack {
-                Circle().fill(Color.black.opacity(0.6)).frame(width: 36, height: 36)
+                Circle().fill(Color.black.opacity(0.6)).frame(width: GameChrome.circle, height: GameChrome.circle)
                 Image(systemName: muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(.white)
             }
-            .frame(width: 48, height: 48)
+            .frame(width: GameChrome.hitBox, height: GameChrome.hitBox)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -109,10 +124,10 @@ private struct GameCloseButton: View {
     var body: some View {
         Button(action: action) {
             ZStack {
-                Circle().fill(Color.black.opacity(0.6)).frame(width: 36, height: 36)
+                Circle().fill(Color.black.opacity(0.6)).frame(width: GameChrome.circle, height: GameChrome.circle)
                 CanvasCloseIcon(size: 18).foregroundColor(.white)
             }
-            .frame(width: 48, height: 48)
+            .frame(width: GameChrome.hitBox, height: GameChrome.hitBox)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
