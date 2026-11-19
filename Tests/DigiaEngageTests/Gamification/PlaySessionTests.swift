@@ -71,6 +71,60 @@ struct PlaySessionTests {
         #expect(source.grantCalls == 0)
     }
 
+    /// Holds the first grant open until the test releases it; later grants
+    /// answer at once. The lock guards state shared with the source's executor.
+    private final class GatedSource: GameOutcomeSource, @unchecked Sendable {
+        private let lock = NSLock()
+        private var calls = 0
+        private var pending: CheckedContinuation<GrantChanceResult, Never>?
+
+        var grantCalls: Int { lock.withLock { calls } }
+        var isHolding: Bool { lock.withLock { pending != nil } }
+
+        func grantChance(_ request: GrantChanceRequest) async -> GrantChanceResult {
+            let first = lock.withLock { calls += 1; return calls == 1 }
+            guard first else { return .granted(GrantedChance(chanceId: "ch-3", expiresAt: nil, show: true)) }
+            return await withCheckedContinuation { cont in lock.withLock { pending = cont } }
+        }
+
+        func release(_ result: GrantChanceResult) {
+            let cont = lock.withLock { () -> CheckedContinuation<GrantChanceResult, Never>? in
+                defer { pending = nil }
+                return pending
+            }
+            cont?.resume(returning: result)
+        }
+
+        func state(campaignKey: String, testInvocationId: String?) async -> ChanceStateResult { .none }
+
+        func getRewards() async -> Result<GameRewardsResponse, GameOutcomeError> {
+            .failure(.transport("unused"))
+        }
+    }
+
+    // Guards the `directInFlight` check: two direct triggers for different
+    // campaigns must not both ask while the first grant is in flight, and the
+    // guard is released afterwards (its reset in `defer`).
+    @Test("a second direct trigger fails busy while the first grant is in flight")
+    func directInFlight() async {
+        let source = GatedSource()
+        let session = PlaySession(source: source, identity: { PlaySessionTests.identity })
+        func direct(_ key: String) -> PlayRequest {
+            PlayRequest(campaignKey: key, triggerId: "t-\(key)", testInvocationId: nil, direct: true, isGameBusy: { false })
+        }
+
+        let first = Task { await session.request(direct("spin")) }
+        for _ in 0..<1000 where !source.isHolding { await Task.yield() }
+        let second = await session.request(direct("scratch"))
+        source.release(.granted(GrantedChance(chanceId: "ch-1", expiresAt: nil, show: true)))
+        _ = await first.value
+        let third = await session.request(direct("chest"))
+
+        #expect(second == .drop(reason: PlayDropReason.busy, denyReason: nil))
+        #expect(third == .open(GrantedChance(chanceId: "ch-3", expiresAt: nil, show: true)))
+        #expect(source.grantCalls == 2)
+    }
+
     // Guards the blank-trigger early return: the SDK never invents a triggerId.
     @Test("a trigger without an id fails missing config without calling")
     func blankTrigger() async {

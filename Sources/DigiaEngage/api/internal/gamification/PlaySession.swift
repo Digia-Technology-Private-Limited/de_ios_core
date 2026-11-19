@@ -15,6 +15,10 @@ final class PlaySession {
     /// One request in flight per campaign: a second trigger for a campaign
     /// whose grant is still in flight drops `busy` at once.
     private var inFlightCampaigns = Set<String>()
+    /// Only one direct game can show, so only one direct grant runs at a time
+    /// across campaigns: two direct triggers would otherwise both spend a chance.
+    /// Matches Android's `PlaySession.directInFlight`.
+    private var directInFlight = false
 
     init(source: any GameOutcomeSource, identity: @escaping () -> PlayIdentity?) {
         self.source = source
@@ -27,11 +31,18 @@ final class PlaySession {
         if request.direct, request.isGameBusy() {
             return .drop(reason: PlayDropReason.busy, denyReason: nil)
         }
+        if request.direct, directInFlight {
+            return .drop(reason: PlayDropReason.busy, denyReason: nil)
+        }
         guard !inFlightCampaigns.contains(request.campaignKey) else {
             return .drop(reason: PlayDropReason.busy, denyReason: nil)
         }
         inFlightCampaigns.insert(request.campaignKey)
-        defer { inFlightCampaigns.remove(request.campaignKey) }
+        if request.direct { directInFlight = true }
+        defer {
+            inFlightCampaigns.remove(request.campaignKey)
+            if request.direct { directInFlight = false }
+        }
         // The identity is read once: the check and the grant below see the same user.
         guard let identity = identity(),
               !identity.userId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -169,7 +180,7 @@ enum PlayDropReason {
     static let denied = "denied"
     /// A direct trigger granted without `show`: the game does not open.
     static let notShown = "not_shown"
-    /// A game is showing, or another request for the campaign is in flight.
+    /// A game is showing, another request for the campaign is in flight, or (direct) another direct grant is in flight.
     static let busy = "busy"
     /// Blank trigger id, or no identity / blank user id.
     static let missingConfig = "missing_config"
