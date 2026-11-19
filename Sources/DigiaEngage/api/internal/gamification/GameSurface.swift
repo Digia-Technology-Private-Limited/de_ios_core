@@ -226,18 +226,6 @@ final class GameSurface {
         }
     }
 
-    /// A skin CTA op ran: the funnel Clicked to Digia only, like Android's
-    /// `onCta`. The only CEP click is the entry tap: never a play or a CTA.
-    private func cta(op: String, chanceId: String, settle: GameSettle, campaign: CampaignModel) {
-        switch settle {
-        case .presentation(let payload, _):
-            sdk.events.toDigia(GameEvent.Clicked(elementId: op, chanceId: chanceId), payload: payload)
-        case .rewards(let rewardsChanceId):
-            let payload = Self.rewardsPayload(chanceId: rewardsChanceId, campaign: campaign)
-            sdk.events.toDigia(GameEvent.Clicked(elementId: op, chanceId: chanceId), payload: payload)
-        }
-    }
-
     /// Settles a direct game that did not open with the real reason so the
     /// CEP, the timeline and the live-test report see why. A presentation
     /// that already displayed can only be dismissed.
@@ -318,6 +306,10 @@ final class GameSurface {
             campaignKey: campaign.campaignKey, cepMetadata: [:], variables: nil)
     }
 
+    /// `element_id` of the Clicked for a window's first `/play`, and for every later one.
+    static let clickPlay = "play"
+    static let clickPlayAgain = "play_again"
+
     /// The one `GameOpenRequest` builder: shared by entries, direct opens and
     /// rewards chances. Only the settle closures differ. The funnel counts a
     /// shown game: `shown` arms the failure Dismissed, so a game that never
@@ -339,7 +331,7 @@ final class GameSurface {
         var shown = false
         // What this window did, for `Dismissed`: one per open, so play again
         // and play next keep counting into the same window.
-        let stats = GameWindowStats(openChanceId: chanceId)
+        let stats = GameWindowStats(chanceId: chanceId)
         let dismissed: (String) -> GameEvent.Dismissed = { reason in
             GameEvent.Dismissed(
                 reason: reason, dwellMs: stats.dwellMs(), chanceId: stats.chanceId,
@@ -398,9 +390,8 @@ final class GameSurface {
                     self.settleDirectFailure(payload: payload, reason: failure.wireValue)
                 }
             },
-            onCta: { [weak self] op in
-                self?.cta(op: op, chanceId: stats.chanceId, settle: settle, campaign: campaign)
-            },
+            // A result action is not a click: Clicked counts plays only.
+            onCta: { _ in },
             onShown: { [weak self] in
                 // A re-sent `ready` counts the impression once.
                 guard !shown else { return }
@@ -409,13 +400,23 @@ final class GameSurface {
                 self?.shown(settle: settle, campaign: campaign, viewed: viewed)
             },
             onHttpAnswer: { [weak self] path, request, response in
-                stats.recordHttp(path: path, request: request, response: response)
+                stats.recordHttp(path: path, response: response)
                 guard let self, path == "play" else { return }
-                // The play answer's chance events go to Digia only (ADR 0002);
-                // the skin already got the body unchanged.
-                self.sdk.events.forwardChanceEvents(
-                    chanceEventsOfAnswer(response, campaignKey: campaignKey),
-                    payload: Self.payload(settle: settle, campaign: campaign))
+                let payload = Self.payload(settle: settle, campaign: campaign)
+                // Every `/play` is a Digia click: `play` first, `play_again` after.
+                // Not a CEP click: the CEP hears only Impressed and Dismissed for a game.
+                let playNumber = stats.nextPlayNumber()
+                let elementId = playNumber == 1 ? Self.clickPlay : Self.clickPlayAgain
+                self.sdk.events.toDigia(
+                    GameEvent.Clicked(elementId: elementId, chanceId: stats.chanceId),
+                    payload: payload)
+                // Game Played (and an extra play's Chance Granted) from the answer's
+                // facts, to Digia only, never for a test invocation.
+                if openTestInvocationId == nil {
+                    self.sdk.events.forwardChanceEvents(
+                        playEventsOf(request: request, envelope: response, playNumber: playNumber),
+                        payload: payload)
+                }
             },
             onForeground: { stats.setForeground($0) },
             payload: payload,

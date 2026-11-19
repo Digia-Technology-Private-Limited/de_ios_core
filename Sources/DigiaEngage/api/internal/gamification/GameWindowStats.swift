@@ -1,14 +1,17 @@
 import Foundation
 
-/// What one open game window did, for its Dismissed event: the latest chance
-/// played or peeked, how many plays landed an outcome, the latest refusal, and
-/// how long the game was visible in the foreground after it showed. Fed from
+/// What one open game window did, for its analytics: the chance it opened with,
+/// how many `/play` requests the skin sent (for `play` vs `play_again`), how many
+/// plays landed an outcome, the latest refusal, and how long the game was visible
+/// in the foreground after it showed. Fed from
 /// the bridge's `http` answers and app foreground changes. Mirrors Android's
 /// `GameWindowStats`.
 final class GameWindowStats: @unchecked Sendable {
     private let lock = NSLock()
     private let clock: () -> Int64
-    private var lastChanceId: String
+    /// The chance the window opened with; play again and play next do not move it.
+    let chanceId: String
+    private var playRequests = 0
     private var playCount = 0
     private var lastRefused = ""
     private var started = false
@@ -16,23 +19,29 @@ final class GameWindowStats: @unchecked Sendable {
     private var visibleSinceMs: Int64 = 0
     private var dwellTotalMs: Int64 = 0
 
-    init(openChanceId: String, clock: @escaping () -> Int64 = {
+    init(chanceId: String, clock: @escaping () -> Int64 = {
         Int64(ProcessInfo.processInfo.systemUptime * 1000)
     }) {
-        self.lastChanceId = openChanceId
+        self.chanceId = chanceId
         self.clock = clock
     }
 
-    var chanceId: String { lock.withLock { lastChanceId } }
     var plays: Int { lock.withLock { playCount } }
     var playRefused: String { lock.withLock { lastRefused } }
 
+    /// Counts one `/play` request and returns its 1-based number in this window.
+    func nextPlayNumber() -> Int {
+        lock.withLock {
+            playRequests += 1
+            return playRequests
+        }
+    }
+
     /// One answered bridge `http` call. `response` is the http body
     /// (`{isSuccess, data:{response}}`); only `play` and `peek` count.
-    func recordHttp(path: String, request: [String: Any]?, response: Any?) {
+    func recordHttp(path: String, response: Any?) {
         guard path == "play" || path == "peek" else { return }
         lock.withLock {
-            if let id = request?["chanceId"] as? String, !id.isEmpty { lastChanceId = id }
             guard let body = response as? [String: Any],
                   let data = body["data"] as? [String: Any],
                   let answer = data["response"] as? [String: Any] else { return }

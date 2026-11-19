@@ -135,17 +135,13 @@ final class AnalyticsService {
             campaign: payload.campaignKey
         )
 
-        // A server-built chance event keeps the server's id, time and campaign id.
-        let chance = event as? ChanceAnalyticsEvent
         enqueue(
             eventName: event.eventName,
-            campaignId: chance?.campaignId ?? campaignId,
+            campaignId: campaignId,
             campaignKey: payload.campaignKey,
             campaignType: campaignType,
             impressionId: impressionId,
-            properties: event.properties,
-            serverEventId: chance?.eventId,
-            serverOccurredAt: chance?.occurredAt
+            properties: event.properties
         )
     }
 
@@ -239,11 +235,9 @@ final class AnalyticsService {
         campaignType: String?,
         impressionId: String? = nil,
         properties: [String: Any] = [:],
-        isAppEvent: Bool = false,
-        serverEventId: String? = nil,
-        serverOccurredAt: String? = nil
+        isAppEvent: Bool = false
     ) -> Int {
-        let eventId = serverEventId ?? UUID().uuidString
+        let eventId = UUID().uuidString
         sessionManager.touch()
 
         let copiedStatic = Self.deepCopyMap(staticContext)
@@ -254,7 +248,7 @@ final class AnalyticsService {
         var payloadMap: [String: Any] = [
             "event_id": eventId,
             "event_name": eventName,
-            "occurred_at": serverOccurredAt ?? isoNow(),
+            "occurred_at": isoNow(),
             "anonymous_id": identityManager.deviceId,
             "session_id": sessionManager.sessionId,
         ]

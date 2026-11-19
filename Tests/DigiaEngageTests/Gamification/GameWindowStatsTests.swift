@@ -10,7 +10,7 @@ struct GameWindowStatsTests {
 
     @Test func dwellCountsOnlyForegroundTimeAfterTheGameShowed() {
         let clock = Clock()
-        let stats = GameWindowStats(openChanceId: "open-chance") { clock.now }
+        let stats = GameWindowStats(chanceId: "open-chance") { clock.now }
         clock.now = 100
         stats.setForeground(false) // backgrounded while loading: nothing counted yet
         stats.start()
@@ -25,16 +25,15 @@ struct GameWindowStatsTests {
         #expect(stats.dwellMs() == 1_250)
     }
 
-    @Test func playsCountOutcomesRefusalAndChanceFollowTheLatestPlayOrPeek() {
-        let stats = GameWindowStats(openChanceId: "open-chance") { 0 }
-        stats.recordHttp(path: "play", request: ["chanceId": "c1"], response: answer(["outcomeKey": "win"]))
-        stats.recordHttp(path: "peek", request: ["chanceId": "c2"], response: answer(["outcomeKey": "win", "refused": "exhausted"]))
-        stats.recordHttp(path: "play", request: ["chanceId": "c2"], response: answer(["refused": "cooldown"]))
-        stats.recordHttp(path: "claim", request: ["chanceId": "other"], response: answer(["outcomeKey": "x"]))
-        stats.recordHttp(path: "play", request: ["chanceId": "c3"], response: answer(["outcomeKey": "lose"]))
+    @Test func playsCountOutcomesAndRefusalFollowsTheLatestPlayOrPeek() {
+        let stats = GameWindowStats(chanceId: "open-chance") { 0 }
+        stats.recordHttp(path: "play", response: answer(["outcomeKey": "win"]))
+        stats.recordHttp(path: "peek", response: answer(["outcomeKey": "win", "refused": "exhausted"]))
+        stats.recordHttp(path: "play", response: answer(["refused": "cooldown"]))
+        stats.recordHttp(path: "claim", response: answer(["outcomeKey": "x"]))
+        stats.recordHttp(path: "play", response: answer(["outcomeKey": "lose"]))
 
         #expect(stats.plays == 2)
         #expect(stats.playRefused == "cooldown")
-        #expect(stats.chanceId == "c3")
     }
 }

@@ -150,8 +150,8 @@ enum PlayDecision: Equatable, Sendable {
     case open(GrantedChance)
     /// Anything else: log, report the live test, emit `game_open_failed`,
     /// and settle the presentation as dropped. `events` are the chance events
-    /// a granted-but-not-shown or denied answer carried (ADR 0002).
-    case drop(reason: String, denyReason: String?, events: [ChanceAnalyticsEvent] = [])
+    /// a granted-but-not-shown or denied answer's facts call for.
+    case drop(reason: String, denyReason: String?, events: [ChanceEvent] = [])
 }
 
 /// What a tap on a shown entry decided. No network call.

@@ -3,16 +3,15 @@ import Testing
 
 @testable import DigiaEngage
 
-/// Chance events the server returns go to Digia analytics only, never the CEP,
-/// a play or a CTA never marks a CEP click, and every game close reaches the CEP. Each test names
-/// the production line it guards. Mirrors Android's `GameChanceEventsAndCepTest`.
+/// The SDK builds a game's chance events from the server's answer facts (the
+/// server sends no events) and sends them to Digia analytics only. A test
+/// invocation reports none. Every `/play` is a Digia-only Clicked (`play`, then
+/// `play_again`); a CTA is not a click; every direct game close reaches the CEP.
+/// Each test names the production line it guards. Mirrors Android's
+/// `GameChanceEventsAndCepTest`.
 @MainActor
 @Suite("Game chance events and CEP", .tags(.unit, .gamification))
 struct GameChanceEventsAndCepTests {
-    private static func chanceEvent(_ eventId: String) -> String {
-        #"{"name":"Chance Granted","eventId":"\#(eventId)","occurredAt":"2026-11-19T10:00:00Z","campaignId":"camp-uid-1","properties":{"chanceId":"ch-1","count":2}}"#
-    }
-
     /// An initialized SDK and a presentation opened on its own coordinator,
     /// recorded so every CEP mark it receives can be read back.
     private func rig() async throws -> (SDKInstance, PresentationRecorder) {
@@ -54,81 +53,159 @@ struct GameChanceEventsAndCepTests {
             userId: "u_123", settle: .presentation(payload: recorder.payload, entry: entry))
     }
 
-    // Guards `chanceEventsOf(response["events"], ...)` in `HttpGameOutcomeSource.grantChance`
-    // and the `toDigia`-only body of `forwardChanceEvents`.
-    @Test("chance events from grantChance go to Digia only")
-    func chanceEventsFromGrantGoToDigiaOnly() async throws {
+    private static func envelope(_ response: [String: Any]) -> [String: Any] {
+        ["isSuccess": true, "data": ["response": response]]
+    }
+
+    private static func props(_ event: [String: Any]) -> [String: Any] {
+        event["properties"] as? [String: Any] ?? [:]
+    }
+
+    private static let grantAnswer: [String: Any] = [
+        "granted": true, "chanceId": "ch-1", "expiresAt": "2026-11-20T00:00:00Z", "show": true,
+        "campaignId": "camp-uid-1", "holdout": ["group": "shown", "period": 3], "isNew": true,
+    ]
+
+    // Fails if a grant answer's facts stop becoming events: the
+    // `events: grantEventsOf(...)` line in `HttpGameOutcomeSource.grantChance`, or
+    // the `granted, isNew` gate in `grantEventsOf` (the repeat-answer case).
+    @Test("a fresh grant reports Assigned and Granted to Digia only; a repeat and a test do not")
+    func freshGrantReportsAssignedAndGrantedToDigiaOnly_repeatAndTestDoNot() async throws {
         let (sdk, recorder) = try await rig()
         let client = MockNetworkClient()
-        client.enqueueResponse(
-            statusCode: 200,
-            body: #"{"isSuccess":true,"data":{"response":{"granted":true,"chanceId":"ch-1","show":true,"events":["#
-                + Self.chanceEvent("evt-1") + #",{"name":"Broken"},"not an object"]}}}"#)
+        let body = try JSONSerialization.data(withJSONObject: Self.envelope(Self.grantAnswer))
+        client.enqueueResponse(statusCode: 200, body: String(decoding: body, as: UTF8.self))
         let session = PlaySession(
             source: HttpGameOutcomeSource(networkClient: client),
             identity: { PlayIdentity(userId: "u_123", userHash: nil, deviceId: nil) })
 
         let decision = await session.request(PlayRequest(
-            campaignKey: "bill_pay_spin", triggerId: "cep-1", testInvocationId: nil,
+            campaignKey: "bill_pay_spin", triggerId: "msg-9", testInvocationId: nil,
             direct: true, isGameBusy: { false }))
         guard case .open = decision else {
             Issue.record("expected .open, got \(decision)")
             return
         }
+        #expect(decision.chanceEvents == [
+            .assigned(GamificationAssigned(group: "shown", period: .int(3))),
+            .granted(ChanceGranted(
+                chanceId: "ch-1", source: ChanceGranted.sourceTrigger, expiresAt: "2026-11-20T00:00:00Z")),
+        ])
         sdk.events.forwardChanceEvents(decision.chanceEvents, payload: recorder.payload)
 
-        let granted = named("Chance Granted", in: try await digiaEvents(sdk))
-        #expect(granted.count == 1)
-        let event = try #require(granted.first)
-        #expect(event["event_id"] as? String == "evt-1")
-        #expect(event["occurred_at"] as? String == "2026-11-19T10:00:00Z")
-        #expect(event["campaign_id"] as? String == "camp-uid-1")
-        #expect((event["properties"] as? [String: Any])?["chanceId"] as? String == "ch-1")
+        let events = try await digiaEvents(sdk)
+        #expect(named("Digia Gamification Assigned", in: events).count == 1)
+        let granted = try #require(named("Digia Chance Granted", in: events).first)
+        #expect(Self.props(granted)["source"] as? String == "trigger")
+        #expect(recorder.signals.isEmpty)
+
+        // The same chance answered again (no `isNew`) is not a new grant.
+        var repeatAnswer = Self.grantAnswer
+        repeatAnswer.removeValue(forKey: "isNew")
+        #expect(grantEventsOf(repeatAnswer, granted: true, chanceId: "ch-1", testInvocationId: nil)
+            == [.assigned(GamificationAssigned(group: "shown", period: .int(3)))])
+        // A live test reports nothing at all.
+        #expect(grantEventsOf(Self.grantAnswer, granted: true, chanceId: "ch-1", testInvocationId: "inv-1").isEmpty)
+    }
+
+    // Fails if the Denied gate loosens or tightens: the
+    // `!granted, isNew, denyReason, campaignId` condition in `grantEventsOf`.
+    @Test("Denied needs a fresh answer for a known campaign")
+    func deniedNeedsAFreshAnswerForAKnownCampaign() {
+        let denied: [String: Any] = [
+            "granted": false, "show": false, "denyReason": "capReached", "cap": "day",
+            "campaignId": "camp-uid-1", "isNew": true,
+        ]
+
+        #expect(grantEventsOf(denied, granted: false, chanceId: nil, testInvocationId: nil)
+            == [.denied(ChanceDenied(reason: "capReached", cap: "day"))])
+        var repeatAnswer = denied
+        repeatAnswer.removeValue(forKey: "isNew")
+        #expect(grantEventsOf(repeatAnswer, granted: false, chanceId: nil, testInvocationId: nil).isEmpty)
+        var noCampaign = denied
+        noCampaign.removeValue(forKey: "campaignId")
+        #expect(grantEventsOf(noCampaign, granted: false, chanceId: nil, testInvocationId: nil).isEmpty)
+    }
+
+    // Fails if plays stop being numbered per window or reported from the answer:
+    // the `stats.nextPlayNumber()` / `forwardChanceEvents(playEventsOf(...))` lines in
+    // `makeGameOpenRequest`'s `onHttpAnswer`, the `isNew` gate in `playEventsOf`, or
+    // the `playNumber == 1` click choice.
+    @Test("plays report Clicked and Played per answer, to Digia only")
+    func playsReportClickedAndPlayedPerAnswer_toDigiaOnly() async throws {
+        let (sdk, recorder) = try await rig()
+        let first = Self.envelope([
+            "outcomeKey": "slot-2", "kind": "reward", "rewardId": "rw-1",
+            "grant": ["grantId": "g-1", "value": ["amountMinor": 5000, "currency": "INR"]],
+            "extraChance": ["chanceId": "ch-2", "expiresAt": "2026-11-21T00:00:00Z"],
+            "isNew": true,
+        ])
+        let second = Self.envelope(["outcomeKey": "slot-0", "kind": "none", "fallback": true, "isNew": true])
+        // A replayed answer for a play already made: clicked, but not a new play.
+        let replay = Self.envelope(["outcomeKey": "slot-0", "kind": "none"])
+        let request = try directOpenRequest(sdk, recorder: recorder)
+
+        for answer in [first, second, replay] {
+            request.onHttpAnswer?("play", ["chanceId": "ch-1"], answer)
+        }
+
+        let reported = try await digiaEvents(sdk).filter {
+            ["Digia Experience Clicked", "Digia Game Played", "Digia Chance Granted"]
+                .contains($0["event_name"] as? String)
+        }
+        let summary = reported.map { event -> String in
+            let p = Self.props(event)
+            switch event["event_name"] as? String {
+            case "Digia Experience Clicked":
+                return "Clicked \(p["element_id"] as? String ?? "-") \(p["chance_id"] as? String ?? "-")"
+            case "Digia Game Played":
+                return "Played #\((p["play_number"] as? NSNumber)?.intValue ?? 0) \(p["outcome_key"] as? String ?? "-")"
+                    + " replay=\(p["is_replay"] as? Bool ?? false) fallback=\(p["fallback"] as? Bool ?? false)"
+            default:
+                return "Granted \(p["chance_id"] as? String ?? "-") \(p["source"] as? String ?? "-")"
+            }
+        }
+        #expect(summary == [
+            "Clicked play ch-1",
+            "Played #1 slot-2 replay=false fallback=false",
+            "Granted ch-2 extraPlay",
+            "Clicked play_again ch-1",
+            "Played #2 slot-0 replay=true fallback=true",
+            "Clicked play_again ch-1",
+        ])
+        let played = Self.props(try #require(named("Digia Game Played", in: reported).first))
+        #expect(played["grant_id"] as? String == "g-1")
+        #expect((played["value_minor"] as? NSNumber)?.intValue == 5000)
+        #expect(played["currency"] as? String == "INR")
+        #expect(recorder.clickedElementIds.isEmpty)
         #expect(recorder.signals.isEmpty)
     }
 
-    // Guards the `forwardChanceEvents(chanceEventsOfAnswer(response, ...))` line in
-    // `makeGameOpenRequest`'s `onHttpAnswer`.
-    @Test("play answer events go to Digia only and the body reaches the skin unchanged")
-    func playAnswerEventsGoToDigiaOnlyAndBodyReachesSkinUnchanged() async throws {
-        let (sdk, recorder) = try await rig()
-        let client = MockNetworkClient()
-        client.enqueueResponse(
-            statusCode: 200,
-            body: #"{"isSuccess":true,"data":{"response":{"outcome":{"slot":2},"events":["#
-                + Self.chanceEvent("evt-2") + "]}}}")
-
-        let result = await GameHttpBridge.send(
-            client: client, baseUrl: "https://app.digia.tech", headers: [:],
-            method: "POST", path: "play", body: GameHttpBridge.jsonData(["chanceId": "ch-1"]))
-        guard case .success(let success) = result else {
-            Issue.record("expected an answered play, got \(result)")
-            return
-        }
-        let response = (success.body?["data"] as? [String: Any])?["response"] as? [String: Any]
-        #expect((response?["outcome"] as? [String: Any])?["slot"] as? Int == 2)
-        #expect(((response?["events"] as? [Any])?.first as? [String: Any])?["eventId"] as? String == "evt-2")
-
-        try directOpenRequest(sdk, recorder: recorder).onHttpAnswer?("play", nil, success.body)
-
-        let granted = named("Chance Granted", in: try await digiaEvents(sdk))
-        #expect(granted.map { $0["event_id"] as? String } == ["evt-2"])
-        #expect(recorder.clickedElementIds.isEmpty)
-    }
-
-    // Guards the removed play click in `onHttpAnswer`, and the CTA path's removed CEP click.
-    @Test("a play or a CTA never marks a CEP click")
-    func playAndCtaNeverMarkCepClick() async throws {
+    // Fails if a window double-counts or a CTA clicks again: the `guard !shown`
+    // in `onShown` and `onCta: { _ in }` in `makeGameOpenRequest`, or the
+    // `play_refused` omission in `GameEvent.Dismissed.properties`.
+    @Test("a window reports one Viewed and one Dismissed on the open chance")
+    func windowReportsOneViewedAndOneDismissedOnTheOpenChance() async throws {
         let (sdk, recorder) = try await rig()
         let request = try directOpenRequest(sdk, recorder: recorder)
 
-        request.onHttpAnswer?("play", nil, nil)
-        request.onHttpAnswer?("play", nil, nil)
+        request.onShown?()
+        request.onShown?() // a recreated host re-runs the ready handshake
+        request.onHttpAnswer?("play", ["chanceId": "ch-1"], Self.envelope(["outcomeKey": "slot-1"]))
         request.onCta?("copy")
+        request.onClose?("skin")
 
-        #expect(recorder.clickedElementIds.isEmpty)
-        let clicked = named("Digia Experience Clicked", in: try await digiaEvents(sdk))
-        #expect(clicked.map { ($0["properties"] as? [String: Any])?["element_id"] as? String } == ["copy"])
+        let events = try await digiaEvents(sdk)
+        #expect(named("Digia Experience Viewed", in: events).count == 1)
+        #expect(named("Digia Experience Clicked", in: events).map {
+            [Self.props($0)["element_id"] as? String, Self.props($0)["chance_id"] as? String]
+        } == [["play", "ch-1"]])
+        let dismissed = named("Digia Experience Dismissed", in: events)
+        #expect(dismissed.count == 1)
+        let props = Self.props(try #require(dismissed.first))
+        #expect(props["chance_id"] as? String == "ch-1")
+        #expect((props["plays"] as? NSNumber)?.intValue == 1)
+        #expect(props["play_refused"] == nil)
     }
 
     // Guards the direct-only check around `coordinator.handle(.dismissed(...))`

@@ -1,38 +1,79 @@
 import Foundation
 
-/// The SDK's one logging style — see ``DigiaLogger``.
-private let log = DigiaLogger()
-
-/// The `events` the gamification server returns in an answer's `data.response`
-/// (the `grantChance` answer, or the body of a proxied `http` `play` answer).
-/// ADR 0002.
+/// The chance events a `grantChance` answer's facts call for. The server no longer
+/// sends events; it says what happened and the SDK reports it:
+/// - `Gamification Assigned` iff the answer carries `holdout`;
+/// - `Chance Granted` (source `trigger`) iff granted and `isNew`;
+/// - `Chance Denied` iff denied with a `denyReason`, `isNew` and a `campaignId`.
 ///
-/// Never throws. A missing or non-array value is no events; an item without a
-/// non-blank `name`, `eventId`, `occurredAt` and `campaignId` is skipped and
-/// logged. Unknown fields are ignored, and a property keeps only a string,
-/// number or boolean value; a null is dropped, as on Android.
-func chanceEventsOf(_ raw: Any?, campaignKey: String? = nil) -> [ChanceAnalyticsEvent] {
-    guard let items = raw as? [Any] else { return [] }
-    var out: [ChanceAnalyticsEvent] = []
-    for (index, item) in items.enumerated() {
-        guard let event = (item as? [String: Any]).flatMap(chanceEventOrNil) else {
-            log.w("Gamification chance event ignored — malformed (index=\(index))", campaign: campaignKey)
-            continue
-        }
-        out.append(event)
+/// None for a test invocation. Never throws: a missing or mistyped fact is no
+/// event. Mirrors Android's `grantEventsOf`.
+func grantEventsOf(
+    _ answer: [String: Any],
+    granted: Bool,
+    chanceId: String?,
+    testInvocationId: String?
+) -> [ChanceEvent] {
+    if testInvocationId != nil { return [] }
+    let isNew = isTrue(answer["isNew"])
+    var out: [ChanceEvent] = []
+    if let holdout = answer["holdout"] as? [String: Any],
+       let group = text(holdout, "group"),
+       let period = ChanceNumber(holdout["period"])
+    {
+        out.append(.assigned(GamificationAssigned(group: group, period: period)))
+    }
+    if granted, isNew, let chanceId {
+        out.append(.granted(ChanceGranted(
+            chanceId: chanceId, source: ChanceGranted.sourceTrigger,
+            expiresAt: text(answer, "expiresAt"))))
+    }
+    if !granted, isNew, let denyReason = text(answer, "denyReason"),
+       text(answer, "campaignId") != nil
+    {
+        out.append(.denied(ChanceDenied(reason: denyReason, cap: text(answer, "cap"))))
     }
     return out
 }
 
-/// The events in a proxied `http` answer body (`{isSuccess, data: {response: {events}}}`).
-func chanceEventsOfAnswer(_ body: Any?, campaignKey: String? = nil) -> [ChanceAnalyticsEvent] {
-    let response = ((body as? [String: Any])?["data"] as? [String: Any])?["response"] as? [String: Any]
-    return chanceEventsOf(response?["events"], campaignKey: campaignKey)
+/// The chance events a proxied `play` answer's facts call for: `Game Played` iff
+/// the answer is `isNew` (the play it made, never a replay of an earlier answer),
+/// plus `Chance Granted` (source `extraPlay`) when it carries an `extraChance`.
+/// `request` is the skin's `/play` body (its `chanceId`); `envelope` is
+/// `{isSuccess, data: {response}}`. `playNumber` is this play's 1-based number in
+/// the window. The caller gates test invocations. Mirrors Android's `playEventsOf`.
+func playEventsOf(request: [String: Any]?, envelope: Any?, playNumber: Int) -> [ChanceEvent] {
+    guard let data = (envelope as? [String: Any])?["data"] as? [String: Any],
+          let answer = data["response"] as? [String: Any],
+          isTrue(answer["isNew"])
+    else { return [] }
+    let grant = answer["grant"] as? [String: Any]
+    let value = grant?["value"] as? [String: Any]
+    var out: [ChanceEvent] = [
+        .played(GamePlayed(
+            chanceId: request.flatMap { text($0, "chanceId") },
+            outcomeKey: text(answer, "outcomeKey"),
+            outcomeKind: text(answer, "kind"),
+            rewardId: text(answer, "rewardId"),
+            grantId: grant.flatMap { text($0, "grantId") },
+            valueMinor: ChanceNumber(value?["amountMinor"]),
+            currency: value.flatMap { text($0, "currency") },
+            fallback: isTrue(answer["fallback"]),
+            playNumber: playNumber)),
+    ]
+    if let extra = answer["extraChance"] as? [String: Any],
+       let chanceId = text(extra, "chanceId")
+    {
+        out.append(.granted(ChanceGranted(
+            chanceId: chanceId, source: ChanceGranted.sourceExtraPlay,
+            expiresAt: text(extra, "expiresAt"))))
+    }
+    return out
 }
 
 extension PlayDecision {
-    /// The events a grant answer carried, whatever the decision it led to.
-    var chanceEvents: [ChanceAnalyticsEvent] {
+    /// The chance events a grant answer led to, whatever the decision.
+    var chanceEvents: [ChanceEvent] {
         switch self {
         case .open(let chance), .showEntry(let chance): return chance.events
         case .drop(_, _, let events): return events
@@ -41,46 +82,23 @@ extension PlayDecision {
 }
 
 extension EngageEventEmitter {
-    /// Sends chance events to Digia analytics only — never the CEP (ADR 0002).
-    func forwardChanceEvents(_ events: [ChanceAnalyticsEvent], payload: CEPTriggerPayload) {
+    /// Sends chance events to Digia analytics only — never the CEP.
+    func forwardChanceEvents(_ events: [ChanceEvent], payload: CEPTriggerPayload) {
         for event in events { toDigia(event, payload: payload) }
     }
 }
 
-private func chanceEventOrNil(_ item: [String: Any]) -> ChanceAnalyticsEvent? {
-    func text(_ key: String) -> String? {
-        guard let value = item[key] as? String,
-              !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        else { return nil }
-        return value
-    }
-    guard let name = text("name"), let eventId = text("eventId"),
-          let occurredAt = text("occurredAt"), let campaignId = text("campaignId")
-    else { return nil }
-    return ChanceAnalyticsEvent(
-        eventName: name, eventId: eventId, occurredAt: occurredAt,
-        campaignId: campaignId, values: propertiesOf(item["properties"]))
+/// A JSON `true` only: JSONSerialization hands booleans as `NSNumber`, and a
+/// number 1 is not a boolean.
+private func isTrue(_ raw: Any?) -> Bool {
+    guard let n = raw as? NSNumber, CFGetTypeID(n) == CFBooleanGetTypeID() else { return false }
+    return n.boolValue
 }
 
-private func propertiesOf(_ raw: Any?) -> [String: ChanceAnalyticsEvent.Value] {
-    guard let json = raw as? [String: Any] else { return [:] }
-    var out: [String: ChanceAnalyticsEvent.Value] = [:]
-    for (key, value) in json {
-        switch value {
-        case let s as String:
-            out[key] = .string(s)
-        case let n as NSNumber:
-            // JSONSerialization hands booleans and numbers both as NSNumber.
-            if CFGetTypeID(n) == CFBooleanGetTypeID() {
-                out[key] = .bool(n.boolValue)
-            } else if CFNumberIsFloatType(n) {
-                out[key] = .double(n.doubleValue)
-            } else {
-                out[key] = .int(n.int64Value)
-            }
-        default:
-            continue
-        }
-    }
-    return out
+/// A string that is not blank, else nil.
+private func text(_ json: [String: Any], _ key: String) -> String? {
+    guard let value = json[key] as? String,
+          !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    else { return nil }
+    return value
 }

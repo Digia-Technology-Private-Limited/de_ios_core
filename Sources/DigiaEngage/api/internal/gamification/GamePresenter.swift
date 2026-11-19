@@ -186,7 +186,6 @@ final class GamePresentation: Identifiable, ObservableObject {
             runSkinAction(id: id, action: .copyToClipboard(text), op: "copy")
         case .actionOpenLink(let id, let op, let url):
             // The container closes first, then the host opens the link.
-            // Every CTA run counts one click, like Android's onCta.
             if let id { bridge.answer(id: id, payload: ["ok": true]) }
             request.onCta?(op)
             dismiss(reason: "cta")
@@ -247,8 +246,8 @@ final class GamePresentation: Identifiable, ObservableObject {
     /// Runs one skin `action` op through the same executor the canvas uses, so
     /// host handlers behave exactly as for any other campaign action. Answered
     /// only once the action has run — or not at all, when the skin sent no id
-    /// or the game closed mid-execution. A run counts one click, like
-    /// Android's `onCta` — including id-less runs, which still tapped.
+    /// or the game closed mid-execution. A run fires `onCta`, like Android's,
+    /// including id-less runs, which still tapped.
     private func runSkinAction(id: String?, action: EngageAction, op: String) {
         Task { @MainActor [weak self] in
             guard let self, self.bridge.state != .closed else { return }
