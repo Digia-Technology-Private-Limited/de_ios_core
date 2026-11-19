@@ -1,4 +1,5 @@
 import Testing
+import SwiftUI
 import UIKit
 @testable import DigiaEngage
 
@@ -95,6 +96,50 @@ struct DigiaHostViewTests {
         try await expectOverlayClaimsTouches(Overlay(
             fixture: "campaigns/survey/survey_stacked_cta.json",
             key: "test_survey_stacked_cta", shownText: "Option Alpha"))
+    }
+
+    // Fails if: `DigiaHostAttachment` stops observing the window's root. The host leaves with the old
+    // root on a swap, and nothing would put it in the new root until the next campaign is routed, so it
+    // would not be there right after the swap.
+    @Test("after the app replaces its root, the attached host moves to the new root and draws there")
+    func attachedHostFollowsARootSwap() async throws {
+        let sdk = try await SdkHarness.start(loadCampaign("campaigns/nudge_dialog/nudge_dialog.json"))
+        defer { sdk.tearDown() }
+        let window = makeWindow(root: AppScreen(), sdk)
+        Digia.attach(to: window)
+        ComponentTestHost.drainRunLoop(for: 0.3)
+
+        let newRoot = AppScreen()
+        window.rootViewController = newRoot
+        // Yield, not a nested run loop: the re-attach is queued on the main queue, which runs only
+        // between main-actor jobs.
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        #expect(newRoot.view.subviews.last is DigiaHostView)
+        #expect(newRoot.children.contains { $0 is UIHostingController<DigiaHost<EmptyView>> })
+        try sdk.deliver("test_nudge_dialog")
+        try await sdk.waitUntil("the dialog is on screen over the new root") { sdk.isShowing("Dialog Test Nudge") }
+    }
+
+    // Fails if: `DigiaHostAttachment.ensure()` stops ending what the swapped-out root was showing
+    // (`endCampaignsForHostTeardown`). The dialog would stay "displaying" after leaving the screen with
+    // the old root, holding the CEP's slot, and be drawn again in the new root.
+    @Test("a dialog on screen when the app replaces its root ends as cancelled, with host_teardown recorded")
+    func rootSwapEndsTheCampaignOnScreen() async throws {
+        let sdk = try await SdkHarness.start(loadCampaign("campaigns/nudge_dialog/nudge_dialog.json"))
+        defer { sdk.tearDown() }
+        let window = makeWindow(root: AppScreen(), sdk)
+        Digia.attach(to: window)
+        ComponentTestHost.drainRunLoop(for: 0.3)
+        let presentation = try sdk.deliver("test_nudge_dialog")
+        try await sdk.waitUntil("the dialog is on screen") { sdk.isShowing("Dialog Test Nudge") }
+
+        window.rootViewController = AppScreen()
+        try await sdk.waitUntil("the dialog has ended") { sdk.outcome(of: presentation) != nil }
+
+        #expect(sdk.outcome(of: presentation) == .dismissed(reason: .cancelled, completed: false))
+        #expect(!sdk.records("test_nudge_dialog", reason: TimelineReason.hostTeardown).isEmpty)
+        #expect(!sdk.isShowing("Dialog Test Nudge"))
     }
 
     private final class PortraitScreen: UIViewController {

@@ -123,7 +123,8 @@ extension UIView {
     }
 }
 
-private extension UIViewController {
+extension UIViewController {
+    /// Navigation, tab bar, split view and page view controllers: each treats any child as one of its screens.
     var managesItsChildren: Bool {
         self is UINavigationController || self is UITabBarController
             || self is UISplitViewController || self is UIPageViewController

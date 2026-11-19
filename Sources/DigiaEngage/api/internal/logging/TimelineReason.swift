@@ -174,6 +174,10 @@ enum TimelineReason: String, CaseIterable, DiagnosticReason {
     /// Campaign media could not load (4xx, invalid URL, or undecodable).
     case mediaLoadFailed = "media_load_failed"
 
+    /// The app replaced its window's root view controller, which took Digia's attached layer, and the
+    /// campaign drawn in it, off the screen. The campaign is ended.
+    case hostTeardown = "host_teardown"
+
     // MARK: interaction
 
     /// The user tapped it. Which element is in `extras`.

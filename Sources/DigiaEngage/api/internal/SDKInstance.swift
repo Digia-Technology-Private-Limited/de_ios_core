@@ -1393,6 +1393,38 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         isHostMounted = false
     }
 
+    /// The app replaced its window's root under the host `Digia.attach(to:)` added, so the host, and every
+    /// overlay it was drawing, left the screen with the old root. Ends those campaigns rather than leaving
+    /// them showing to nobody, as Flutter does on a host teardown: floaters as `host_teardown`, nudges,
+    /// surveys and guides cancelled. Inline slots live in the app's own screens and are not affected.
+    func endCampaignsForHostTeardown() {
+        let ended = surfaceOccupants().filter {
+            if case .inline = $0.kind { return false }
+            return true
+        }
+        guard !ended.isEmpty else { return }
+        for occupant in ended {
+            log.w(
+                "Ended — the app replaced its root view controller, which removed Digia's layer",
+                campaign: occupant.campaignKey,
+                stage: .render,
+                reason: TimelineReason.hostTeardown,
+                presentationId: occupant.presentationId
+            )
+        }
+        floaterOrchestrator.dismiss(.hostTeardown)
+        floaterStoryOrchestrator.dismiss(.hostTeardown)
+        for occupant in ended {
+            switch occupant.kind {
+            case .nudge, .survey, .guide:
+                guard let id = occupant.presentationId else { continue }
+                coordinator.controller(forPresentationId: id)?.presentation.cancel()
+            case .floaterExpanded, .floaterCollapsed, .inline:
+                continue
+            }
+        }
+    }
+
     /// Routes an organically delivered trigger and answers what happened to it.
     ///
     /// The verdict — not a boolean — is what a plugin holding a CEP slot needs:
@@ -1498,6 +1530,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         payload: CEPTriggerPayload,
         driver: CampaignDriver
     ) -> RoutingVerdict {
+        // `Digia.attach(to:)`: the app may have replaced its root since; put the host back before drawing.
+        DigiaHostAttachment.ensure()
         let router = CampaignRouter(
             occupants: { [unowned self] in surfaceOccupants() },
             supersede: { [unowned self] occupant, incoming, request in
