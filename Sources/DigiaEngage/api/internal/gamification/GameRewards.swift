@@ -254,6 +254,9 @@ struct GameRewardsResponse {
     let emptyMessage: String?
     /// `page.url`: where the hosted rewards page lives for this environment.
     var pageUrl: String? = nil
+    /// `page.appLinkDomains`: the app's own web link domains, each a hostname or
+    /// `*.domain`. Malformed entries are dropped later, at match time.
+    var appLinkDomains: [String] = []
 
     var isEmpty: Bool {
         chances.isEmpty && active.isEmpty && used.isEmpty
@@ -276,7 +279,9 @@ struct GameRewardsResponse {
             expiredChances: expired.objectArray("chances").compactMap(GameExpiredChance.fromJson),
             widget: raw.object("widget").map(GameRewardsWidget.fromJson),
             emptyMessage: raw.nonBlankString("emptyMessage"),
-            pageUrl: raw.object("page")?.nonBlankString("url")
+            pageUrl: raw.object("page")?.nonBlankString("url"),
+            appLinkDomains: (raw.object("page")?["appLinkDomains"] as? [Any])?
+                .compactMap { $0 as? String } ?? []
         )
     }
 

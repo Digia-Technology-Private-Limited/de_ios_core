@@ -309,7 +309,8 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
     }
 
     private func open(link raw: String) {
-        switch RewardsLinkRouter.route(raw) {
+        switch RewardsLinkRouter.route(
+            raw, appLinkHosts: Set(SDKInstance.shared.rewardsResponse?.appLinkDomains ?? [])) {
         case .refused:
             log.w("Rewards link refused")
         case .internal(let url):

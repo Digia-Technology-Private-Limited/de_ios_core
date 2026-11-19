@@ -46,6 +46,28 @@ struct RewardsPageTests {
         #expect(RewardsLinkRouter.route("http://shop.example.org") == .external(URL(string: "http://shop.example.org")!))
     }
 
+    @Test("app link domains match exact hosts and wildcards, case-insensitively")
+    func appLinkDomainMatching() {
+        func internalLink(_ raw: String, _ domains: Set<String>) -> Bool {
+            if case .internal = RewardsLinkRouter.route(raw, appSchemes: [], appLinkHosts: domains) { return true }
+            return false
+        }
+        #expect(internalLink("https://medihub.com/x", ["medihub.com"]))
+        #expect(internalLink("https://MediHub.COM/x", ["medihub.com"]))
+        #expect(internalLink("https://medihub.com/x", ["MEDIHUB.com"]))
+        #expect(!internalLink("https://www.medihub.com/x", ["medihub.com"]))
+        #expect(internalLink("https://www.medihub.com/x", ["*.medihub.com"]))
+        #expect(internalLink("https://a.b.medihub.com/x", ["*.medihub.com"]))
+        #expect(internalLink("https://medihub.com/x", ["*.medihub.com"]))
+        #expect(!internalLink("https://evilmedihub.com/x", ["*.medihub.com"]))
+        #expect(!internalLink("https://evilmedihub.com/x", ["medihub.com"]))
+        #expect(!internalLink("https://medihub.com.evil.com/x", ["*.medihub.com"]))
+        #expect(!internalLink("https://partner.com/x", ["*.medihub.com"]))
+        for bad in ["", "*", "*.", "https://medihub.com", "medihub.com/x", "medihub.com:8080", "med hub.com", "localhost"] {
+            #expect(!internalLink("https://medihub.com/x", [bad]), "\(bad)")
+        }
+    }
+
     // MARK: - Bridge
 
     private func page(_ object: [String: Any]) -> String {
@@ -181,5 +203,8 @@ struct RewardsPageTests {
         let raw: [String: Any] = ["page": ["url": "https://rewards.digia.tech"]]
         #expect(GameRewardsResponse.fromJson(raw).pageUrl == "https://rewards.digia.tech")
         #expect(GameRewardsResponse.fromJson([:]).pageUrl == nil)
+        #expect(GameRewardsResponse.fromJson([:]).appLinkDomains == [])
+        let withDomains: [String: Any] = ["page": ["appLinkDomains": ["medihub.com", 3, "*.medihub.com"]]]
+        #expect(GameRewardsResponse.fromJson(withDomains).appLinkDomains == ["medihub.com", "*.medihub.com"])
     }
 }
