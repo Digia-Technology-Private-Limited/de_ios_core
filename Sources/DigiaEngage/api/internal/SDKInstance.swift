@@ -1551,20 +1551,27 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             campaignId: { [unowned self] in campaignStore.find($0)?.id },
             reportMissing: { [unowned self] in reportMissingCampaignVariables($0.campaign, payload: $0.payload) },
             configCheck: { [unowned self] in checkGuideCanvasContent($0) },
-            hostUnavailable: { [unowned self] in attachedHostUnavailable($0) }
+            hostUnavailable: { [unowned self] in hostUnavailable($0) }
         )
         logVerbose("routeByCampaignKey key='\(campaign.campaignKey)' type='\(campaign.campaignType)'")
         return router.route(CampaignRequest(driver: driver, campaign: campaign, payload: payload))
     }
 
-    /// Under `Digia.attach(to:)` only (a SwiftUI or React Native host keeps its own behaviour): why
-    /// the attached host cannot draw this overlay now. No host at all is `host_not_mounted`; a modal of
-    /// the app's own in front of a nudge or survey is `host_modal_open`. A modal of Digia's own is left
-    /// to the surface rule.
-    private func attachedHostUnavailable(_ request: CampaignRequest) -> (reason: DropReason, detail: String)? {
-        guard DigiaHostAttachment.isInUse else { return nil }
-        guard DigiaHostAttachment.hasHost || !HostRegistry.shared.isEmpty else {
-            return (.hostNotMounted, "no Digia host on screen: Digia.attach(to:) found no root it can use")
+    /// Why no Digia host can draw this overlay now, dropped at once rather than left to time out. No host
+    /// at all is `host_not_mounted`; a modal of the app's own in front of a nudge or survey is
+    /// `host_modal_open`. A modal of Digia's own is left to the surface rule.
+    private func hostUnavailable(_ request: CampaignRequest) -> (reason: DropReason, detail: String)? {
+        let attached = DigiaHostAttachment.isInUse
+        if attached {
+            guard DigiaHostAttachment.hasHost || !HostRegistry.shared.isEmpty else {
+                return (.hostNotMounted, "no Digia host on screen: Digia.attach(to:) found no root it can use")
+            }
+        } else {
+            // A classic guide is drawn by the React Native renderer, not by a host.
+            if let guide = request.campaign.guideConfig, isClassicRNGuide(guide) { return nil }
+            guard !HostRegistry.shared.isEmpty else {
+                return (.hostNotMounted, "no Digia host on screen: no DigiaHost is mounted")
+            }
         }
         switch request.campaign.config {
         case .nudge, .survey: break
@@ -1572,7 +1579,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
         let digiaPresents = controller.activeNudge != nil || surveyOrchestrator.state != nil
             || controller.activeStoryOverlay != nil
-        guard !digiaPresents, let modal = DigiaHostAttachment.appPresentation() else { return nil }
+        let window = attached ? DigiaHostAttachment.window : ViewControllerUtil.keyWindow()
+        guard !digiaPresents, let modal = DigiaHostAttachment.appPresentation(in: window) else { return nil }
         return (.hostModalOpen, "the app is presenting \(type(of: modal))")
     }
 

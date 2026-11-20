@@ -15,7 +15,7 @@ import UIKit
 @MainActor
 enum DigiaHostAttachment {
     private static let log = DigiaLogger()
-    private static weak var window: UIWindow?
+    private(set) static weak var window: UIWindow?
     private static var host: DigiaHostView?
     private static weak var warnedRoot: UIViewController?
     /// Whether the host was added to a root and has not been found missing since.
@@ -30,9 +30,9 @@ enum DigiaHostAttachment {
         return host.superview === root.view && host.window != nil
     }
 
-    /// The first controller the app itself presented in the attached window, if any. Digia's own debug
+    /// The first controller the app itself presented in `window`, if any. Digia's own debug
     /// screen is skipped; its nudge covers, surveys and stories are told apart by their state instead.
-    static func appPresentation() -> UIViewController? {
+    static func appPresentation(in window: UIWindow?) -> UIViewController? {
         var presented = window?.rootViewController?.presentedViewController
         while let current = presented {
             if !(current is UIHostingController<DigiaDebugSettingsView>) {

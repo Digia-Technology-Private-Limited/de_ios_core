@@ -127,6 +127,30 @@ struct DigiaHostViewTests {
         #expect(newRoot.view.subviews.last is DigiaHostView)
     }
 
+    // Fails if: `endCampaignsForHostTeardown` stops ending the floaters (`floaterStoryOrchestrator.dismiss(.hostTeardown)`):
+    // the floater left by the swapped-out root would stay "displaying" and the next one would be
+    // dropped as surface_busy.
+    @Test("after the app replaces its root, a floater left on screen ends and the next floater draws")
+    func rootSwapEndsAFloaterLeftOnScreen() async throws {
+        let sdk = try await SdkHarness.start(loadCampaign("campaigns/floater/floater_story_window.json"))
+        defer { sdk.tearDown() }
+        let window = makeWindow(root: AppScreen(), sdk)
+        Digia.attach(to: window)
+        ComponentTestHost.drainRunLoop(for: 0.3)
+        let first = try sdk.deliver("test_floater_story")
+        try await sdk.waitUntil("the first floater is on screen") { first.state == .displaying }
+
+        window.rootViewController = AppScreen()
+        try await sdk.settle(0.3)
+        let second = try sdk.deliver("test_floater_story")
+
+        #expect(sdk.outcome(of: first) == .dismissed(reason: .cancelled, completed: false))
+        #expect(!sdk.records("test_floater_story", reason: TimelineReason.hostTeardown).isEmpty)
+        try await sdk.waitUntil("the second floater is on screen over the new root") {
+            second.state == .displaying
+        }
+    }
+
     // Fails if: `DigiaHost` stops gating its overlays on `HostRegistry.isActive` (`shownIf(drawsOverlays)`):
     // both hosts would draw the dialog. Or if `HostRegistry.unmount` stops handing over to the host
     // mounted before: nothing would draw once the newer host goes.
@@ -168,7 +192,7 @@ struct DigiaHostViewTests {
         return reason
     }
 
-    // Fails if: the router's host gate stops asking `attachedHostUnavailable`, or that stops answering
+    // Fails if: the router's host gate stops asking `hostUnavailable`, or that stops answering
     // `host_not_mounted` when `attach` found no root it can use. The dialog would then wait for the
     // 15 s watchdog and end as `timeout`.
     @Test("with attach on a navigation root, a campaign is dropped at once as host_not_mounted")
@@ -184,7 +208,19 @@ struct DigiaHostViewTests {
         #expect(dropReason(presentation, sdk) == .hostNotMounted)
     }
 
-    // Fails if: `attachedHostUnavailable` stops answering `host_modal_open` while the app presents a
+    // Fails if: `hostUnavailable` stops answering `host_not_mounted` without attach when no `DigiaHost`
+    // is mounted. The dialog would wait for the 15 s watchdog and end as `timeout`.
+    @Test("without attach, a campaign with no DigiaHost mounted is dropped at once as host_not_mounted")
+    func noDigiaHostDropsAsHostNotMounted() async throws {
+        let sdk = try await SdkHarness.start(loadCampaign("campaigns/nudge_dialog/nudge_dialog.json"))
+        defer { sdk.tearDown() }
+
+        let presentation = try sdk.deliver("test_nudge_dialog")
+
+        #expect(dropReason(presentation, sdk) == .hostNotMounted)
+    }
+
+    // Fails if: `hostUnavailable` stops answering `host_modal_open` while the app presents a
     // controller of its own. The dialog would be drawn under the app's modal and count an impression.
     @Test("with attach, a dialog triggered while the app presents its own modal is dropped at once as host_modal_open")
     func appModalDropsAsHostModalOpen() async throws {
@@ -206,6 +242,24 @@ struct DigiaHostViewTests {
         try await sdk.settle(0.5)  // yield: UIKit finishes the dismissal between main-actor jobs
         let shown = try sdk.deliver("test_nudge_dialog")
         try await sdk.waitUntil("the dialog shows once the modal is closed") { shown.state == .displaying }
+    }
+
+    // Fails if: `hostUnavailable` checks for an app modal only under attach. With a SwiftUI `DigiaHost`
+    // the dialog would be drawn hidden under the app's sheet and count an impression.
+    @Test("without attach, a dialog triggered while the app presents its own modal is dropped at once as host_modal_open")
+    func appModalOverDigiaHostDropsAsHostModalOpen() async throws {
+        let sdk = try await SdkHarness.start(loadCampaign("campaigns/nudge_dialog/nudge_dialog.json"))
+        defer { sdk.tearDown() }
+        try sdk.mount { Text("App home") }
+        let root = try #require(ViewControllerUtil.keyWindow()?.rootViewController)
+        root.present(AppScreen(), animated: false)
+        ComponentTestHost.drainRunLoop(for: 0.3)
+
+        let blocked = try sdk.deliver("test_nudge_dialog")
+
+        #expect(dropReason(blocked, sdk) == .hostModalOpen)
+        root.dismiss(animated: false)
+        try await sdk.settle(0.5)
     }
 
     // Fails if: `showStoryOverlay` under attach records the story as open before the present was
