@@ -224,6 +224,11 @@ final class GamePresentation: Identifiable, ObservableObject {
         isHeld = false
         if pageFinished { sendInit() }
         armLoadTimer()
+        // A skin that booted while held already sent its one `ready`.
+        if let ready = heldReady {
+            heldReady = nil
+            bridge.receive(ready)
+        }
     }
 
     /// Destroys a held game without a word: no callback, no analytics.
@@ -236,12 +241,25 @@ final class GamePresentation: Identifiable, ObservableObject {
         webCoordinator?.teardown()
     }
 
-    /// A skin message from the web view. Dropped while held: the skin speaks
-    /// only after `init`, and a held game answers nothing.
+    /// A skin message from the web view. Dropped while held, a held game
+    /// answering nothing, except `ready`: skins send it once on boot without
+    /// waiting for `init`, so it is kept and replayed by `release(with:)`.
     func receive(_ body: Any) {
-        guard !isHeld else { return }
+        guard !isHeld else {
+            if let text = body as? String, text.contains("\"ready\""),
+               let data = text.data(using: .utf8),
+               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               object["type"] as? String == "ready"
+            {
+                heldReady = text
+            }
+            return
+        }
         bridge.receive(body)
     }
+
+    /// The skin's boot `ready`, received while held.
+    private var heldReady: String?
 
     func toggleMute() {
         isMuted.toggle()
