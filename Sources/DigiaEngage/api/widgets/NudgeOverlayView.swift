@@ -56,18 +56,7 @@ struct NudgeOverlayView: View {
                     .transition(.opacity)
                 }
 
-                if DigiaHostAttachment.isInUse {
-                    // Under `Digia.attach(to:)` the host is the top subview of the app's root, so a
-                    // bottom sheet or full screen is drawn here like the dialog: no modal of Digia's
-                    // own, which leaves the app's status bar and orientation to the app.
-                    if let nudge = coverBinding.wrappedValue {
-                        NudgeCoverContent(nudge: nudge)
-                            .id(nudge.id)
-                            .transition(.opacity)
-                    }
-                } else {
-                    NudgeCoverPresenter(presentation: coverBinding)
-                }
+                NudgeCoverPresenter(presentation: coverBinding)
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
         }
@@ -126,8 +115,7 @@ private struct NudgeCoverPresenter: View {
     }
 }
 
-/// The bottom-sheet or full-screen nudge itself, shared by the SwiftUI cover and the inline layer
-/// used under `Digia.attach(to:)`.
+/// The bottom-sheet or full-screen nudge the cover presents.
 private struct NudgeCoverContent: View {
     let nudge: DigiaNudgePresentation
 

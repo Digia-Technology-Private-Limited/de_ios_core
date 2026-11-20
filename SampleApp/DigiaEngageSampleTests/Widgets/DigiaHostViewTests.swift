@@ -262,8 +262,8 @@ struct DigiaHostViewTests {
         try await sdk.settle(0.5)
     }
 
-    // Fails if: `showStoryOverlay` under attach records the story as open before the present was
-    // accepted, or `present(checked:)` stops refusing a presenter mid-transition. The SDK would then
+    // Fails if: `showStoryOverlay` records the story as open before the present was accepted, or
+    // `DigiaStoryPresenter.present` stops refusing a presenter mid-transition. The SDK would then
     // believe a story is open with nothing on screen, and `hasActiveOverlay` would block the app.
     @Test("with attach, a story opened while the top screen is still being presented is not recorded as open")
     func storyIntoATransitionIsNotRecordedAsOpen() async throws {
@@ -286,27 +286,26 @@ struct DigiaHostViewTests {
             == "presenter_transitioning")
     }
 
-    // Fails if: `NudgeOverlayView` stops drawing bottom-sheet and full-screen nudges inline under attach
-    // (e.g. goes back to presenting a cover): a modal of Digia's own would take over the status bar and
-    // orientation from the app, and a present made before the re-mounted host is in a window is lost.
-    @Test("with attach, a bottom-sheet nudge is drawn in the host, with no modal over the app")
-    func bottomSheetIsDrawnInlineUnderAttach() async throws {
-        let sdk = try await SdkHarness.start(
-            loadCampaign("campaigns/nudge_bottomsheet/nudge_bottomsheet_backdrop_on.json"))
+    // Fails if: `showStoryOverlay` keeps the unchecked present for hosts other than attach (a SwiftUI
+    // `DigiaHost` here): the story would be recorded as open with nothing on screen.
+    @Test("without attach, a story opened while the top screen is still being presented is not recorded as open")
+    func storyIntoATransitionIsNotRecordedAsOpenWithDigiaHost() async throws {
+        let sdk = try await SdkHarness.start(loadCampaign("campaigns/nudge_dialog/nudge_dialog.json"))
         defer { sdk.tearDown() }
-        let root = PortraitScreen()
-        let window = makeWindow(root: root, sdk)
-        Digia.attach(to: window)
-        ComponentTestHost.drainRunLoop(for: 0.3)
+        try sdk.mount { Text("App home") }
+        let root = try #require(ViewControllerUtil.keyWindow()?.rootViewController)
+        root.present(AppScreen(), animated: true)  // still being presented until its animation ends
 
-        let presentation = try sdk.deliver("test_nudge_bottomsheet_backdrop_on")
-        try await sdk.waitUntil("the sheet is drawn") {
-            presentation.state == .displaying && sdk.isShowing("Backdrop Tap Dismiss On")
-        }
-        #expect(root.presentedViewController == nil)
+        let shown = SDKInstance.shared.controller.showStoryOverlay(
+            config: InlineStoryConfig(slotKey: "story_slot", items: []), initialIndex: 0,
+            payload: CEPTriggerPayload(cepCampaignId: "cep-story", campaignKey: "story_test", cepMetadata: [:]))
 
-        Digia.dismissActiveNudge()
-        try await sdk.waitUntil("the sheet is gone") { !sdk.isShowing("Backdrop Tap Dismiss On") }
+        #expect(!shown)
+        #expect(SDKInstance.shared.controller.activeStoryOverlay == nil)
+        #expect(sdk.records("story_test", reason: TimelineReason.storyPresentFailed).first?.extras["cause"]
+            == "presenter_transitioning")
+        root.dismiss(animated: false)
+        try await sdk.settle(0.5)
     }
 
     private final class PortraitScreen: UIViewController {
