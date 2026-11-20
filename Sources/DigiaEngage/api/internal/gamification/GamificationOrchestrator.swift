@@ -241,6 +241,16 @@ final class GamificationOrchestrator: ObservableObject {
         }
     }
 
+    /// Opens a reward's web link through the host action executor: the app's
+    /// openURL handler first, else the system.
+    func openRewardUrl(_ url: String) {
+        do {
+            try sdk.hostActionExecutor.execute(.openUrl(url), campaignKey: nil)
+        } catch {
+            log.w("Rewards link failed: \(error)")
+        }
+    }
+
     // MARK: - Play
 
     /// The one adapter every gamification chance request goes through: builds

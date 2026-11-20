@@ -460,7 +460,7 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
                 SDKInstance.shared.gamification.openRewardDeepLink(url.absoluteString)
             }
         case .external(let url):
-            ActionPlatform.current.open(url)
+            SDKInstance.shared.gamification.openRewardUrl(url.absoluteString)
         }
     }
 
