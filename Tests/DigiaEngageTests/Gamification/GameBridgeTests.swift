@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import Testing
 
@@ -447,7 +448,7 @@ struct GameBridgeTests {
             osVersion: "18.0", sdkVersion: "4.3.2", model: "iPhone17,2",
             locale: "en-IN", timezone: "Asia/Kolkata",
             hapticsAllowed: true, reducedMotion: false,
-            tier: "full", ramMb: 8192, cores: 6,
+            tier: "high", ramMb: 8192, cores: 6,
             thermal: "nominal", lowPower: false,
             sensors: ["gyroscope", "accelerometer"])
         let payload = GameInitPayload(
@@ -457,6 +458,7 @@ struct GameBridgeTests {
             slots: [GamificationSlotConfig(outcomeKey: "win", values: ["color": .string("red")])],
             viewportWidth: 412, viewportHeight: 915,
             safeArea: GameSafeArea(top: 24, right: 0, bottom: 16, left: 0),
+            keyboardBottom: 291,
             colorScheme: "light", fontFamily: nil, themeFonts: [],
             device: device)
         bridge.push(type: "init", payload: payload.message())
@@ -474,8 +476,48 @@ struct GameBridgeTests {
         #expect(values["label"] as? String == "Spin")
         let viewport = try #require(body["viewport"] as? [String: Any])
         #expect(viewport["width"] as? Double == 412)
+        let keyboardInset = try #require(viewport["keyboardInset"] as? [String: Any])
+        #expect(keyboardInset["bottom"] as? Double == 291)
         let devicePayload = try #require(body["device"] as? [String: Any])
         #expect(devicePayload["platform"] as? String == "ios")
-        #expect(devicePayload["tier"] as? String == "full")
+        #expect(devicePayload["tier"] as? String == "high")
+    }
+}
+
+/// Text input inside the game: the keyboard inset the `viewport` push
+/// carries, and the selection lockdown lifted only for inputs.
+@Suite("Game text input", .tags(.unit, .game))
+struct GameTextInputTests {
+    private let surface = CGRect(x: 0, y: 0, width: 390, height: 844)
+
+    @Test("keyboard inset is the docked keyboard's overlap, 0 when hidden or floating")
+    func keyboardInset() {
+        // Docked: rises 336 pt from the bottom edge.
+        #expect(GameKeyboardInset.bottom(
+            keyboard: CGRect(x: 0, y: 508, width: 390, height: 336), surface: surface) == 336)
+        // Hidden: the end frame sits below the screen.
+        #expect(GameKeyboardInset.bottom(
+            keyboard: CGRect(x: 0, y: 844, width: 390, height: 336), surface: surface) == 0)
+        // Floating (iPad): does not touch the bottom edge, covers nothing to pad.
+        #expect(GameKeyboardInset.bottom(
+            keyboard: CGRect(x: 40, y: 300, width: 320, height: 250), surface: surface) == 0)
+        // Hardware keyboard: only the 55 pt shortcut bar is docked.
+        #expect(GameKeyboardInset.bottom(
+            keyboard: CGRect(x: 0, y: 789, width: 390, height: 55), surface: surface) == 55)
+    }
+
+    @Test("selection and callout are lifted only for text inputs")
+    func selectionScopedToInputs() {
+        let css = GameWebViewConfigurationFactory.selectionStyle
+        let rules = css.components(separatedBy: "} ")
+        #expect(rules.count == 2)
+        #expect(rules[0].hasPrefix("* {"))
+        #expect(rules[0].contains("user-select: none"))
+        #expect(rules[0].contains("-webkit-touch-callout: none"))
+        #expect(rules[1].hasPrefix("input, textarea, [contenteditable], [contenteditable] * {"))
+        #expect(rules[1].contains("user-select: text"))
+        #expect(rules[1].contains("-webkit-touch-callout: default"))
+        // Sits inside a single-quoted JS literal unescaped.
+        #expect(!css.contains("'") && !css.contains("\\"))
     }
 }

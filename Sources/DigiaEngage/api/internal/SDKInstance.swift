@@ -613,6 +613,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         healthSink.applyConfig(enabled: config.healthEnabled, sessionCap: config.healthSessionCap)
         appEventLimits = config.appEvents.limits
         services?.appEventsService?.applyPolicy(config.appEvents)
+        GameDeviceTier.applyConfig(config.deviceTier)
         gamePrewarm = config.gamePrewarm
         GamePrewarmer.refreshEngine()
     }

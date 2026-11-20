@@ -98,21 +98,40 @@ struct SdkConfigAppEventsTests {
 
 @Suite("SdkConfig game prewarm")
 struct SdkConfigGamePrewarmTests {
-    @Test("game prewarm is opt-in: on only for explicit true, eligible only on tier full above the RAM floor")
+    @Test("game prewarm is opt-in: on only for explicit true, eligible only for a listed tier")
     func gamePrewarmOptIn() {
         #expect(SdkConfig.resolve().gamePrewarm == .off)
         #expect(SdkConfig.defaults.gamePrewarm == .off)
         let mistyped = SdkConfig.resolve(fetched: object(
-            #"{"gamification":{"prewarm":{"enabled":"true","engine":1,"game":true,"minRamMb":"big"}}}"#)).gamePrewarm
-        #expect(mistyped == GamePrewarmConfig(enabled: false, engine: false, game: true, minRamMb: 0))
-        #expect(mistyped.allowsGame(tier: "full", ramMb: 8000) == false, "game on without enabled stays off")
+            #"{"gamification":{"prewarm":{"engine":1,"game":true}}}"#)).gamePrewarm
+        #expect(mistyped.engine == false)
+        #expect(mistyped.game == true)
+        #expect(mistyped.tiers == ["high"], "tiers default to high")
 
         let on = SdkConfig.resolve(fetched: object(
-            #"{"gamification":{"prewarm":{"enabled":true,"engine":true,"minRamMb":6144}}}"#)).gamePrewarm
-        #expect(on.allowsEngine(tier: "full", ramMb: 6144))
-        #expect(on.allowsEngine(tier: "full", ramMb: 6143) == false)
-        #expect(on.allowsEngine(tier: "lite", ramMb: 8000) == false)
-        #expect(on.allowsGame(tier: "full", ramMb: 8000) == false, "game defaults off")
+            #"{"gamification":{"prewarm":{"engine":true}}}"#)).gamePrewarm
+        #expect(on.allowsEngine(tier: "high"))
+        #expect(on.allowsEngine(tier: "mid") == false)
+        #expect(on.allowsGame(tier: "high") == false, "game defaults off")
+
+        let all = SdkConfig.resolve(fetched: object(
+            #"{"gamification":{"prewarm":{"engine":true,"tiers":["high","mid","low"]}}}"#)).gamePrewarm
+        #expect(all.allowsEngine(tier: "low"))
+        let unknown = SdkConfig.resolve(fetched: object(
+            #"{"gamification":{"prewarm":{"engine":true,"tiers":["high","full"]}}}"#)).gamePrewarm
+        #expect(unknown.tiers == ["high"], "one unknown tier falls back whole")
+    }
+
+    @Test("deviceTier parses a valid config and falls back to the default on a bad one")
+    func deviceTierParse() {
+        #expect(SdkConfig.resolve().deviceTier == .default)
+        let valid = SdkConfig.resolve(fetched: object(
+            #"{"gamification":{"deviceTier":{"weights":{"cpuLevel":1},"rules":[{"tier":"mid","all":[{"fact":"a","eq":1}]}],"fallback":"low"}}}"#)).deviceTier
+        #expect(valid.rules.count == 1)
+        #expect(valid.rules.first?.tier == "mid")
+        let bad = SdkConfig.resolve(fetched: object(
+            #"{"gamification":{"deviceTier":{"weights":{"cpuLevel":1},"rules":[],"fallback":"full"}}}"#)).deviceTier
+        #expect(bad == .default)
     }
 }
 

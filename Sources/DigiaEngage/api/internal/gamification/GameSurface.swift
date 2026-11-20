@@ -184,7 +184,7 @@ final class GameSurface {
         source: GamePrewarmSource
     ) {
         let prewarm = SDKInstance.shared.gamePrewarm
-        guard prewarm.enabled, prewarm.game,
+        guard prewarm.game,
               let file = sdk.gamification.skinFileCache.cachedFile(
             skinId: config.skinId, version: config.skinVersion),
             let userId = sdk.services?.identityManager.userId, !userId.isEmpty

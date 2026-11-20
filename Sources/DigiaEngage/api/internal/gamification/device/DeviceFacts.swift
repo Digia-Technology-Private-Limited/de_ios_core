@@ -1,9 +1,11 @@
 import Foundation
+import os
 import UIKit
 
 /// The `device` object sent in `init`, and the subset re-pushed
-/// whenever it changes. The skin picks its own quality from `tier`; the SDK
-/// never picks for it.
+/// whenever it changes. `tier` (`high`, `mid` or `low`) comes from the backend's
+/// `gamification.deviceTier` rules evaluated over `facts`; the skin picks its own
+/// quality from it.
 ///
 /// `soundAllowed` is always true: iOS exposes no mute-switch API, and web
 /// audio is gated on a user gesture anyway. `hapticsAllowed` is the negation
@@ -25,6 +27,8 @@ struct GameDeviceInfo: Equatable, Sendable {
     var thermal: String
     var lowPower: Bool
     var sensors: [String]
+    /// The raw facts and levels the tier rules read, named as in the backend rules.
+    var facts: [String: TierOperand] = [:]
 
     /// The `init` `device` object.
     var payload: [String: Any] {
@@ -44,6 +48,7 @@ struct GameDeviceInfo: Equatable, Sendable {
             "thermal": thermal,
             "lowPower": lowPower,
             "sensors": sensors,
+            "facts": facts.mapValues(\.json),
         ]
     }
 
@@ -59,22 +64,53 @@ struct GameDeviceInfo: Equatable, Sendable {
         ]
     }
 
-    /// Picks the skin tier from live facts: `minimal` when the device is
-    /// constrained (Reduce Motion, Low Power, serious/critical heat, or under
-    /// 3 GB RAM), `lite` when it is merely small (under 6 GB, under 6 cores,
-    /// or fair heat), else `full`. Pure, so tests pin the boundaries.
-    static func tier(
-        ramMb: Int, cores: Int, thermal: String, lowPower: Bool, reducedMotion: Bool
-    ) -> String {
-        if reducedMotion || lowPower || thermal == "serious" || thermal == "critical"
-            || ramMb < 3000
-        {
-            return "minimal"
+    // Levels: 0 unknown, 1 low, 2 average, 3 high, 4 excellent, after grofers/droid-dex.
+    // The thresholds match Android's `GameDeviceFacts`.
+
+    /// RAM level from total memory, one lower (never below 1) when the app has under a
+    /// fifth of it left to use.
+    static func memoryLevel(totalMb: Int, availableMb: Int?) -> Int {
+        guard totalMb > 0 else { return 0 }
+        let gb = Double(totalMb) / 1_024
+        let base: Int
+        switch gb {
+        case ..<2.8: base = 1
+        case ..<6.9: base = 2
+        case 10.5...: base = 4
+        default: base = 3
         }
-        if ramMb < 6000 || cores < 6 || thermal == "fair" {
-            return "lite"
+        let pressured = availableMb.map { $0 > 0 && Double($0) < Double(totalMb) * 0.2 } ?? false
+        return pressured ? max(1, base - 1) : base
+    }
+
+    /// Battery level from the charge percentage; charging lowers each threshold.
+    static func batteryLevel(percentage: Int?, charging: Bool) -> Int {
+        guard let pct = percentage else { return 0 }
+        if pct >= 80 || (charging && pct >= 70) { return 4 }
+        if pct >= 55 || (charging && pct >= 50) { return 3 }
+        if pct >= 40 || (charging && pct >= 35) { return 2 }
+        return 1
+    }
+
+    static func thermalLevel(_ state: ProcessInfo.ThermalState) -> Int {
+        switch state {
+        case .nominal: 4
+        case .fair: 3
+        case .serious: 2
+        case .critical: 1
+        @unknown default: 0
         }
-        return "full"
+    }
+
+    /// An approximation: iOS exposes no per-core frequency or design, so the level comes
+    /// from core count and RAM, which track the chip generation on iPhones.
+    static func cpuLevel(cores: Int, ramMb: Int) -> Int {
+        guard cores > 0, ramMb > 0 else { return 0 }
+        let gb = Double(ramMb) / 1_024
+        if cores <= 2 || gb < 2.8 { return 1 }
+        if gb < 3.6 { return 2 }
+        if gb < 5.5 { return 3 }
+        return 4
     }
 
     /// Maps the thermal state to the `device.thermal` wire string.
@@ -100,7 +136,8 @@ struct GameDeviceInfo: Equatable, Sendable {
         !UIAccessibility.isReduceMotionEnabled
     }
 
-    /// Reads the live device facts for `init`. No battery facts on iOS.
+    /// Reads the live device facts for `init`. Every read is permission-free; one that is
+    /// unavailable is left out of `facts` (unknown), never guessed.
     @MainActor
     static func current(sdkVersion: String) -> GameDeviceInfo {
         let process = ProcessInfo.processInfo
@@ -112,6 +149,8 @@ struct GameDeviceInfo: Equatable, Sendable {
         var sensors: [String] = []
         if GameMotionSource.gyroscopeAvailable { sensors.append(GameMotionSource.gyroscopeName) }
         if GameMotionSource.accelerometerAvailable { sensors.append(GameMotionSource.accelerometerName) }
+        let facts = GameDeviceTier.scored(
+            readFacts(process: process, ramMb: ramMb, cores: cores, lowPower: lowPower, reducedMotion: reducedMotion))
         return GameDeviceInfo(
             osVersion: UIDevice.current.systemVersion,
             sdkVersion: sdkVersion,
@@ -120,15 +159,53 @@ struct GameDeviceInfo: Equatable, Sendable {
             timezone: TimeZone.current.identifier,
             hapticsAllowed: !reducedMotion,
             reducedMotion: reducedMotion,
-            tier: tier(
-                ramMb: ramMb, cores: cores, thermal: thermal,
-                lowPower: lowPower, reducedMotion: reducedMotion),
+            tier: GameDeviceTier.evaluate(facts),
             ramMb: ramMb,
             cores: cores,
             thermal: thermal,
             lowPower: lowPower,
-            sensors: sensors
+            sensors: sensors,
+            facts: facts
         )
+    }
+
+    @MainActor
+    private static func readFacts(
+        process: ProcessInfo, ramMb: Int, cores: Int, lowPower: Bool, reducedMotion: Bool
+    ) -> [String: TierOperand] {
+        // The app's remaining memory budget; 0 means unavailable (simulator, older OS).
+        let availableBytes = os_proc_available_memory()
+        let availableMb: Int? = availableBytes > 0 ? Int(availableBytes / 1_024 / 1_024) : nil
+
+        // Battery reads need monitoring on; restore the host's setting afterwards.
+        let device = UIDevice.current
+        let wasMonitoring = device.isBatteryMonitoringEnabled
+        device.isBatteryMonitoringEnabled = true
+        let rawLevel = device.batteryLevel
+        let state = device.batteryState
+        device.isBatteryMonitoringEnabled = wasMonitoring
+        let batteryPct: Int? = rawLevel >= 0 ? Int((rawLevel * 100).rounded()) : nil
+        let charging: Bool? = switch state {
+        case .charging, .full: true
+        case .unplugged: false
+        default: nil
+        }
+
+        var facts: [String: TierOperand] = [
+            "totalRamInMb": .number(Double(ramMb)),
+            "isPowerSaveMode": .bool(lowPower),
+            "thermalStatus": .string(thermalName(process.thermalState)),
+            "isReduceMotionEnabled": .bool(reducedMotion),
+            "cpuCores": .number(Double(cores)),
+            "cpuLevel": .number(Double(cpuLevel(cores: cores, ramMb: ramMb))),
+            "memoryLevel": .number(Double(memoryLevel(totalMb: ramMb, availableMb: availableMb))),
+            "thermalLevel": .number(Double(thermalLevel(process.thermalState))),
+            "batteryLevel": .number(Double(batteryLevel(percentage: batteryPct, charging: charging == true))),
+        ]
+        if let availableMb { facts["availableRamInMb"] = .number(Double(availableMb)) }
+        if let batteryPct { facts["batteryPercentage"] = .number(Double(batteryPct)) }
+        if let charging { facts["isCharging"] = .bool(charging) }
+        return facts
     }
 
     private static func deviceModel() -> String {

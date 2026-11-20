@@ -26,7 +26,7 @@ final class WeakScriptMessageProxy: NSObject, WKScriptMessageHandler {
 
 /// Builds the locked-down `WKWebViewConfiguration`:
 /// non-persistent storage (DOM storage and cookies off), the `digia` handler
-/// on the main frame only, selection and callout off, bounce off, playback
+/// on the main frame only, selection and callout off outside text inputs, bounce off, playback
 /// gated on a user gesture, inspection in debug builds only.
 enum GameWebViewConfigurationFactory {
     /// Defines `window.digia.postMessage` for skins that speak the
@@ -37,8 +37,16 @@ enum GameWebViewConfigurationFactory {
         "window.digia = { postMessage: function(message) { " +
         "window.webkit.messageHandlers.digia.postMessage(message); } };"
 
-    private static let noSelectionStyle =
-        "* { -webkit-user-select: none !important; -webkit-touch-callout: none !important; }"
+    /// Selection and the long-press callout stay off everywhere except text
+    /// inputs, so typing, paste and cursor placement work. Same string as
+    /// Android `GAME_SELECTION_CSS`. No quotes or backslashes: it sits in a
+    /// JS string literal as is.
+    static let selectionStyle =
+        "* { -webkit-user-select: none !important; user-select: none !important; " +
+        "-webkit-touch-callout: none !important; } " +
+        "input, textarea, [contenteditable], [contenteditable] * { " +
+        "-webkit-user-select: text !important; user-select: text !important; " +
+        "-webkit-touch-callout: default !important; }"
 
     static func make(messageProxy: WKScriptMessageHandler) -> WKWebViewConfiguration {
         let configuration = WKWebViewConfiguration()
@@ -57,7 +65,7 @@ enum GameWebViewConfigurationFactory {
             forMainFrameOnly: true
         ))
         let styleScript =
-            "var style = document.createElement('style'); style.textContent = '\(noSelectionStyle)'; " +
+            "var style = document.createElement('style'); style.textContent = '\(selectionStyle)'; " +
             "(document.head || document.documentElement).appendChild(style);"
         controller.addUserScript(WKUserScript(
             source: styleScript,

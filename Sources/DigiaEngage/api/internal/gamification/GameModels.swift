@@ -25,6 +25,19 @@ struct GameSafeArea: Equatable, Sendable {
     }
 }
 
+/// The software keyboard's overlap with the game surface, for
+/// `viewport.keyboardInset.bottom`. The surface never resizes for the
+/// keyboard; the skin keeps its form above this inset itself.
+enum GameKeyboardInset {
+    /// How far a docked keyboard reaches up from the surface's bottom edge,
+    /// in points (CSS px). 0 when hidden, off screen, or floating/undocked
+    /// (an iPad split or floating keyboard does not sit on the bottom edge).
+    static func bottom(keyboard: CGRect, surface: CGRect) -> Double {
+        guard keyboard.intersects(surface), keyboard.maxY >= surface.maxY - 0.5 else { return 0 }
+        return Double(max(0, surface.maxY - keyboard.minY))
+    }
+}
+
 /// Why a game closed without the user finishing it. Failures log with the
 /// reason and settle through the coordinator, whose delivery outcome records
 /// the analytics; the surface itself stays silent.
@@ -81,6 +94,8 @@ struct GameInitPayload {
     var viewportWidth: Double
     var viewportHeight: Double
     var safeArea: GameSafeArea
+    /// `viewport.keyboardInset.bottom` at build time; 0 when no keyboard.
+    var keyboardBottom: Double = 0
     var colorScheme: String
     var fontFamily: String?
     var themeFonts: [[String: String]]
@@ -103,6 +118,7 @@ struct GameInitPayload {
             "viewport": [
                 "width": viewportWidth, "height": viewportHeight,
                 "safeArea": safeArea.payload,
+                "keyboardInset": ["bottom": keyboardBottom],
             ],
             "theme": theme,
             "device": device.payload,

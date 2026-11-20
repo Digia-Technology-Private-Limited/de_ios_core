@@ -254,7 +254,7 @@ struct GameBridgeCasesTests {
                 osVersion: "18.0", sdkVersion: "test", model: "test",
                 locale: "en", timezone: "UTC",
                 hapticsAllowed: true, soundAllowed: true, reducedMotion: false,
-                tier: "full", ramMb: 8192, cores: 6,
+                tier: "high", ramMb: 8192, cores: 6,
                 thermal: "nominal", lowPower: false, sensors: [])
             if let tier = facts["tier"] as? String { device.tier = tier }
             if let thermal = facts["thermal"] as? String { device.thermal = thermal }
@@ -373,7 +373,7 @@ struct GameBridgeCasesTests {
                 osVersion: "18.0", sdkVersion: "test", model: "test",
                 locale: "en", timezone: "UTC",
                 hapticsAllowed: true, soundAllowed: true, reducedMotion: false,
-                tier: "full", ramMb: 8192, cores: 6,
+                tier: "high", ramMb: 8192, cores: 6,
                 thermal: "nominal", lowPower: false, sensors: [])
         ).message()
     }

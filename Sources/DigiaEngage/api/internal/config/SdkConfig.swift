@@ -3,7 +3,8 @@ import Foundation
 private let log = DigiaLogger()
 
 /// The flags and limits the backend can change without an SDK release.
-/// `sdkHealth`, `appEvents` and `gamification.prewarm` are read here; the saved response is kept whole.
+/// `sdkHealth`, `appEvents`, `gamification.prewarm` and `gamification.deviceTier` are read here;
+/// the saved response is kept whole.
 struct SdkConfig: Equatable, Sendable {
     let healthEnabled: Bool
     let healthSessionCap: Int
@@ -11,15 +12,18 @@ struct SdkConfig: Equatable, Sendable {
     let appEvents: AppEventUploadPolicy
     /// The game prewarm switches. Off unless the response turns them on.
     let gamePrewarm: GamePrewarmConfig
+    /// How a device is placed in a game tier; the built-in default unless the backend sends one.
+    let deviceTier: DeviceTierConfig
 
     init(
         healthEnabled: Bool, healthSessionCap: Int, appEvents: AppEventUploadPolicy = .unlimited,
-        gamePrewarm: GamePrewarmConfig = .off
+        gamePrewarm: GamePrewarmConfig = .off, deviceTier: DeviceTierConfig = .default
     ) {
         self.healthEnabled = healthEnabled
         self.healthSessionCap = healthSessionCap
         self.appEvents = appEvents
         self.gamePrewarm = gamePrewarm
+        self.deviceTier = deviceTier
     }
 
     /// What the SDK runs on with no cache and no answer. A test pins it to the shared fixture.
@@ -74,12 +78,22 @@ struct SdkConfig: Equatable, Sendable {
                 )
             ),
             gamePrewarm: GamePrewarmConfig(
-                enabled: optIn(prewarm + ["enabled"]),
                 engine: optIn(prewarm + ["engine"]),
                 game: optIn(prewarm + ["game"]),
-                minRamMb: number(prewarm + ["minRamMb"], min: 0, fallback: 0)
-            )
+                tiers: tiers(section(primary, prewarm + ["tiers"]))
+            ),
+            deviceTier: DeviceTierConfig.parse(section(primary, ["gamification", "deviceTier"]) as? [String: Any])
         )
+    }
+
+    /// A non-empty list of known tiers, else the default; one unknown tier falls back whole.
+    private static func tiers(_ raw: Any?) -> Set<String> {
+        guard let array = raw as? [Any], !array.isEmpty else { return GamePrewarmConfig.defaultTiers }
+        let tiers = array.compactMap { $0 as? String }
+        guard tiers.count == array.count, tiers.allSatisfy(DeviceTierConfig.tiers.contains) else {
+            return GamePrewarmConfig.defaultTiers
+        }
+        return Set(tiers)
     }
 
     private static func boolean(_ number: NSNumber) -> Bool? {
@@ -98,28 +112,24 @@ struct SdkConfig: Equatable, Sendable {
 
 /// `gamification.prewarm`: `engine` keeps one blank game web view warm, `game` loads a
 /// whole game ahead of the tap (and the Direct load alongside the grant). Every switch is
-/// off unless the response says `true`, so a missing block leaves today's behaviour.
+/// off unless the response says `true`, so a missing block leaves today's behaviour. Only a
+/// device whose game tier is in `tiers` is eligible.
 struct GamePrewarmConfig: Equatable, Sendable {
-    var enabled = false
     var engine = false
     var game = false
-    /// An extra RAM floor on top of tier `full`; 0 lets the tier alone decide.
-    var minRamMb = 0
+    var tiers: Set<String> = GamePrewarmConfig.defaultTiers
 
+    static let defaultTiers: Set<String> = ["high"]
     static let off = GamePrewarmConfig()
 
-    /// Eligible for the engine prewarm: enabled, `engine` on, tier `full`, RAM ≥ `minRamMb`.
-    func allowsEngine(tier: String, ramMb: Int) -> Bool {
-        enabled && engine && deviceQualifies(tier: tier, ramMb: ramMb)
+    /// Eligible for the engine prewarm: `engine` on and the tier allowed.
+    func allowsEngine(tier: String) -> Bool {
+        engine && tiers.contains(tier)
     }
 
     /// Eligible for the game prewarm and the Direct parallel load.
-    func allowsGame(tier: String, ramMb: Int) -> Bool {
-        enabled && game && deviceQualifies(tier: tier, ramMb: ramMb)
-    }
-
-    private func deviceQualifies(tier: String, ramMb: Int) -> Bool {
-        tier == "full" && ramMb >= minRamMb
+    func allowsGame(tier: String) -> Bool {
+        game && tiers.contains(tier)
     }
 }
 

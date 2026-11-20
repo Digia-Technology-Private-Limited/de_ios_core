@@ -60,7 +60,13 @@ final class GamePresentation: Identifiable, ObservableObject {
     /// The one `init` for this session: built from the open request and the
     /// live facts, re-sent unchanged on a repeated `ready`.
     private var initMessage: [String: Any]
-    private var lastViewport: (width: Double, height: Double, safeArea: GameSafeArea)?
+    private var lastViewport: (width: Double, height: Double, safeArea: GameSafeArea, keyboardBottom: Double)?
+    /// The docked keyboard's overlap with the game, in points; 0 when hidden.
+    private var keyboardBottom: Double = 0
+    /// The keyboard's last end frame in screen coordinates; nil when hidden.
+    /// Kept so a frame seen before the game view is in a window still counts
+    /// once it is.
+    private var keyboardEndFrame: CGRect?
     private var lastDevicePush: [String: Any]?
     private var observers: [NSObjectProtocol] = []
     /// The slow device-facts re-collect while the game is open. Cancelled
@@ -191,7 +197,15 @@ final class GamePresentation: Identifiable, ObservableObject {
     func sendInit() {
         pageFinished = true
         guard !isHeld else { return }
-        send(["type": "init", "payload": initMessage])
+        // `initMessage` is built once, but the keyboard can open or close
+        // before a (repeated) `init`: send its live overlap.
+        refreshKeyboardBottom()
+        var payload = initMessage
+        if var viewport = payload["viewport"] as? [String: Any] {
+            viewport["keyboardInset"] = ["bottom": keyboardBottom]
+            payload["viewport"] = viewport
+        }
+        send(["type": "init", "payload": payload])
         // `init` is built unmuted; a skin that re-announces itself while muted
         // gets the muted facts right after it.
         if isMuted, let lastDevicePush { send(["type": "device", "payload": lastDevicePush]) }
@@ -481,10 +495,14 @@ final class GamePresentation: Identifiable, ObservableObject {
     }
 
     /// Reports the rendered viewport when it changes (rotation, split
-    /// screen). The container calls this on appear and on geometry changes;
-    /// unchanged viewports stay silent.
+    /// screen, keyboard show/hide/height). The container calls this on
+    /// appear and on geometry changes, the keyboard observers on keyboard
+    /// frame changes; unchanged viewports stay silent.
     func pushViewportIfChanged(size: CGSize, safeArea: GameSafeArea) {
-        let viewport = (width: Double(size.width), height: Double(size.height), safeArea: safeArea)
+        refreshKeyboardBottom()
+        let viewport = (
+            width: Double(size.width), height: Double(size.height),
+            safeArea: safeArea, keyboardBottom: keyboardBottom)
         if let last = lastViewport, last == viewport { return }
         lastViewport = viewport
         send([
@@ -492,8 +510,30 @@ final class GamePresentation: Identifiable, ObservableObject {
             "payload": [
                 "width": viewport.width, "height": viewport.height,
                 "safeArea": safeArea.payload,
+                "keyboardInset": ["bottom": viewport.keyboardBottom],
             ],
         ])
+    }
+
+    /// The keyboard will show, hide or change height: measure its final
+    /// overlap with the game (the animation's end frame, like Android's
+    /// IME animation target) and push it. The game surface itself never
+    /// resizes. Before the game is shown there is no viewport to update;
+    /// the container's first push carries the value.
+    private func keyboardWillChange(endFrame: CGRect?) {
+        keyboardEndFrame = endFrame
+        guard let last = lastViewport else { return }
+        pushViewportIfChanged(
+            size: CGSize(width: last.width, height: last.height), safeArea: last.safeArea)
+    }
+
+    /// Recomputes `keyboardBottom` from the last keyboard frame against the
+    /// game view. Before the view is in a window the previous value stays.
+    private func refreshKeyboardBottom() {
+        guard let endFrame = keyboardEndFrame else { keyboardBottom = 0; return }
+        guard let view = webCoordinator?.view, let screen = view.window?.screen else { return }
+        let keyboard = view.convert(endFrame, from: screen.coordinateSpace)
+        keyboardBottom = GameKeyboardInset.bottom(keyboard: keyboard, surface: view.bounds)
     }
 
     /// Whether the next pushed `device` facts differ from the last push.
@@ -594,6 +634,19 @@ final class GamePresentation: Identifiable, ObservableObject {
                 forName: UIAccessibility.reduceMotionStatusDidChangeNotification,
                 object: nil, queue: .main) { [weak self] _ in
                 Task { @MainActor [weak self] in self?.pushDeviceIfChanged() }
+            },
+            // Keyboard show, height change and hide reach the skin as a
+            // `viewport` push with `keyboardInset.bottom`.
+            center.addObserver(
+                forName: UIResponder.keyboardWillChangeFrameNotification,
+                object: nil, queue: .main) { [weak self] note in
+                let end = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
+                Task { @MainActor [weak self] in self?.keyboardWillChange(endFrame: end) }
+            },
+            center.addObserver(
+                forName: UIResponder.keyboardWillHideNotification,
+                object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor [weak self] in self?.keyboardWillChange(endFrame: nil) }
             },
             // Pause on resign-active, like the story and canvas campaigns:
             // a call, Control Center or the app switcher pauses the game, and

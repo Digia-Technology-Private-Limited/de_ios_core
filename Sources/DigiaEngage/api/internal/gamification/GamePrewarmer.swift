@@ -199,10 +199,10 @@ enum GamePrewarmer {
     private static func deviceAllowsGame() -> Bool {
         guard UIApplication.shared.applicationState != .background else { return false }
         let device = GameDeviceInfo.current(sdkVersion: DigiaSdkVersion.value)
-        return SDKInstance.shared.gamePrewarm.allowsGame(tier: device.tier, ramMb: device.ramMb)
+        return SDKInstance.shared.gamePrewarm.allowsGame(tier: device.tier)
     }
 
-    /// Thermal or low-power change: the device may have left tier `full`.
+    /// Thermal or low-power change: the device may have left an allowed tier.
     private static func deviceTierChanged() {
         refreshEngine()
         if warm != nil, !deviceAllowsGame() { discard(reason: "tier_drop") }
@@ -212,7 +212,7 @@ enum GamePrewarmer {
         guard #available(iOS 17, *) else { return false }
         guard UIApplication.shared.applicationState != .background else { return false }
         let device = GameDeviceInfo.current(sdkVersion: DigiaSdkVersion.value)
-        return SDKInstance.shared.gamePrewarm.allowsEngine(tier: device.tier, ramMb: device.ramMb)
+        return SDKInstance.shared.gamePrewarm.allowsEngine(tier: device.tier)
     }
 
     private static func makeEngine() -> Engine {
