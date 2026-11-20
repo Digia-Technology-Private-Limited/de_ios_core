@@ -63,10 +63,10 @@ final class DigiaOverlayController: ObservableObject {
 
     /// Opens the story viewer, answering whether it was shown.
     ///
-    /// Under `Digia.attach(to:)` the "story open" state is recorded only once UIKit accepted the
-    /// present: a story that could not be shown (no screen to present from, one mid-transition, or a
-    /// refused present) would otherwise leave the SDK believing a story is open with nothing on screen.
-    /// That failure is recorded as `story_present_failed`. Other hosts keep their behaviour.
+    /// The "story open" state is recorded only once UIKit accepted the present: a story that could not
+    /// be shown (no screen to present from, one mid-transition, or a refused present) would otherwise
+    /// leave the SDK believing a story is open with nothing on screen. That failure is recorded as
+    /// `story_present_failed`.
     @discardableResult
     func showStoryOverlay(config: InlineStoryConfig, initialIndex: Int, payload: CEPTriggerPayload) -> Bool
     {
@@ -75,12 +75,7 @@ final class DigiaOverlayController: ObservableObject {
             initialIndex: initialIndex,
             payload: payload
         )
-        guard DigiaHostAttachment.isInUse else {
-            activeStoryOverlay = state
-            DigiaStoryPresenter.shared.present(state: state)
-            return true
-        }
-        if let cause = DigiaStoryPresenter.shared.present(state: state, checked: true) {
+        if let cause = DigiaStoryPresenter.shared.present(state: state) {
             storyLog.w(
                 "Story not shown — \(cause)",
                 campaign: payload.campaignKey,

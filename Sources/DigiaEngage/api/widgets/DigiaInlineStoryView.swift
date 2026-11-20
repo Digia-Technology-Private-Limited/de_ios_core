@@ -41,7 +41,7 @@ struct DigiaInlineStoryView: View {
     }
 
     private func openStory(at index: Int) {
-        // Reported only for a story that was shown (always, outside `Digia.attach(to:)`).
+        // Reported only for a story that was shown.
         guard SDKInstance.shared.controller.showStoryOverlay(
             config: config,
             initialIndex: index,
@@ -490,11 +490,10 @@ final class DigiaStoryPresenter {
 
     private init() {}
 
-    /// Presents the story. With `checked` (only under `Digia.attach(to:)`), answers why it could not:
-    /// `no_presenter`, `presenter_transitioning` (UIKit refuses to present from a controller mid
+    /// Presents the story, answering why it could not: `no_presenter`, `presenter_transitioning` (UIKit refuses to present from a controller mid
     /// present or dismiss) or `present_refused`; nil once presented.
     @discardableResult
-    func present(state: InlineStoryOverlayState, checked: Bool = false) -> String? {
+    func present(state: InlineStoryOverlayState) -> String? {
         // Replace any story already showing (e.g. tapping another story).
         // Tear the old one down without animation so it doesn't collide with
         // the incoming present.
@@ -504,7 +503,7 @@ final class DigiaStoryPresenter {
         }
 
         guard let presenter = ViewControllerUtil.topViewController() else { return "no_presenter" }
-        if checked, presenter.isBeingPresented || presenter.isBeingDismissed { return "presenter_transitioning" }
+        if presenter.isBeingPresented || presenter.isBeingDismissed { return "presenter_transitioning" }
 
         let host = DigiaStoryHostingController(
             rootView: InlineStoryOverlayContent(state: state)
@@ -516,7 +515,7 @@ final class DigiaStoryPresenter {
         host.modalTransitionStyle = .crossDissolve
         presented = host
         presenter.present(host, animated: true)
-        if checked, presenter.presentedViewController !== host {
+        if presenter.presentedViewController !== host {
             presented = nil
             return "present_refused"
         }
