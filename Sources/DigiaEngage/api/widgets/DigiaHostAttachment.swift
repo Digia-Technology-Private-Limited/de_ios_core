@@ -25,19 +25,11 @@ enum DigiaHostAttachment {
     /// Whether the app called `Digia.attach(to:)`, for a window that still exists.
     static var isInUse: Bool { window != nil }
 
-    /// Whether the attached host is in the window's current root, on screen.
+    /// Whether the attached host is in the window's current root, on screen or only covered by the app's
+    /// own full-screen modal (which takes the root's view out of the window until it closes).
     static var hasHost: Bool {
         guard attached, let host, let root = window?.rootViewController else { return false }
-        return host.superview === root.view && host.window != nil
-    }
-
-    /// Whether the host that draws campaigns has gone, so a cover being torn down is not the user's close.
-    /// Under attach: its host is not in the window's current root (the app replaced the root, or removed the
-    /// host) and has not been put back yet. Otherwise: no `DigiaHost` is mounted.
-    static var lostHost: Bool {
-        guard isInUse else { return HostRegistry.shared.isEmpty }
-        guard attached, let host else { return false }
-        return host.superview !== window?.rootViewController?.view
+        return host.superview === root.view && (host.window != nil || root.presentedViewController != nil)
     }
 
     /// The first controller the app itself presented in `window`, if any. Digia's own debug

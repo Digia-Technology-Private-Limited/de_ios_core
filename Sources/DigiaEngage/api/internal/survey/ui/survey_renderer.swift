@@ -218,14 +218,19 @@ private struct SurveySession: View {
                 visible && !vm.isComplete
                     && state.config.settings.display.type == .bottomSheet
             },
-            // As the nudge cover, decided on the next turn: a sheet torn down by a root swap under attach
-            // is ended by re-attaching, not counted as the user's close.
+            // As the nudge cover: SwiftUI clears this only when the system tears the cover down (the sheet's
+            // own drag/backdrop/close call `finish` directly), so it ends the survey as cancelled, not as
+            // the user's close. On the next turn, unless the survey already ended.
             set: { presented in
                 guard !presented else { return }
                 let token = state.token
                 DispatchQueue.main.async {
-                    guard orchestrator.state?.token == token, !DigiaHostAttachment.lostHost else { return }
-                    finish(completed: false)
+                    guard orchestrator.state?.token == token else { return }
+                    SDKInstance.shared.surveyReporter.markSurveyDismissed(
+                        abandonedAtItem: vm.currentItemIndex,
+                        answeredCount: vm.answers.values.filter { $0.isAnswered }.count,
+                        reason: .cancelled
+                    )
                 }
             }
         )

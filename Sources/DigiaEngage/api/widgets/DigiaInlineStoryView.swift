@@ -527,6 +527,15 @@ final class DigiaStoryPresenter {
         self.presented = nil
         presented.presentingViewController?.dismiss(animated: true)
     }
+
+    /// UIKit took a story down without the SDK asking (the app dismissed it, or its root went away). Clears the
+    /// story state, else `hasActiveOverlay` stays true and the host swallows every touch. Not for a story a
+    /// newer one already replaced.
+    func storyWentAway(_ controller: UIViewController) {
+        guard presented == nil || presented === controller else { return }
+        presented = nil
+        SDKInstance.shared.controller.storyOverlayEnded()
+    }
 }
 
 private final class DigiaStoryHostingController<Content: View>: UIHostingController<Content> {
@@ -552,6 +561,14 @@ private final class DigiaStoryHostingController<Content: View>: UIHostingControl
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         becomeFirstResponder()
+    }
+
+    /// Dismissed, by the SDK or from outside it. Covered by something presented on top is not a dismissal.
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        if isBeingDismissed || presentingViewController == nil {
+            DigiaStoryPresenter.shared.storyWentAway(self)
+        }
     }
 
     @objc private func dismissStoryOverlay() {

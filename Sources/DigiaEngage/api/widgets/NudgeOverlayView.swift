@@ -78,13 +78,13 @@ struct NudgeOverlayView: View {
             },
             set: { newValue in
                 guard newValue == nil, let nudge = SDKInstance.shared.controller.activeNudge else { return }
-                // Decided on the next turn, once a root swap has finished: under attach, a cover torn down
-                // because the app replaced its root is not a user close; re-attaching ends it as cancelled.
+                // SwiftUI clears this only when the system tears the cover down (the app replaced its root, or
+                // dismissed everything): the user's own closes call `markNudgeDismissed` directly, and the
+                // cover can't be swiped away. So it is never a user close. On the next turn, unless the nudge
+                // already ended (e.g. by the host teardown).
                 DispatchQueue.main.async {
-                    guard SDKInstance.shared.controller.activeNudge?.id == nudge.id,
-                        !DigiaHostAttachment.lostHost
-                    else { return }
-                    SDKInstance.shared.nudgeOrchestrator.markNudgeDismissed()
+                    guard SDKInstance.shared.controller.activeNudge?.id == nudge.id else { return }
+                    SDKInstance.shared.nudgeOrchestrator.markNudgeDismissed(reason: .cancelled)
                 }
             }
         )

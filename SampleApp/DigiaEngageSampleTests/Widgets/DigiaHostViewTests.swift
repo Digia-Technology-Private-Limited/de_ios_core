@@ -126,9 +126,9 @@ struct DigiaHostViewTests {
         #expect(newRoot.view.subviews.last is DigiaHostView)
     }
 
-    // Fails if: the nudge cover's binding setter reports a close when the cover was torn down by a root
-    // swap (`DigiaHostAttachment.lostHost` guard in `NudgeOverlayView.coverBinding`): the sheet would end as
-    // user_close, counting a close the user never made.
+    // Fails if: the nudge cover's binding setter (`NudgeOverlayView.coverBinding`) reports anything but cancelled
+    // when the system tears the cover down: a root swap would end the sheet as user_close, counting a close the
+    // user never made.
     @Test("when the app replaces its root under a bottom sheet, the sheet ends as cancelled, not user_close")
     func rootSwapUnderASheetIsNotAUserClose() async throws {
         let sdk = try await SdkHarness.start(
@@ -384,6 +384,158 @@ struct DigiaHostViewTests {
         let shown = try sdk.deliver("test_nudge_dialog")
         try await sdk.waitUntil("the dialog draws in the new window") { shown.state == .displaying }
         first.isHidden = true
+    }
+
+    private func openStory(_ sdk: SdkHarness) -> Bool {
+        SDKInstance.shared.controller.showStoryOverlay(
+            config: InlineStoryConfig(slotKey: "story_slot", items: []), initialIndex: 0,
+            payload: CEPTriggerPayload(cepCampaignId: "cep-story", campaignKey: "story_test", cepMetadata: [:]))
+    }
+
+    // Fails if: `endCampaignsForHostTeardown` stops closing an open story: `activeStoryOverlay` would stay set
+    // after the root (and the story with it) is gone, `hasActiveOverlay` would stay true, and the host would
+    // swallow every touch on the new root.
+    @Test("with attach, a story open when the app replaces its root is closed, and the app gets its touches back")
+    func rootSwapClosesAnOpenStory() async throws {
+        let sdk = try await SdkHarness.start(loadCampaign("campaigns/nudge_dialog/nudge_dialog.json"))
+        defer { sdk.tearDown() }
+        let window = makeWindow(root: AppScreen(), sdk)
+        Digia.attach(to: window)
+        ComponentTestHost.drainRunLoop(for: 0.5)
+        #expect(openStory(sdk))
+
+        window.rootViewController = AppScreen()
+        try await sdk.waitUntil("the story is closed") { SDKInstance.shared.controller.activeStoryOverlay == nil }
+
+        #expect(!Digia.hasActiveOverlay)
+    }
+
+    // Fails if: the story controller stops clearing the story state when UIKit dismisses it from outside the
+    // SDK (`DigiaStoryHostingController.viewDidDisappear`): the app would be frozen behind a story that is gone.
+    @Test("a story dismissed by the app, not by the SDK, no longer counts as open")
+    func externallyDismissedStoryIsClosed() async throws {
+        let sdk = try await SdkHarness.start(loadCampaign("campaigns/nudge_dialog/nudge_dialog.json"))
+        defer { sdk.tearDown() }
+        let root = AppScreen()
+        let window = makeWindow(root: root, sdk)
+        Digia.attach(to: window)
+        ComponentTestHost.drainRunLoop(for: 0.5)
+        #expect(openStory(sdk))
+        try await sdk.waitUntil("the story is presented") { root.presentedViewController != nil }
+
+        root.dismiss(animated: false)
+        try await sdk.waitUntil("the story is closed") { SDKInstance.shared.controller.activeStoryOverlay == nil }
+
+        #expect(!Digia.hasActiveOverlay)
+    }
+
+    // Fails if: an open story stops counting as Digia's own presentation that turns new nudges away
+    // (`hostUnavailable`): the dialog would be drawn hidden behind the story and count an impression.
+    @Test("with a story open, a new dialog is turned away as surface_busy")
+    func openStoryTurnsANudgeAway() async throws {
+        let sdk = try await SdkHarness.start(loadCampaign("campaigns/nudge_dialog/nudge_dialog.json"))
+        defer { sdk.tearDown() }
+        let root = AppScreen()
+        let window = makeWindow(root: root, sdk)
+        Digia.attach(to: window)
+        ComponentTestHost.drainRunLoop(for: 0.5)
+        #expect(openStory(sdk))
+        try await sdk.waitUntil("the story is presented") { root.presentedViewController != nil }
+
+        let blocked = try sdk.deliver("test_nudge_dialog")
+
+        #expect(dropReason(blocked, sdk) == .surfaceBusy)
+        SDKInstance.shared.controller.dismissStoryOverlay()
+        try await sdk.settle(0.5)
+    }
+
+    private func presentFullScreen(over root: UIViewController) {
+        let modal = AppScreen()
+        modal.modalPresentationStyle = .fullScreen
+        root.present(modal, animated: false)
+        ComponentTestHost.drainRunLoop(for: 0.5)
+    }
+
+    // Fails if: `DigiaHostAttachment.hasHost` goes back to requiring the host in a window: a full-screen modal
+    // takes the root's view out of the window, and the dialog would drop as host_not_mounted instead.
+    @Test("with attach, a dialog triggered under the app's full-screen modal drops as host_modal_open")
+    func fullScreenModalIsHostModalOpen() async throws {
+        let sdk = try await SdkHarness.start(loadCampaign("campaigns/nudge_dialog/nudge_dialog.json"))
+        defer { sdk.tearDown() }
+        SDKInstance.shared.onHostUnmounted(SDKInstance.testHostId)  // only the app's real host counts
+        let root = AppScreen()
+        let window = makeWindow(root: root, sdk)
+        Digia.attach(to: window)
+        ComponentTestHost.drainRunLoop(for: 0.3)
+        presentFullScreen(over: root)
+        try await sdk.waitUntil("UIKit takes the covered root out of the window") { root.view.window == nil }
+
+        let blocked = try sdk.deliver("test_nudge_dialog")
+
+        #expect(dropReason(blocked, sdk) == .hostModalOpen)
+        root.dismiss(animated: false)
+        try await sdk.settle(0.5)
+    }
+
+    // Fails if: the host gate drops a floater under the app's full-screen modal (host_not_mounted): floaters and
+    // guides are outside the modal rule and are accepted as before.
+    @Test("with attach, a floater triggered under the app's full-screen modal is not dropped")
+    func fullScreenModalLetsAFloaterThrough() async throws {
+        let sdk = try await SdkHarness.start(loadCampaign("campaigns/floater/floater_story_window.json"))
+        defer { sdk.tearDown() }
+        SDKInstance.shared.onHostUnmounted(SDKInstance.testHostId)
+        let root = AppScreen()
+        let window = makeWindow(root: root, sdk)
+        Digia.attach(to: window)
+        ComponentTestHost.drainRunLoop(for: 0.3)
+        presentFullScreen(over: root)
+        try await sdk.waitUntil("UIKit takes the covered root out of the window") { root.view.window == nil }
+
+        let floater = try sdk.deliver("test_floater_story")
+
+        #expect(dropReason(floater, sdk) == nil)
+        root.dismiss(animated: false)
+        try await sdk.waitUntil("the floater shows once the modal is closed") { floater.state == .displaying }
+    }
+
+    // Fails if: `DigiaHostView` tears its hosting controller down when it only left the window under the app's
+    // full-screen modal: SwiftUI state on screen (an in-progress survey's answers) would be lost.
+    @Test("with attach, the host keeps its SwiftUI layer across the app's full-screen modal")
+    func fullScreenModalKeepsTheHostLayer() async throws {
+        let sdk = try await SdkHarness.start(loadCampaign("campaigns/nudge_dialog/nudge_dialog.json"))
+        defer { sdk.tearDown() }
+        let root = AppScreen()
+        let window = makeWindow(root: root, sdk)
+        Digia.attach(to: window)
+        ComponentTestHost.drainRunLoop(for: 0.3)
+        let host = try #require(root.view.subviews.last as? DigiaHostView)
+        let layer = try #require(host.subviews.first)
+
+        presentFullScreen(over: root)
+        try await sdk.waitUntil("UIKit takes the covered root out of the window") { root.view.window == nil }
+        root.dismiss(animated: false)
+        try await sdk.waitUntil("the root is back in the window") { root.view.window != nil }
+
+        #expect(host.subviews.first === layer)
+    }
+
+    // Fails if: without attach, the host gate answers host_not_mounted before looking for the app's modal: a
+    // full-screen modal makes `DigiaHost` disappear, so the dialog would be misreported.
+    @Test("without attach, a dialog triggered under the app's full-screen modal drops as host_modal_open")
+    func fullScreenModalOverDigiaHostIsHostModalOpen() async throws {
+        let sdk = try await SdkHarness.start(loadCampaign("campaigns/nudge_dialog/nudge_dialog.json"))
+        defer { sdk.tearDown() }
+        SDKInstance.shared.onHostUnmounted(SDKInstance.testHostId)
+        try sdk.mount { Text("App home") }
+        let root = try #require(ViewControllerUtil.keyWindow()?.rootViewController)
+        presentFullScreen(over: root)
+        try await sdk.waitUntil("UIKit takes the covered root out of the window") { root.view.window == nil }
+
+        let blocked = try sdk.deliver("test_nudge_dialog")
+
+        #expect(dropReason(blocked, sdk) == .hostModalOpen)
+        root.dismiss(animated: false)
+        try await sdk.settle(0.5)
     }
 
     // Fails if: `hostUnavailable` checks for an app modal only under attach. With a SwiftUI `DigiaHost`

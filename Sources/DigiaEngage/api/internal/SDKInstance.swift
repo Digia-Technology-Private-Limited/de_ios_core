@@ -1412,6 +1412,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// them showing to nobody, as Flutter does on a host teardown: floaters as `host_teardown`, nudges,
     /// surveys and guides cancelled. Inline slots live in the app's own screens and are not affected.
     func endCampaignsForHostTeardown() {
+        // An open story went with the old root too; left set, it would keep every touch.
+        if controller.activeStoryOverlay != nil { controller.dismissStoryOverlay() }
         let ended = surfaceOccupants().filter {
             if case .inline = $0.kind { return false }
             return true
@@ -1580,7 +1582,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         } else {
             // A classic guide is drawn by the React Native renderer, not by a host.
             if let guide = request.campaign.guideConfig, isClassicRNGuide(guide) { return nil }
-            guard !HostRegistry.shared.isEmpty else {
+            // The app's own full-screen modal also makes `DigiaHost` disappear: that is not "no host".
+            if HostRegistry.shared.isEmpty,
+                DigiaHostAttachment.appPresentation(in: ViewControllerUtil.keyWindow()) == nil
+            {
                 return (.hostNotMounted, "no Digia host on screen: no DigiaHost is mounted")
             }
         }
@@ -1588,8 +1593,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         case .nudge, .survey: break
         default: return nil
         }
+        // An open story is not a surface occupant, so the surface rule would not turn the nudge away.
+        if controller.activeStoryOverlay != nil { return (.surfaceBusy, "a story is on screen") }
         let digiaPresents = controller.activeNudge != nil || surveyOrchestrator.state != nil
-            || controller.activeStoryOverlay != nil
         let window = attached ? DigiaHostAttachment.window : ViewControllerUtil.keyWindow()
         guard !digiaPresents, let modal = DigiaHostAttachment.appPresentation(in: window) else { return nil }
         return (.hostModalOpen, "the app is presenting \(type(of: modal))")

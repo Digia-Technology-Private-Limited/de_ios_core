@@ -83,6 +83,8 @@ final class DigiaOverlayController: ObservableObject {
                 reason: TimelineReason.storyPresentFailed,
                 extras: ["cause": cause]
             )
+            // A story already open was dismissed to make room for this one, so none is open now.
+            activeStoryOverlay = nil
             return false
         }
         activeStoryOverlay = state
@@ -92,6 +94,11 @@ final class DigiaOverlayController: ObservableObject {
     func dismissStoryOverlay() {
         activeStoryOverlay = nil
         DigiaStoryPresenter.shared.dismiss()
+    }
+
+    /// The story viewer was taken down outside the SDK; only the state is left to clear.
+    func storyOverlayEnded() {
+        activeStoryOverlay = nil
     }
 }
 

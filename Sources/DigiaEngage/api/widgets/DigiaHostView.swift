@@ -44,11 +44,18 @@ public final class DigiaHostView: UIView {
     public override func didMoveToWindow() {
         super.didMoveToWindow()
         if window == nil {
-            unmount()
+            // Still in its superview: the app covered the root with a full-screen modal, or replaced the root.
+            // The SwiftUI layer is kept, so what it shows (an in-progress survey) survives the modal; it is
+            // dropped when the host leaves its superview (`didMoveToSuperview`).
             DigiaHostAttachment.hostLeftWindow(self)
         } else if hostingController == nil {
             mount()
         }
+    }
+
+    public override func didMoveToSuperview() {
+        super.didMoveToSuperview()
+        if superview == nil { unmount() }
     }
 
     /// Lets touches through to the app unless the SDK is drawing something at that point.
