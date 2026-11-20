@@ -244,7 +244,11 @@ final class GameSurface {
     /// inline or floating entry's CEP presentation is the entry, which stays
     /// on screen. Matches Android. Every presentation policy refreshes rewards only when
     /// the page is already loaded, while a rewards game always refreshes.
-    private func closed(settle: GameSettle, campaign: CampaignModel, reason: String, dismissed: GameEvent.Dismissed) {
+    /// `chanceId` is the chance the closed game was playing.
+    private func closed(
+        settle: GameSettle, campaign: CampaignModel, reason: String, chanceId: String,
+        dismissed: GameEvent.Dismissed
+    ) {
         switch settle {
         case .presentation(let payload, let entry):
             sdk.events.toDigia(dismissed, payload: payload)
@@ -258,12 +262,12 @@ final class GameSurface {
             switch entry {
             case .inlineTeaser:
                 refreshInlineEntryAfterClose(
-                    campaignKey: campaign.campaignKey, payload: payload)
+                    campaignKey: campaign.campaignKey, payload: payload, chanceId: chanceId)
             case .direct, .unknown:
                 break
             case .floating:
                 refreshFloatingEntryAfterClose(
-                    campaignKey: campaign.campaignKey, payload: payload)
+                    campaignKey: campaign.campaignKey, payload: payload, chanceId: chanceId)
             }
         case .rewards(let chanceId):
             sdk.events.toDigia(
@@ -472,7 +476,7 @@ final class GameSurface {
                     return
                 }
                 self.closed(
-                    settle: settle, campaign: campaign, reason: reason,
+                    settle: settle, campaign: campaign, reason: reason, chanceId: stats.chanceId,
                     dismissed: dismissed(Self.gameDismissReason(closeReason: reason)))
             },
             onFailure: { [weak self] failure in
@@ -497,10 +501,12 @@ final class GameSurface {
                         self.settleDirectFailure(payload: payload, reason: failure.wireValue)
                     case .inlineTeaser:
                         self.sdk.gamification.refreshRewardsIfLoaded()
-                        self.refreshInlineEntryAfterClose(campaignKey: campaignKey, payload: payload)
+                        self.refreshInlineEntryAfterClose(
+                            campaignKey: campaignKey, payload: payload, chanceId: stats.chanceId)
                     case .floating:
                         self.sdk.gamification.refreshRewardsIfLoaded()
-                        self.refreshFloatingEntryAfterClose(campaignKey: campaignKey, payload: payload)
+                        self.refreshFloatingEntryAfterClose(
+                            campaignKey: campaignKey, payload: payload, chanceId: stats.chanceId)
                     }
                 }
             },
@@ -571,10 +577,10 @@ final class GameSurface {
     /// when the chance stays. With no user the call is skipped and the floater
     /// hides.
     private func refreshFloatingEntryAfterClose(
-        campaignKey: String, payload: CEPTriggerPayload
+        campaignKey: String, payload: CEPTriggerPayload, chanceId: String
     ) {
         refreshEntryAfterClose(
-            campaignKey: campaignKey, payload: payload,
+            campaignKey: campaignKey, payload: payload, chanceId: chanceId,
             hide: { [weak self] in self?.hideFloatingEntry(campaignKey: campaignKey, payload: payload) },
             onKept: { [weak self] in self?.rewarmEntry(payload) })
     }
@@ -598,24 +604,28 @@ final class GameSurface {
     }
 
     /// After a game opened from an inline entry closes: the card always
-    /// stays. `state` only refreshes its stored chance (an extra play stores
-    /// the new one). A spent chance stays stored too, so a tap reopens the
+    /// stays. `state` only refreshes its stored chance (a `playable` answer
+    /// stores that chance). A spent chance stays stored too, so a tap reopens the
     /// skin, whose own `state` call answers `played` and shows the reward
     /// already won.
     private func refreshInlineEntryAfterClose(
-        campaignKey: String, payload: CEPTriggerPayload
+        campaignKey: String, payload: CEPTriggerPayload, chanceId: String
     ) {
         let rewarm: @MainActor () -> Void = { [weak self] in self?.rewarmEntry(payload) }
-        refreshEntryAfterClose(campaignKey: campaignKey, payload: payload, hide: rewarm, onKept: rewarm)
+        refreshEntryAfterClose(
+            campaignKey: campaignKey, payload: payload, chanceId: chanceId, hide: rewarm, onKept: rewarm)
     }
 
     /// The one entry-close round-trip both entries share: with no user the
-    /// entry hides at once, otherwise the backend `state` about the entry's own
-    /// chance decides. `played` and a failed call keep the stored chance (a
+    /// entry hides at once, otherwise the backend `state` about `chanceId`, the
+    /// chance the closed game was playing, decides. Not the stored chance: a
+    /// re-trigger can replace it while the game is open, and play next moves
+    /// the game to a newer chance. `played` and a failed call keep the stored chance (a
     /// reopen shows the outcome); any other non-playable answer runs `hide`.
     private func refreshEntryAfterClose(
         campaignKey: String,
         payload: CEPTriggerPayload,
+        chanceId: String,
         hide: @MainActor @escaping () -> Void,
         onKept: @MainActor @escaping () -> Void = {}
     ) {
@@ -632,7 +642,7 @@ final class GameSurface {
             let result = await self.sdk.gamification.gameOutcomeSource.state(
                 campaignKey: campaignKey,
                 testInvocationId: testInvocationIdOf(payload.cepCampaignId),
-                chanceId: self.sdk.gamificationSurface.chances[campaignKey]?.chanceId)
+                chanceId: chanceId)
             if case .failed(let error) = result {
                 // The close-time `state` failure reports like the rewards
                 // fetch — and a timeout stays a timeout, never `network`.

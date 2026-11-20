@@ -228,6 +228,36 @@ struct GameChanceEventsAndCepTests {
         #expect(dismissed.count == 2)
     }
 
+    // Fails if an entry's close stops asking `state` about the chance the game
+    // played (`chanceId: stats.chanceId` in `onClose`/`onFailure` of
+    // `makeGameOpenRequest`): a re-trigger can replace the entry's stored chance
+    // while the game is open, and `state` about that one answers `playable`,
+    // so a reopen would spin again.
+    @Test(
+        "an entry's close asks state about the chance the game played",
+        arguments: [GamificationEntryKind.inlineTeaser, .floating], [false, true])
+    func entryCloseAsksStateAboutTheChanceTheGamePlayed(
+        entry: GamificationEntryKind, failed: Bool
+    ) async throws {
+        let (sdk, recorder) = try await rig()
+        let client = try #require(sdk.networkClient as? MockNetworkClient)
+        sdk.setUserId("u_123")
+        let request = try directOpenRequest(sdk, recorder: recorder, entry: entry)
+
+        request.onShown?()
+        // The skin's own `state` answered with an older unplayed chance.
+        request.onHttpAnswer?("state", ["chanceId": "ch-1"], Self.envelope(["chanceId": "ch-0"]))
+        if failed { request.onFailure?(.renderError) } else { request.onClose?("skin") }
+        try? await Task.sleep(nanoseconds: 200_000_000)
+
+        let stateCall = try #require(client.recordedRequests.last {
+            $0.url.absoluteString == DigiaEndpoints.gamificationState
+        })
+        let bodyData = try #require(stateCall.body)
+        let body = try #require(try JSONSerialization.jsonObject(with: bodyData) as? [String: Any])
+        #expect(body["chanceId"] as? String == "ch-0")
+    }
+
     // Guards `closedBeforeShown` behind `guard shown` in `onClose`: a game
     // closed before it showed was never Viewed, so it is an open failure
     // (`closed_before_ready`) that drops its presentation, never a Dismissed;
