@@ -130,12 +130,14 @@ struct TimelineWireStringsTests {
                 "app_event_blocked",
                 "app_event_queue_full",
                 "digia_managed",
+                "story_present_failed",
             ])
     }
 
     @Test("HealthReasons detail-key projections")
     func healthReasonsDetailKeys() {
         #expect(HealthReasons.detailKeys["timeout"] == ["surface_kind"])
+        #expect(HealthReasons.detailKeys["story_present_failed"] == ["cause"])
         #expect(HealthReasons.detailKeys["pending_expired"] == ["cep"])
         #expect(HealthReasons.detailKeys["superseded"] == ["cep"])
         #expect(HealthReasons.detailKeys["unknown_campaign_key"] == [])

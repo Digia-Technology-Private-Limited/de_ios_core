@@ -75,6 +75,9 @@ enum HealthReasons {
         "app_event_blocked",
         "app_event_queue_full",
         "digia_managed",
+        // Breakage (#262): the story viewer could not be presented. The story is not recorded as
+        // open and sends no opened analytics, so nothing else reports it.
+        "story_present_failed",
     ]
 
     /// Which `extras` keys each reason may send as `detail` — and nothing else.
@@ -115,6 +118,7 @@ enum HealthReasons {
         "initialization_failed": [],
         "surface_busy": ["blocking_campaign_key", "blocking_kind"],
         "timeout": ["surface_kind"],
+        "story_present_failed": ["cause"],
         "pending_expired": ["cep"],
         "superseded": ["cep"],
         "unsupported_action_type": ["action_type"],
