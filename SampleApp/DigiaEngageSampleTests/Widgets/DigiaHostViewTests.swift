@@ -232,11 +232,11 @@ struct DigiaHostViewTests {
             == "presenter_transitioning")
     }
 
-    // Fails if: `AppAppearanceHostingController` stops answering status bar style and orientation with
-    // the app root's choices (or NudgeCoverPresenter stops using it under attach): the cover would then
-    // flip the status bar and let a portrait-only app rotate while the sheet is up.
-    @Test("with attach, a bottom-sheet nudge keeps the app's status bar style and orientation lock")
-    func bottomSheetKeepsTheAppsStatusBarAndOrientation() async throws {
+    // Fails if: `NudgeOverlayView` stops drawing bottom-sheet and full-screen nudges inline under attach
+    // (e.g. goes back to presenting a cover): a modal of Digia's own would take over the status bar and
+    // orientation from the app, and a present made before the re-mounted host is in a window is lost.
+    @Test("with attach, a bottom-sheet nudge is drawn in the host, with no modal over the app")
+    func bottomSheetIsDrawnInlineUnderAttach() async throws {
         let sdk = try await SdkHarness.start(
             loadCampaign("campaigns/nudge_bottomsheet/nudge_bottomsheet_backdrop_on.json"))
         defer { sdk.tearDown() }
@@ -246,17 +246,13 @@ struct DigiaHostViewTests {
         ComponentTestHost.drainRunLoop(for: 0.3)
 
         let presentation = try sdk.deliver("test_nudge_bottomsheet_backdrop_on")
-        try await sdk.waitUntil("the sheet is presented") {
-            presentation.state == .displaying && root.presentedViewController != nil
+        try await sdk.waitUntil("the sheet is drawn") {
+            presentation.state == .displaying && sdk.isShowing("Backdrop Tap Dismiss On")
         }
-
-        try await sdk.waitUntil("the sheet is drawn") { sdk.isShowing("Backdrop Tap Dismiss On") }
-        let cover = try #require(root.presentedViewController)
-        #expect(cover.preferredStatusBarStyle == .lightContent)
-        #expect(cover.supportedInterfaceOrientations == .portrait)
+        #expect(root.presentedViewController == nil)
 
         Digia.dismissActiveNudge()
-        try await sdk.waitUntil("the cover is gone") { root.presentedViewController == nil }
+        try await sdk.waitUntil("the sheet is gone") { !sdk.isShowing("Backdrop Tap Dismiss On") }
     }
 
     private final class PortraitScreen: UIViewController {
