@@ -24,7 +24,7 @@ struct PlaySessionTests {
             return grant
         }
 
-        func state(campaignKey: String, testInvocationId: String?) async -> ChanceStateResult {
+        func state(campaignKey: String, testInvocationId: String?, chanceId: String?) async -> ChanceStateResult {
             .none
         }
 
@@ -95,7 +95,7 @@ struct PlaySessionTests {
             cont?.resume(returning: result)
         }
 
-        func state(campaignKey: String, testInvocationId: String?) async -> ChanceStateResult { .none }
+        func state(campaignKey: String, testInvocationId: String?, chanceId: String?) async -> ChanceStateResult { .none }
 
         func getRewards() async -> Result<GameRewardsResponse, GameOutcomeError> {
             .failure(.transport("unused"))
@@ -212,5 +212,12 @@ struct PlaySessionTests {
 
         #expect(source.lastRequest?.userId == "u-123")
         #expect(source.lastRequest?.userHash == "h-1")
+    }
+
+    // Fails if a played chance stops keeping the entry (the `.played` arm of
+    // `decideAfterClose`): a reopen would then lose the outcome already won.
+    @Test("a played chance keeps the entry and its stored chance after close")
+    func playedKeepsEntry() {
+        #expect(PlaySession.decideAfterClose(.played(chanceId: "ch-1")) == .keep(nil))
     }
 }

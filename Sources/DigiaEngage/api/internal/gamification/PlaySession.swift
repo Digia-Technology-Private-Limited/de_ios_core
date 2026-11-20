@@ -107,17 +107,18 @@ final class PlaySession {
         return .open(chance)
     }
 
-    /// The after-close decision for a game opened from a floating entry.
-    /// `playable` keeps the floater with the new chance, a failed call keeps
-    /// it with the stored one, and anything else hides it. Pure, so both
-    /// platforms share it exactly.
+    /// The after-close decision from the `state` answer about the entry's own
+    /// chance. `playable` keeps the entry with that chance; `played` and a
+    /// failed call keep it with the stored one, so a reopen shows the outcome
+    /// already won; anything else hides it. Pure, so both platforms share it
+    /// exactly.
     nonisolated static func decideAfterClose(_ state: ChanceStateResult) -> CloseDecision {
         switch state {
         case .playable(let chanceId, let expiresAt):
             return .keep(GrantedChance(chanceId: chanceId, expiresAt: expiresAt, show: true))
-        case .failed:
+        case .played, .failed:
             return .keep(nil)
-        case .played, .expired, .none, .refused:
+        case .expired, .none, .refused:
             return .hide
         }
     }
@@ -167,7 +168,7 @@ enum TapDecision: Equatable, Sendable {
 /// What closing a game opened from a floating entry decided.
 enum CloseDecision: Equatable, Sendable {
     /// Keep the floater. A non-nil replacement replaces the stored chance (a
-    /// fresh `playable` answer); nil keeps the stored one (a failed call).
+    /// fresh `playable` answer); nil keeps the stored one (`played` or a failed call).
     case keep(GrantedChance?)
     /// Dismiss the floater and forget its spent chance; a later trigger can show it again.
     case hide

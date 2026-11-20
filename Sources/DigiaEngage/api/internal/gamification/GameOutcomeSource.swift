@@ -112,9 +112,11 @@ protocol GameOutcomeSource: Sendable {
     func grantChance(_ request: GrantChanceRequest) async -> GrantChanceResult
     /// The read-only play state for a campaign key. Reserves nothing and does
     /// not count as a play. Identity travels in the headers the network
-    /// client already sends; the body carries only the campaign key, plus the
-    /// live-test invocation when a live-test game closed.
-    func state(campaignKey: String, testInvocationId: String?) async -> ChanceStateResult
+    /// client already sends; the body carries the campaign key, the live-test
+    /// invocation when a live-test game closed, and the entry's own `chanceId`
+    /// when it has one — a played chance then answers `played` even while
+    /// another delivery's chance is playable.
+    func state(campaignKey: String, testInvocationId: String?, chanceId: String?) async -> ChanceStateResult
     func getRewards() async -> Result<GameRewardsResponse, GameOutcomeError>
 }
 
@@ -182,10 +184,15 @@ final class HttpGameOutcomeSource: GameOutcomeSource, Sendable {
     /// or a refusal. A blank `chanceId` on `playable`/`played`, an unknown
     /// `state`, or an unusable `refused` is `invalidResponse`, in the strict
     /// grantChance style.
-    func state(campaignKey: String, testInvocationId: String? = nil) async -> ChanceStateResult {
+    func state(
+        campaignKey: String, testInvocationId: String? = nil, chanceId: String? = nil
+    ) async -> ChanceStateResult {
         var body: [String: Any] = ["campaignKey": campaignKey]
         if let testInvocationId, !testInvocationId.isEmpty {
             body["testInvocationId"] = testInvocationId
+        }
+        if let chanceId, !chanceId.isEmpty {
+            body["chanceId"] = chanceId
         }
         switch await post(
             urlString: DigiaEndpoints.gamificationState,

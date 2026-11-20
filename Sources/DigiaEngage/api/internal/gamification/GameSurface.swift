@@ -610,8 +610,9 @@ final class GameSurface {
     }
 
     /// The one entry-close round-trip both entries share: with no user the
-    /// entry hides at once, otherwise the backend `state` decides. A failed
-    /// call keeps the stored chance; any other non-playable answer runs `hide`.
+    /// entry hides at once, otherwise the backend `state` about the entry's own
+    /// chance decides. `played` and a failed call keep the stored chance (a
+    /// reopen shows the outcome); any other non-playable answer runs `hide`.
     private func refreshEntryAfterClose(
         campaignKey: String,
         payload: CEPTriggerPayload,
@@ -630,7 +631,8 @@ final class GameSurface {
             let start = Date()
             let result = await self.sdk.gamification.gameOutcomeSource.state(
                 campaignKey: campaignKey,
-                testInvocationId: testInvocationIdOf(payload.cepCampaignId))
+                testInvocationId: testInvocationIdOf(payload.cepCampaignId),
+                chanceId: self.sdk.gamificationSurface.chances[campaignKey]?.chanceId)
             if case .failed(let error) = result {
                 // The close-time `state` failure reports like the rewards
                 // fetch — and a timeout stays a timeout, never `network`.
