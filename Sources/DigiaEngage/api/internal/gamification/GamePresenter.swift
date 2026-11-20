@@ -131,9 +131,11 @@ final class GamePresentation: Identifiable, ObservableObject {
     /// 15 s, or sends no `ready` within 5 s of the commit, closes silently.
     func preload(held: Bool = false) {
         isHeld = held
+        let engine = GamePrewarmer.takeEngine()
+        if request.timing.warm == nil { request.timing.warm = engine != nil ? "engine" : "none" }
         let coordinator = GameWebCoordinator(
             game: self, entryFile: entryFile, bundleRoot: bundleRoot,
-            engine: GamePrewarmer.takeEngine())
+            engine: engine)
         webCoordinator = coordinator
         let view = coordinator.view
         view.alpha = 0
@@ -146,6 +148,7 @@ final class GamePresentation: Identifiable, ObservableObject {
             view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
             window.addSubview(view)
         }
+        if !didCommitPage { request.timing.stage = GameOpenTiming.stageCommit }
         coordinator.start()
     }
 
@@ -179,6 +182,7 @@ final class GamePresentation: Identifiable, ObservableObject {
     func pageDidCommit() {
         guard !didCommitPage else { return }
         didCommitPage = true
+        request.timing.stage = GameOpenTiming.stageReady
         armLoadTimer()
     }
 
@@ -199,6 +203,8 @@ final class GamePresentation: Identifiable, ObservableObject {
     func release(with request: GameOpenRequest) {
         guard isHeld, !didFinish else { return }
         self.request = request
+        request.timing.warm = "game"
+        request.timing.stage = didCommitPage ? GameOpenTiming.stageReady : GameOpenTiming.stageCommit
         initMessage = Self.initMessage(for: request)
         lastDevicePush = GameDeviceInfo.current(sdkVersion: sdkVersion).pushPayload
         isHeld = false
@@ -657,7 +663,9 @@ final class GamePresentation: Identifiable, ObservableObject {
         bridge.close()
     }
 
-    /// Renderer death: destroy, close quietly, this skin version off for the session.
+    /// Renderer death: this skin version off for the session. Before `ready`
+    /// the open fails `web_process_terminated`; a shown game closes like a
+    /// native close with that dismiss reason.
     func failRendering() {
         // A held game has shown nothing and been asked for nothing: discard it quietly.
         if isHeld {
@@ -666,7 +674,11 @@ final class GamePresentation: Identifiable, ObservableObject {
         }
         GameAvailability.markCrashed(skinId: request.skinId, skinVersion: request.skinVersion)
         guard bridge.state != .closed else { return }
-        finish(report: { [request] in request.onFailure?(.renderError) })
+        if isReady {
+            dismiss(reason: "web_process_terminated")
+            return
+        }
+        finish(report: { [request] in request.onFailure?(.webProcessTerminated) })
         bridge.close()
     }
 

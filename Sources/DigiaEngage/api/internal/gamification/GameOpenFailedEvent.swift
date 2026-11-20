@@ -11,16 +11,29 @@ struct GameOpenFailedEvent: EngageAnalyticsEvent {
     let entry: String
     let skinId: String
     let skinVersion: Int
+    /// `game`, `engine` or `none`: what the prewarm had ready for this open.
+    var warm: String? = nil
+    /// The device tier; nil when it cannot be read.
+    var tier: String? = nil
+    /// Milliseconds from the intent to the failure; 0 for an entry tap.
+    var msElapsed: Int64? = nil
+    /// How far the open got: `grant`, `download`, `load`, `commit` or `ready`.
+    var stage: String? = nil
 
     var eventName: String { "game_open_failed" }
 
     var properties: [String: Any] {
-        [
+        var properties: [String: Any] = [
             "reason": reason,
             "chance_id": chanceId,
             "entry": entry,
             "skin_id": skinId,
             "skin_version": skinVersion,
         ]
+        if let warm { properties["warm"] = warm }
+        if let tier { properties["tier"] = tier }
+        if let msElapsed { properties["ms_elapsed"] = msElapsed }
+        if let stage { properties["stage"] = stage }
+        return properties
     }
 }

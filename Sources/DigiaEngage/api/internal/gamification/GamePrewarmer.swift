@@ -176,6 +176,19 @@ enum GamePrewarmer {
 
     static var warmGameKeyForTesting: String? { warm?.id }
 
+    /// For analytics: `game` when this campaign's game is warm, `engine` when
+    /// only the engine is, `none` otherwise.
+    static func warmKind(campaignKey: String) -> String {
+        if warm?.id == campaignKey { return "game" }
+        return engine != nil ? "engine" : "none"
+    }
+
+    /// The device tier for analytics. Optional to match Android, where it can
+    /// be unreadable; on iOS it is always read.
+    static func deviceTier() -> String? {
+        GameDeviceInfo.current(sdkVersion: DigiaSdkVersion.value).tier
+    }
+
     private static func gameAllowed(_ request: GameOpenRequest) -> Bool {
         guard #available(iOS 17, *) else { return false }
         guard deviceAllowsGame() else { return false }

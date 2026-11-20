@@ -237,7 +237,10 @@ final class GamificationSurface: CampaignSurface {
                     GameOpenFailedEvent(
                         reason: reason, chanceId: chances[key]?.chanceId ?? "",
                         entry: config.entryKind.rawValue,
-                        skinId: config.skinId, skinVersion: config.skinVersion),
+                        skinId: config.skinId, skinVersion: config.skinVersion,
+                        warm: GamePrewarmer.warmKind(campaignKey: key),
+                        tier: GamePrewarmer.deviceTier(),
+                        msElapsed: 0, stage: GameOpenTiming.stageGrant),
                     payload: payload)
             }
             // The entry stays on screen, so its own presentation stays live.

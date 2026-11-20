@@ -14,16 +14,26 @@ enum GameEvent {
         let chanceId: String
         let skinId: String
         let skinVersion: Int
+        /// `game`, `engine` or `none`: what the prewarm had ready for this open.
+        var warm: String? = nil
+        /// The device tier; nil when it cannot be read.
+        var tier: String? = nil
+        /// Milliseconds from the intent (trigger or tap) to `ready`.
+        var msToReady: Int64? = nil
 
         var eventName: String { "Digia Experience Viewed" }
 
         var properties: [String: Any] {
-            [
+            var properties: [String: Any] = [
                 "display_style": GameEvent.displayStyle,
                 "chance_id": chanceId,
                 "skin_id": skinId,
                 "skin_version": skinVersion,
             ]
+            if let warm { properties["warm"] = warm }
+            if let tier { properties["tier"] = tier }
+            if let msToReady { properties["ms_to_ready"] = msToReady }
+            return properties
         }
     }
 

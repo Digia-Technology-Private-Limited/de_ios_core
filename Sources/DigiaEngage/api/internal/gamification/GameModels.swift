@@ -46,6 +46,8 @@ enum GameFailure: String, Equatable, Sendable {
     case bridgeVersionUnsupported
     /// The skin closed itself before `ready` for any other reason.
     case closedBeforeReady
+    /// The web content process died before `ready`.
+    case webProcessTerminated
 
     var wireValue: String {
         switch self {
@@ -57,6 +59,7 @@ enum GameFailure: String, Equatable, Sendable {
         case .busy: return "busy"
         case .bridgeVersionUnsupported: return "bridge_version_unsupported"
         case .closedBeforeReady: return "closed_before_ready"
+        case .webProcessTerminated: return "web_process_terminated"
         }
     }
 }
@@ -175,4 +178,34 @@ struct GameOpenRequest {
     var values: [String: JSONValue] = [:]
     /// `init.slots`: outcome-keyed slot values, read whenever present.
     var slots: [GamificationSlotConfig] = []
+    /// The open's analytics timing: shared by the surface and the presentation.
+    var timing = GameOpenTiming(intentAt: ProcessInfo.processInfo.systemUptime)
+}
+
+/// One open's analytics timing, from the intent (trigger or tap) to `ready`
+/// or a failure. `warm` is `game`, `engine` or `none`; `stage` is how far the
+/// open got: `grant`, `download`, `load`, `commit` or `ready`. Mirrors
+/// Android's `GameOpenTiming`.
+final class GameOpenTiming {
+    /// `ProcessInfo.systemUptime` at the intent, in seconds.
+    let intentAt: TimeInterval
+    var warm: String?
+    var stage: String = GameOpenTiming.stageDownload
+
+    static let stageGrant = "grant"
+    static let stageDownload = "download"
+    static let stageLoad = "load"
+    static let stageCommit = "commit"
+    static let stageReady = "ready"
+
+    init(intentAt: TimeInterval) {
+        self.intentAt = intentAt
+    }
+
+    /// Milliseconds since the intent.
+    var msElapsed: Int64 { GameOpenTiming.ms(since: intentAt) }
+
+    static func ms(since intentAt: TimeInterval) -> Int64 {
+        Int64(max(0, (ProcessInfo.processInfo.systemUptime - intentAt) * 1000))
+    }
 }

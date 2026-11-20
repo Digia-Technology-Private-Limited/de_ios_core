@@ -257,6 +257,8 @@ final class GamificationOrchestrator: ObservableObject {
         driver: CampaignDriver?
     ) {
         let key = campaign.campaignKey
+        // The analytics timings (`ms_elapsed`, `ms_to_ready`) run from here.
+        let intentAt = ProcessInfo.processInfo.systemUptime
         let triggerId = PlaySession.triggerId(of: payload)
         let testInvocationId = testInvocationIdOf(payload.cepCampaignId)
         // Direct parallel load: the skin loads hidden while the grant is
@@ -280,7 +282,7 @@ final class GamificationOrchestrator: ObservableObject {
                 ))
             self.applyPlayDecision(
                 decision, campaign: campaign, config: config, payload: payload,
-                driver: driver)
+                driver: driver, intentAt: intentAt)
         }
     }
 
@@ -293,10 +295,13 @@ final class GamificationOrchestrator: ObservableObject {
         campaign: CampaignModel,
         config: GamificationConfig,
         payload: CEPTriggerPayload,
-        driver: CampaignDriver?
+        driver: CampaignDriver?,
+        intentAt: TimeInterval
     ) {
         let campaignKey = campaign.campaignKey
         let cepCampaignId = payload.cepCampaignId
+        // Read before a denied Direct grant discards its warm game.
+        let warm = GamePrewarmer.warmKind(campaignKey: campaignKey)
         // The grant answer's chance events go to Digia analytics only, whatever
         // the decision (ADR 0002).
         sdk.events.forwardChanceEvents(decision.chanceEvents, payload: payload)
@@ -314,7 +319,8 @@ final class GamificationOrchestrator: ObservableObject {
             prefetchGamificationBundle(config, campaignKey: campaignKey)
             sdk.gameSurface.open(
                 campaign: campaign, config: config, chanceId: chance.chanceId,
-                settle: .presentation(payload: payload, entry: config.entryKind))
+                settle: .presentation(payload: payload, entry: config.entryKind),
+                intentAt: intentAt)
         case .showEntry(let chance):
             log.d(
                 "Gamification chance granted (chanceId=\(chance.chanceId), show=\(chance.show)) — showing entry",
@@ -363,7 +369,10 @@ final class GamificationOrchestrator: ObservableObject {
                 sdk.events.toDigia(
                     GameOpenFailedEvent(
                         reason: reason, chanceId: "", entry: config.entryKind.rawValue,
-                        skinId: config.skinId, skinVersion: config.skinVersion),
+                        skinId: config.skinId, skinVersion: config.skinVersion,
+                        warm: warm, tier: GamePrewarmer.deviceTier(),
+                        msElapsed: GameOpenTiming.ms(since: intentAt),
+                        stage: GameOpenTiming.stageGrant),
                     payload: payload)
             }
             sdk.coordinator.drop(

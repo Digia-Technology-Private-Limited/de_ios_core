@@ -26,14 +26,18 @@ final class GameSurface {
 
     /// Opens the game for `campaign` with the chance `chanceId`, settling by
     /// `settle`. Every former open path (direct, entry tap, rewards chance)
-    /// funnels through here.
+    /// funnels through here. `intentAt` (`ProcessInfo.systemUptime`) is when
+    /// the open was asked for: a Direct trigger passes its trigger time, so
+    /// the analytics timings run from it.
     func open(
         campaign: CampaignModel,
         config: GamificationConfig,
         chanceId: String,
-        settle: GameSettle
+        settle: GameSettle,
+        intentAt: TimeInterval = ProcessInfo.processInfo.systemUptime
     ) {
         let campaignKey = campaign.campaignKey
+        let timing = GameOpenTiming(intentAt: intentAt)
         // 1. One game owns the surface: a second open fails `busy` and never
         // overwrites the live game. `GamePresenter.open` re-checks this
         // as the backstop for a race between the check and the handoff.
@@ -44,17 +48,21 @@ final class GameSurface {
                 log.d("Test send replaces the open game", campaign: campaignKey)
                 GamePresenter.replace(
                     open: { [weak self] in
-                        self?.open(campaign: campaign, config: config, chanceId: chanceId, settle: settle)
+                        self?.open(
+                            campaign: campaign, config: config, chanceId: chanceId, settle: settle,
+                            intentAt: intentAt)
                     },
                     drop: { [weak self] in
                         self?.fail(
                             settle: settle, campaign: campaign, config: config,
-                            reason: PlayDropReason.busy, chanceId: chanceId)
+                            reason: PlayDropReason.busy, chanceId: chanceId, timing: timing)
                     })
                 return
             }
             log.w("Game not opened — another game is already open", campaign: campaignKey)
-            fail(settle: settle, campaign: campaign, config: config, reason: PlayDropReason.busy, chanceId: chanceId)
+            fail(
+                settle: settle, campaign: campaign, config: config, reason: PlayDropReason.busy,
+                chanceId: chanceId, timing: timing)
             return
         }
         // 2. SDK compatibility recheck, rewards only: a presentation was
@@ -68,7 +76,7 @@ final class GameSurface {
                 campaign: campaignKey)
             fail(
                 settle: settle, campaign: campaign, config: config,
-                reason: GamificationSurface.causeUnsupportedSDK, chanceId: chanceId)
+                reason: GamificationSurface.causeUnsupportedSDK, chanceId: chanceId, timing: timing)
             return
         }
         if case .rewards = settle, !config.bridgeSupported {
@@ -77,7 +85,8 @@ final class GameSurface {
                 campaign: campaignKey)
             fail(
                 settle: settle, campaign: campaign, config: config,
-                reason: GamificationSurface.causeBridgeVersionUnsupported, chanceId: chanceId)
+                reason: GamificationSurface.causeBridgeVersionUnsupported, chanceId: chanceId,
+                timing: timing)
             return
         }
         // 3. Skin cache hit opens at once, else download-then-show.
@@ -86,7 +95,7 @@ final class GameSurface {
         {
             openResolved(
                 file, campaign: campaign, config: config,
-                chanceId: chanceId, settle: settle)
+                chanceId: chanceId, settle: settle, timing: timing)
             return
         }
         log.d(
@@ -103,14 +112,14 @@ final class GameSurface {
                     version: config.skinVersion)
                 self.openResolved(
                     file, campaign: campaign, config: config,
-                    chanceId: chanceId, settle: settle)
+                    chanceId: chanceId, settle: settle, timing: timing)
             } catch {
                 log.w(
                     "Game not opened — skin download failed",
                     campaign: campaignKey, error: "\(error)")
                 self.fail(
                     settle: settle, campaign: campaign, config: config, reason: "skin_unavailable",
-                    chanceId: chanceId)
+                    chanceId: chanceId, timing: timing)
             }
         }
     }
@@ -126,7 +135,8 @@ final class GameSurface {
         campaign: CampaignModel,
         config: GamificationConfig,
         chanceId: String,
-        settle: GameSettle
+        settle: GameSettle,
+        timing: GameOpenTiming
     ) {
         let campaignKey = campaign.campaignKey
         // A direct game whose presentation already settled — its acceptance
@@ -138,7 +148,7 @@ final class GameSurface {
             // presentation again is a no-op in the coordinator.
             fail(
                 settle: settle, campaign: campaign, config: config,
-                reason: Self.downloadTimeoutReason, chanceId: chanceId)
+                reason: Self.downloadTimeoutReason, chanceId: chanceId, timing: timing)
             return
         }
         // 4. No user, no game.
@@ -146,11 +156,12 @@ final class GameSurface {
             log.d("Game not opened — no user id", campaign: campaignKey)
             fail(
                 settle: settle, campaign: campaign, config: config,
-                reason: PlayDropReason.missingConfig, chanceId: chanceId)
+                reason: PlayDropReason.missingConfig, chanceId: chanceId, timing: timing)
             return
         }
         // 5–6. Build the request once and hand it to the presenter with the
         // settle policy's callbacks.
+        timing.stage = GameOpenTiming.stageLoad
         GamePresenter.open(
             makeGameOpenRequest(
                 file: file, chanceId: chanceId, config: config, campaign: campaign,
@@ -158,7 +169,7 @@ final class GameSurface {
                 userId: Self.storageIdentity(
                     userId: userId,
                     deviceId: sdk.services?.identityManager.deviceId),
-                settle: settle))
+                settle: settle, timing: timing))
     }
 
     /// Warms this game in the hidden prewarm slot (`GamePrewarmer`), only when
@@ -203,7 +214,7 @@ final class GameSurface {
     /// reason — never a toast — and an entry's teaser stays. Matches Android.
     private func fail(
         settle: GameSettle, campaign: CampaignModel, config: GamificationConfig,
-        reason: String, chanceId: String
+        reason: String, chanceId: String, timing: GameOpenTiming
     ) {
         log.w("Game not opened (reason=\(reason))", campaign: campaign.campaignKey)
         if reason != PlayDropReason.busy {
@@ -215,7 +226,10 @@ final class GameSurface {
             sdk.events.toDigia(
                 GameOpenFailedEvent(
                     reason: reason, chanceId: chanceId, entry: entry,
-                    skinId: config.skinId, skinVersion: config.skinVersion),
+                    skinId: config.skinId, skinVersion: config.skinVersion,
+                    warm: timing.warm ?? GamePrewarmer.warmKind(campaignKey: campaign.campaignKey),
+                    tier: GamePrewarmer.deviceTier(),
+                    msElapsed: timing.msElapsed, stage: timing.stage),
                 payload: Self.payload(settle: settle, campaign: campaign))
         }
         if case .presentation(let payload, let entry) = settle, entry != .inlineTeaser, entry != .floating {
@@ -267,7 +281,7 @@ final class GameSurface {
     /// presentation as superseded, since nothing else does. Matches Android.
     private func closedBeforeShown(
         settle: GameSettle, campaign: CampaignModel, config: GamificationConfig,
-        reason: String, chanceId: String
+        reason: String, chanceId: String, timing: GameOpenTiming
     ) {
         switch reason {
         case GamePresentation.cancelledReason:
@@ -279,7 +293,7 @@ final class GameSurface {
         default:
             fail(
                 settle: settle, campaign: campaign, config: config,
-                reason: GameFailure.closedBeforeReady.wireValue, chanceId: chanceId)
+                reason: GameFailure.closedBeforeReady.wireValue, chanceId: chanceId, timing: timing)
         }
     }
 
@@ -304,13 +318,14 @@ final class GameSurface {
     }
 
     /// The CEP reason for a direct game's close: the native close button and
-    /// the skin's own `close` are the user's (as an authored Hide is on other
+    /// the skin's own `close` (and a web process death after the game
+    /// showed) are the user's (as an authored Hide is on other
     /// campaigns; `completed` is kept for an experience that reached its end),
     /// a CTA handoff is a CTA, a host screen change is a screen exit,
     /// anything else is a cancel. Matches Android.
     static func dismissReason(closeReason: String) -> DismissReason {
         switch closeReason {
-        case "user", "skin": return .userClose
+        case "user", "skin", "web_process_terminated": return .userClose
         case "cta": return .ctaAction
         case "superseded": return .superseded
         case "screen_exit": return .screenExit
@@ -320,8 +335,9 @@ final class GameSurface {
 
     /// The `dismiss_reason` analytics value for a game close: every known
     /// close reason passes through (`superseded` is a test send replacing
-    /// the game; `back`, `timeout` and `web_process_terminated` are Android's
-    /// and never reach iOS), anything unknown is the user's. Matches Android's
+    /// the game; `web_process_terminated` is a web process death after the
+    /// game showed; `back` and `timeout` are Android's and never reach iOS),
+    /// anything unknown is the user's. Matches Android's
     /// `gameDismissReasonOf`.
     static func gameDismissReason(closeReason: String) -> String {
         switch closeReason {
@@ -392,7 +408,8 @@ final class GameSurface {
         campaign: CampaignModel,
         payload: CEPTriggerPayload,
         userId: String,
-        settle: GameSettle
+        settle: GameSettle,
+        timing: GameOpenTiming = GameOpenTiming(intentAt: ProcessInfo.processInfo.systemUptime)
     ) -> GameOpenRequest {
         let campaignKey = campaign.campaignKey
         // The funnel counts a shown game: `shown` arms the failure Dismissed,
@@ -408,8 +425,6 @@ final class GameSurface {
                 skinId: config.skinId, skinVersion: config.skinVersion,
                 plays: stats.plays, playRefused: stats.playRefused)
         }
-        let viewed = GameEvent.Viewed(
-            chanceId: chanceId, skinId: config.skinId, skinVersion: config.skinVersion)
         // The live-test invocation the trigger carried, if any: the grant was asked
         // with it, and both the skin's `state` call and the close-time `state` call
         // need it back so a draft campaign answers. Derived here — never stored —
@@ -453,7 +468,7 @@ final class GameSurface {
                 guard shown else {
                     self.closedBeforeShown(
                         settle: settle, campaign: campaign, config: config,
-                        reason: reason, chanceId: stats.chanceId)
+                        reason: reason, chanceId: stats.chanceId, timing: timing)
                     return
                 }
                 self.closed(
@@ -468,7 +483,7 @@ final class GameSurface {
                 guard shown else {
                     self.fail(
                         settle: settle, campaign: campaign, config: config,
-                        reason: failure.wireValue, chanceId: chanceId)
+                        reason: failure.wireValue, chanceId: chanceId, timing: timing)
                     return
                 }
                 self.sdk.events.toDigia(
@@ -502,6 +517,10 @@ final class GameSurface {
                 guard !shown else { return }
                 shown = true
                 stats.start()
+                let viewed = GameEvent.Viewed(
+                    chanceId: chanceId, skinId: config.skinId, skinVersion: config.skinVersion,
+                    warm: timing.warm ?? GamePrewarmer.warmKind(campaignKey: campaignKey),
+                    tier: GamePrewarmer.deviceTier(), msToReady: timing.msElapsed)
                 self?.shown(settle: settle, campaign: campaign, viewed: viewed)
             },
             onHttpAnswer: { [weak self] path, request, response in
@@ -539,7 +558,8 @@ final class GameSurface {
             themeFontFamily: config.themeFontFamily,
             themeFonts: config.themeFonts,
             values: config.values,
-            slots: config.slots
+            slots: config.slots,
+            timing: timing
         )
     }
 
