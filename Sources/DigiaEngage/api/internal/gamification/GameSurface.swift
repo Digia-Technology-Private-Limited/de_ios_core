@@ -573,9 +573,17 @@ final class GameSurface {
     private func refreshFloatingEntryAfterClose(
         campaignKey: String, payload: CEPTriggerPayload
     ) {
-        refreshEntryAfterClose(campaignKey: campaignKey, payload: payload) { [weak self] in
-            self?.hideFloatingEntry(campaignKey: campaignKey, payload: payload)
-        }
+        refreshEntryAfterClose(
+            campaignKey: campaignKey, payload: payload,
+            hide: { [weak self] in self?.hideFloatingEntry(campaignKey: campaignKey, payload: payload) },
+            onKept: { [weak self] in self?.rewarmEntry(payload) })
+    }
+
+    /// The open took the warm game and the engine, and the entry's impression
+    /// does not fire again while it stays on screen, so warm both again now.
+    private func rewarmEntry(_ payload: CEPTriggerPayload) {
+        GamePrewarmer.refreshEngine()
+        sdk.gamificationSurface.prewarmEntry(payload)
     }
 
     /// Hides a floating entry after its game closed: removes the stored
@@ -597,7 +605,8 @@ final class GameSurface {
     private func refreshInlineEntryAfterClose(
         campaignKey: String, payload: CEPTriggerPayload
     ) {
-        refreshEntryAfterClose(campaignKey: campaignKey, payload: payload, hide: {})
+        let rewarm: @MainActor () -> Void = { [weak self] in self?.rewarmEntry(payload) }
+        refreshEntryAfterClose(campaignKey: campaignKey, payload: payload, hide: rewarm, onKept: rewarm)
     }
 
     /// The one entry-close round-trip both entries share: with no user the
