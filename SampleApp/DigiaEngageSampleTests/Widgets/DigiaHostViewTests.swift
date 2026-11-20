@@ -305,6 +305,87 @@ struct DigiaHostViewTests {
         try await sdk.waitUntil("the dialog shows once the modal is closed") { shown.state == .displaying }
     }
 
+    // Fails if: `hostUnavailable` stops checking surveys for an app modal (`case .nudge, .survey`): the survey
+    // would be drawn under the app's modal and count an impression.
+    @Test("with attach, a survey triggered while the app presents its own modal is dropped at once as host_modal_open")
+    func appModalDropsASurveyAsHostModalOpen() async throws {
+        let sdk = try await SdkHarness.start(loadCampaign("campaigns/survey/survey_stacked_cta.json"))
+        defer { sdk.tearDown() }
+        let root = AppScreen()
+        let window = makeWindow(root: root, sdk)
+        Digia.attach(to: window)
+        root.present(AppScreen(), animated: false)
+        ComponentTestHost.drainRunLoop(for: 0.3)
+
+        let blocked = try sdk.deliver("test_survey_stacked_cta")
+
+        #expect(dropReason(blocked, sdk) == .hostModalOpen)
+        root.dismiss(animated: false)
+        try await sdk.settle(0.5)
+    }
+
+    // Fails if: `hostUnavailable` stops leaving Digia's own presentations to the surface rule (`digiaPresents`):
+    // a bottom sheet on screen is a presented controller too, and the next nudge would be misreported as
+    // host_modal_open instead of surface_busy.
+    @Test("with attach, Digia's own presented sheet turns the next nudge away as surface_busy, not host_modal_open")
+    func ownPresentationIsSurfaceBusy() async throws {
+        let sdk = try await SdkHarness.start(campaigns: [
+            loadCampaign("campaigns/nudge_bottomsheet/nudge_bottomsheet_backdrop_on.json"),
+            loadCampaign("campaigns/nudge_dialog/nudge_dialog.json"),
+        ])
+        defer { sdk.tearDown() }
+        let root = AppScreen()
+        let window = makeWindow(root: root, sdk)
+        Digia.attach(to: window)
+        ComponentTestHost.drainRunLoop(for: 0.3)
+        let sheet = try sdk.deliver("test_nudge_bottomsheet_backdrop_on")
+        try await sdk.waitUntil("the sheet is presented") {
+            sheet.state == .displaying && root.presentedViewController != nil
+        }
+
+        let second = try sdk.deliver("test_nudge_dialog")
+
+        #expect(dropReason(second, sdk) == .surfaceBusy)
+    }
+
+    // Fails if: `DigiaHostAttachment.ensure()` stops reusing its one host (`self.host ?? DigiaHostView(...)`):
+    // a second attach would add a second host and every campaign would be drawn twice.
+    @Test("calling attach twice keeps exactly one host in the root")
+    func doubleAttachKeepsOneHost() async throws {
+        let sdk = try await SdkHarness.start(loadCampaign("campaigns/nudge_dialog/nudge_dialog.json"))
+        defer { sdk.tearDown() }
+        let root = AppScreen()
+        let window = makeWindow(root: root, sdk)
+        Digia.attach(to: window)
+        Digia.attach(to: window)
+        ComponentTestHost.drainRunLoop(for: 0.3)
+
+        #expect(root.view.subviews.filter { $0 is DigiaHostView }.count == 1)
+    }
+
+    // Fails if: `attach(to:)` stops switching to the window it is given (`self.window = window`): an app that
+    // makes a new window would keep the host in the old one, and campaigns would not draw in the new one.
+    @Test("attach to a new window moves the host into the new window's root")
+    func attachToANewWindowMovesTheHost() async throws {
+        let sdk = try await SdkHarness.start(loadCampaign("campaigns/nudge_dialog/nudge_dialog.json"))
+        defer { sdk.tearDown() }
+        let firstRoot = AppScreen()
+        let first = makeWindow(root: firstRoot, sdk)
+        Digia.attach(to: first)
+        ComponentTestHost.drainRunLoop(for: 0.3)
+
+        let secondRoot = AppScreen()
+        let second = makeWindow(root: secondRoot, sdk)
+        Digia.attach(to: second)
+        ComponentTestHost.drainRunLoop(for: 0.3)
+
+        #expect(secondRoot.view.subviews.last is DigiaHostView)
+        #expect(!firstRoot.view.subviews.contains { $0 is DigiaHostView })
+        let shown = try sdk.deliver("test_nudge_dialog")
+        try await sdk.waitUntil("the dialog draws in the new window") { shown.state == .displaying }
+        first.isHidden = true
+    }
+
     // Fails if: `hostUnavailable` checks for an app modal only under attach. With a SwiftUI `DigiaHost`
     // the dialog would be drawn hidden under the app's sheet and count an impression.
     @Test("without attach, a dialog triggered while the app presents its own modal is dropped at once as host_modal_open")
