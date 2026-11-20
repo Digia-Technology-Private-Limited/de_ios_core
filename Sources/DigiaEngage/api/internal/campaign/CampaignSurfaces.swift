@@ -208,6 +208,9 @@ final class GuideSurface: CampaignSurface {
         }
         if surfaceOwns(sdk.guideOrchestrator.state?.payload, payload: payload) {
             sdk.guideOrchestrator.dismissIfActive(payloadId: payload.cepCampaignId)
+            // A cancel never reaches the dwell report, so end the timer here; left running, the
+            // next showing of this campaign is never recorded as displayed.
+            _ = sdk.dwellTracker.consumeDwellMs(payload.cepCampaignId)
         }
     }
 }
