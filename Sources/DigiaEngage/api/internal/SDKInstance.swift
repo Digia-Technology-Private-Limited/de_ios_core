@@ -2292,6 +2292,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         return nil
     }
 
+    /// The stand-in host ``resetForTesting()`` registers.
+    static let testHostId = UUID()
+
     func resetForTesting() {
         DigiaEndpoints.resetForTest()
         ActionPlatform.current = .live
@@ -2320,8 +2323,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         config = nil
         hostActionExecutor.clearHandlers()
         sdkState = .notInitialized
-        isHostMounted = false
         HostRegistry.shared.reset()
+        // Tests drive the SDK without drawing a host view; routing drops an overlay as `host_not_mounted`
+        // when no host is registered. A test of the no-host path unmounts `testHostId`.
+        onHostMounted(Self.testHostId)
         font = DigiaFont()
         currentDesignTokens = .empty
         currentTimeAnchor = nil

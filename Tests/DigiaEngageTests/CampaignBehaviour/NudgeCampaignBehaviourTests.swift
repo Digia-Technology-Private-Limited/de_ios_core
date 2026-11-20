@@ -297,24 +297,20 @@ struct NudgeCampaignBehaviourTests {
 
     // MARK: - Dropped or ended by the plugin and the watchdog
 
-    // As coded: the SDK has no check for a missing `DigiaHost` (`host_not_mounted` is only the React Native
-    // guide renderer's), so a nudge with no host to draw it waits out the 15 s acceptance watchdog and drops
-    // `timeout`. This is also the one `timeout` reachable through the CEP flow in real time.
-    @Test("timeout: with no DigiaHost mounted a nudge never shows and drops as timeout after 15 s, never host_not_mounted (as coded)", .tags(.slow))
-    func noHostMountedTimesOut() async throws {
+    // Fails if the router's host gate stops answering `host_not_mounted` when no `DigiaHost` is mounted:
+    // the nudge would wait out the 15 s acceptance watchdog and drop as `timeout` instead.
+    @Test("host_not_mounted: with no DigiaHost mounted a nudge is dropped at once, never shown")
+    func noHostMountedDropsAtOnce() async throws {
         let campaign = fixture("nudge_dialog")
         let sdk = try await SdkHarness.startWithoutHost(campaign)
         defer { sdk.tearDown() }
         let d = try sdk.deliverChain("test_nudge_dialog")
-        // The watchdog sleeps 15 s for real; the deadline leaves room for a loaded simulator, whose
-        // main actor can run it late. What it reports (`timeout_ms`) is asserted below.
-        try await sdk.waitUntil("the acceptance watchdog", timeout: 40) { d.outcome != nil }
+        try await sdk.waitUntil("the drop") { d.outcome != nil }
 
         #expect(!sdk.isShowing("Dialog Test Nudge"))
         expectDroppedWire(
-            try await sdk.sentToScriptedNetwork("test_nudge_dialog"), d, .timeout, campaign, screen: nil,
-            extras: ["surface_kind": "nudge", "timeout_ms": 15000, "app_backgrounded": false],
-            detail: "never displayed within the acceptance window")
+            try await sdk.sentToScriptedNetwork("test_nudge_dialog"), d, .hostNotMounted, campaign, screen: nil,
+            detail: "no Digia host on screen: no DigiaHost is mounted")
     }
 
     // As coded: the CEP's outcome is `dismissed(plugin_detached)`; Digia is told nothing and the nudge stays up

@@ -199,6 +199,7 @@ struct DigiaHostViewTests {
     func noUsableRootDropsAsHostNotMounted() async throws {
         let sdk = try await SdkHarness.start(loadCampaign("campaigns/nudge_dialog/nudge_dialog.json"))
         defer { sdk.tearDown() }
+        SDKInstance.shared.onHostUnmounted(SDKInstance.testHostId)
         let window = makeWindow(root: UINavigationController(rootViewController: AppScreen()), sdk)
         Digia.attach(to: window)
         ComponentTestHost.drainRunLoop(for: 0.3)
@@ -214,6 +215,7 @@ struct DigiaHostViewTests {
     func noDigiaHostDropsAsHostNotMounted() async throws {
         let sdk = try await SdkHarness.start(loadCampaign("campaigns/nudge_dialog/nudge_dialog.json"))
         defer { sdk.tearDown() }
+        SDKInstance.shared.onHostUnmounted(SDKInstance.testHostId)
 
         let presentation = try sdk.deliver("test_nudge_dialog")
 

@@ -67,11 +67,11 @@ struct DMCRuleWaitSDKTests {
         let body = try JSONSerialization.data(withJSONObject: ["campaigns": campaigns])
         let response = Result<NetworkResponse, Error>.success(
             NetworkResponse(statusCode: 200, headers: [:], body: body, isSuccessful: true))
-        let sdk = SDKInstance(
+        let sdk = { let instance = SDKInstance(
             defaults: UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!,
             legacyDefaults: UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!,
             makeNetworkClient: { _ in network },
-            clock: sessionClock.map { session in { Int64(session.now) } } ?? SessionManager.systemClock)
+            clock: sessionClock.map { session in { Int64(session.now) } } ?? SessionManager.systemClock); instance.onHostMounted(SDKInstance.testHostId); return instance }()
         sdk.waitClock = { [clock] in clock.now }
         DigiaLogger.registerSink(sink)
         try await sdk.initialize(DigiaConfig(apiKey: "test-api-key"))

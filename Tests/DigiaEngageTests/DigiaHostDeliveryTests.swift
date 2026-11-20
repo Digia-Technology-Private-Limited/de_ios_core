@@ -107,9 +107,9 @@ extension DigiaEngageTests {
         @Test("a resolved trigger sends Triggered, and Dropped with the same impression only if it drops")
         func deliveryEventsPairByImpression() async throws {
             let suite = { UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")! }
-            let sdk = SDKInstance(
+            let sdk = { let instance = SDKInstance(
                 defaults: suite(), legacyDefaults: suite(), makeNetworkClient: { _ in MockNetworkClient() }
-            )
+            ); instance.onHostMounted(SDKInstance.testHostId); return instance }()
             try await sdk.initialize(DigiaConfig(apiKey: "test_key"))
             sdk.setCampaignsForTesting([
                 try #require(try CampaignModel.fromJson(nudgeJson("help-only", targetScreenNames: ["Help"]))),
@@ -185,9 +185,9 @@ extension DigiaEngageTests {
 
         private func initializedInstance() async throws -> SDKInstance {
             let suite = { UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")! }
-            let sdk = SDKInstance(
+            let sdk = { let instance = SDKInstance(
                 defaults: suite(), legacyDefaults: suite(), makeNetworkClient: { _ in MockNetworkClient() }
-            )
+            ); instance.onHostMounted(SDKInstance.testHostId); return instance }()
             try await sdk.initialize(DigiaConfig(apiKey: "test_key"))
             return sdk
         }

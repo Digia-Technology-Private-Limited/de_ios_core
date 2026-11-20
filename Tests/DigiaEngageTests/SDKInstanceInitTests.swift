@@ -17,7 +17,7 @@ struct SDKInstanceInitTests {
         defaults: UserDefaults,
         network: MockNetworkClient = MockNetworkClient()
     ) -> SDKInstance {
-        SDKInstance(defaults: defaults, legacyDefaults: makeDefaults(), makeNetworkClient: { _ in network })
+        { let instance = SDKInstance(defaults: defaults, legacyDefaults: makeDefaults(), makeNetworkClient: { _ in network }); instance.onHostMounted(SDKInstance.testHostId); return instance }()
     }
 
     /// Session reports are posted from a detached task; waits for them to land.
