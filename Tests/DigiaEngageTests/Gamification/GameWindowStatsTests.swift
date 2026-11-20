@@ -48,5 +48,8 @@ struct GameWindowStatsTests {
         #expect(stats.chanceId == "ch-2")
         stats.recordHttp(path: "peek", response: answer(["chanceId": "ch-3"]))
         #expect(stats.chanceId == "ch-3")
+        // The play answer carries no chanceId: the skin's request body names it.
+        stats.recordHttp(path: "play", request: ["chanceId": "ch-4"], response: answer(["outcomeKey": "win"]))
+        #expect(stats.chanceId == "ch-4")
     }
 }

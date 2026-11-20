@@ -40,15 +40,21 @@ final class GameWindowStats: @unchecked Sendable {
         }
     }
 
-    /// One answered bridge `http` call. `response` is the http body
-    /// (`{isSuccess, data:{response}}`); only `play` and `peek` count.
-    func recordHttp(path: String, response: Any?) {
+    /// One answered bridge `http` call. `request` is the skin's request body, `response`
+    /// the http body (`{isSuccess, data:{response}}`); only `play` and `peek` count.
+    func recordHttp(path: String, request: [String: Any]? = nil, response: Any?) {
         guard path == "play" || path == "peek" else { return }
         lock.withLock {
             guard let body = response as? [String: Any],
                   let data = body["data"] as? [String: Any],
                   let answer = data["response"] as? [String: Any] else { return }
-            if let next = answer["chanceId"] as? String, !next.isEmpty { latestChanceId = next }
+            // The answer's chanceId wins; the play answer has none today, so the skin's
+            // request body supplies it.
+            if let next = answer["chanceId"] as? String, !next.isEmpty {
+                latestChanceId = next
+            } else if let next = request?["chanceId"] as? String, !next.isEmpty {
+                latestChanceId = next
+            }
             if let refused = answer["refused"] as? String, !refused.isEmpty { lastRefused = refused }
             if path == "play", let outcome = answer["outcomeKey"] as? String, !outcome.isEmpty {
                 playCount += 1

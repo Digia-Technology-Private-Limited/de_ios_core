@@ -476,7 +476,7 @@ final class GameSurface {
                 self?.shown(settle: settle, campaign: campaign, viewed: viewed)
             },
             onHttpAnswer: { [weak self] path, request, response in
-                stats.recordHttp(path: path, response: response)
+                stats.recordHttp(path: path, request: request, response: response)
                 guard let self, path == "play" else { return }
                 let payload = Self.payload(settle: settle, campaign: campaign)
                 // Every `/play` is a Digia click: `play` first, `play_again` after.
