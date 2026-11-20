@@ -21,54 +21,27 @@ struct RewardsPageTests {
         }
     }
 
-    @Test("a link on one of the app's own schemes is internal")
-    func customSchemeInternal() {
-        let mine: Set<String> = ["myapp"]
-        #expect(RewardsLinkRouter.route("myapp://offers/12", appSchemes: mine) == .internal(URL(string: "myapp://offers/12")!))
-        #expect(RewardsLinkRouter.route("MyApp://offers/12", appSchemes: mine) == .internal(URL(string: "MyApp://offers/12")!))
-    }
-
-    @Test("other schemes (tel, mailto, other apps) are external")
-    func foreignSchemeExternal() {
-        let mine: Set<String> = ["myapp"]
-        for raw in ["tel:+911234567890", "mailto:a@b.com", "whatsapp://send?text=hi", "otherapp://x"] {
-            #expect(RewardsLinkRouter.route(raw, appSchemes: mine) == .external(URL(string: raw)!), "\(raw)")
+    @Test("an http(s) link is external, whatever the host")
+    func webLinkExternal() {
+        for raw in ["https://shop.example.org/x", "http://shop.example.org", "HTTPS://App.example.com/offers",
+                    " https://example.com/a "] {
+            let url = URL(string: raw.trimmingCharacters(in: .whitespaces))!
+            #expect(RewardsLinkRouter.route(raw) == .external(url), "\(raw)")
         }
     }
 
-    @Test("an http(s) link on an app link host is internal, others are external")
-    func universalLink() {
-        let hosts: Set<String> = ["app.example.com"]
-        let own = URL(string: "https://App.example.com/offers")!
-        let other = URL(string: "https://shop.example.org/x")!
-        #expect(RewardsLinkRouter.route(own.absoluteString, appSchemes: [], appLinkHosts: hosts) == .internal(own))
-        #expect(RewardsLinkRouter.route(other.absoluteString, appSchemes: [], appLinkHosts: hosts) == .external(other))
-        #expect(RewardsLinkRouter.route("http://shop.example.org") == .external(URL(string: "http://shop.example.org")!))
+    @Test("an http(s) link with no host is refused")
+    func webLinkNeedsHost() {
+        for raw in ["https://", "http:///path", "https:/path"] {
+            #expect(RewardsLinkRouter.route(raw) == .refused, "\(raw)")
+        }
     }
 
-    @Test("app link domains match exact hosts and wildcards, case-insensitively")
-    func appLinkDomainMatching() {
-        func internalLink(_ raw: String, _ domains: Set<String>) -> Bool {
-            if case .internal = RewardsLinkRouter.route(raw, appSchemes: [], appLinkHosts: domains) { return true }
-            return false
-        }
-        #expect(internalLink("https://medihub.com/x", ["medihub.com"]))
-        #expect(internalLink("https://MediHub.COM/x", ["medihub.com"]))
-        #expect(internalLink("https://medihub.com/x", ["MEDIHUB.com"]))
-        #expect(!internalLink("https://www.medihub.com/x", ["medihub.com"]))
-        #expect(internalLink("https://www.medihub.com/x", ["*.medihub.com"]))
-        #expect(internalLink("https://a.b.medihub.com/x", ["*.medihub.com"]))
-        #expect(internalLink("https://medihub.com/x", ["*.medihub.com"]))
-        #expect(!internalLink("https://evilmedihub.com/x", ["*.medihub.com"]))
-        #expect(!internalLink("https://evilmedihub.com/x", ["medihub.com"]))
-        #expect(!internalLink("https://medihub.com.evil.com/x", ["*.medihub.com"]))
-        #expect(!internalLink("https://partner.com/x", ["*.medihub.com"]))
-        for encoded in ["https://evil.com%2F.medihub.com/x", "https://evil.com%23.medihub.com/x",
-                        "https://evil%2Ecom.medihub.com/x", "https://medihub%2Ecom/x"] {
-            #expect(!internalLink(encoded, ["*.medihub.com", "medihub.com"]), "\(encoded)")
-        }
-        for bad in ["", "*", "*.", "https://medihub.com", "medihub.com/x", "medihub.com:8080", "med hub.com", "localhost"] {
-            #expect(!internalLink("https://medihub.com/x", [bad]), "\(bad)")
+    @Test("any other allowed scheme is internal: custom, partner, tel, mailto")
+    func otherSchemesInternal() {
+        for raw in ["myapp://offers/12", "MyApp://offers/12", "ridenow://trip/1", "tel:+911234567890",
+                    "mailto:a@b.com", "whatsapp://send?text=hi"] {
+            #expect(RewardsLinkRouter.route(raw) == .internal(URL(string: raw)!), "\(raw)")
         }
     }
 
@@ -291,8 +264,5 @@ struct RewardsPageTests {
         let raw: [String: Any] = ["page": ["url": "https://rewards.digia.tech"]]
         #expect(GameRewardsResponse.fromJson(raw).pageUrl == "https://rewards.digia.tech")
         #expect(GameRewardsResponse.fromJson([:]).pageUrl == nil)
-        #expect(GameRewardsResponse.fromJson([:]).appLinkDomains == [])
-        let withDomains: [String: Any] = ["page": ["appLinkDomains": ["medihub.com", 3, "*.medihub.com"]]]
-        #expect(GameRewardsResponse.fromJson(withDomains).appLinkDomains == ["medihub.com", "*.medihub.com"])
     }
 }

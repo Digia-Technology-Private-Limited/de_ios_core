@@ -1,5 +1,4 @@
 import Combine
-import SafariServices
 import SwiftUI
 import UIKit
 import WebKit
@@ -453,8 +452,7 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
     }
 
     private func open(link raw: String) {
-        switch RewardsLinkRouter.route(
-            raw, appLinkHosts: Set(SDKInstance.shared.rewardsResponse?.appLinkDomains ?? [])) {
+        switch RewardsLinkRouter.route(raw) {
         case .refused:
             log.w("Rewards link refused")
         case .internal(let url):
@@ -462,12 +460,7 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
                 SDKInstance.shared.gamification.openRewardDeepLink(url.absoluteString)
             }
         case .external(let url):
-            if url.scheme?.lowercased() == "http" || url.scheme?.lowercased() == "https" {
-                let safari = SFSafariViewController(url: url)
-                ViewControllerUtil.topViewController(base: self)?.present(safari, animated: true)
-            } else {
-                ActionPlatform.current.open(url)
-            }
+            ActionPlatform.current.open(url)
         }
     }
 
