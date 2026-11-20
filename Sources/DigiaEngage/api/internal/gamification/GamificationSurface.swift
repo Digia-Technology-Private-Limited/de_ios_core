@@ -251,6 +251,20 @@ final class GamificationSurface: CampaignSurface {
         }
     }
 
+    /// An entry's impression (inline render, floater shown): warms its game
+    /// in the prewarm slot with the stored chance, built as the tap will
+    /// build it. A no-op unless the prewarm config allows `game`.
+    func prewarmEntry(_ payload: CEPTriggerPayload) {
+        guard let campaign = entryCampaign(payload),
+              let config = campaign.gamificationConfig,
+              config.entryKind == .inlineTeaser || config.entryKind == .floating,
+              let chance = chances[campaign.campaignKey]
+        else { return }
+        sdk.gameSurface.prewarm(
+            campaign: campaign, config: config, chanceId: chance.chanceId,
+            settle: .presentation(payload: payload, entry: config.entryKind), source: .entry)
+    }
+
     var occupants: [SurfaceOccupant] { [] }
 
     func supersede(_: SurfaceOccupant) {}
@@ -268,6 +282,7 @@ final class GamificationSurface: CampaignSurface {
     /// `grantChance` again, which decides whether the entry shows.
     func hideFloatingEntry(campaignKey: String) {
         chances.removeValue(forKey: campaignKey)
+        GamePrewarmer.discard(reason: "chance_gone", campaignKey: campaignKey)
     }
 
     /// Clears the session entry state for a user change: the next user must
@@ -276,5 +291,6 @@ final class GamificationSurface: CampaignSurface {
     func clearForUserChange() {
         chances.removeAll()
         entryCampaigns.removeAll()
+        GamePrewarmer.discard(reason: "chance_gone")
     }
 }

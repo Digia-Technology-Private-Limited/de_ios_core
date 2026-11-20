@@ -34,7 +34,8 @@ final class GamePresentation: Identifiable, ObservableObject {
 
     /// The campaign key. One game owns the surface at a time, so this is unique.
     let id: String
-    let request: GameOpenRequest
+    /// Swapped once by `release(with:)` when a prewarmed game is adopted.
+    private(set) var request: GameOpenRequest
     let entryFile: URL
     let bundleRoot: URL
     let bridge = GameBridge()
@@ -58,7 +59,7 @@ final class GamePresentation: Identifiable, ObservableObject {
     private static let maxSkinErrorsPerOpen = 5
     /// The one `init` for this session: built from the open request and the
     /// live facts, re-sent unchanged on a repeated `ready`.
-    private let initMessage: [String: Any]
+    private var initMessage: [String: Any]
     private var lastViewport: (width: Double, height: Double, safeArea: GameSafeArea)?
     private var lastDevicePush: [String: Any]?
     private var observers: [NSObjectProtocol] = []
@@ -110,6 +111,16 @@ final class GamePresentation: Identifiable, ObservableObject {
             payload: request.payload)
     }
 
+    /// A prewarmed game (`GamePrewarmer`): the page loads hidden up to
+    /// finished, but `init` is held back, skin messages are dropped and no
+    /// timer runs until `release(with:)` adopts it on the tap or grant.
+    private(set) var isHeld = false
+    /// The page finished while held; `release` sends the held-back `init`.
+    private var pageFinished = false
+    /// The page failed to load while held: the tap discards it (`replaced`)
+    /// and opens normally.
+    private(set) var heldLoadFailed = false
+
     /// The web view's owner, created once in `preload()` and reused by the
     /// container once the game is shown.
     private(set) var webCoordinator: GameWebCoordinator?
@@ -118,7 +129,8 @@ final class GamePresentation: Identifiable, ObservableObject {
     /// window fully transparent and ignoring touches, so the host app stays
     /// usable; `ready` presents the game. A page that does not commit within
     /// 15 s, or sends no `ready` within 5 s of the commit, closes silently.
-    func preload() {
+    func preload(held: Bool = false) {
+        isHeld = held
         let coordinator = GameWebCoordinator(
             game: self, entryFile: entryFile, bundleRoot: bundleRoot,
             engine: GamePrewarmer.takeEngine())
@@ -146,7 +158,7 @@ final class GamePresentation: Identifiable, ObservableObject {
     /// re-arming (or `cancelReadyTimer`) makes any earlier timer a stale no-op.
     /// Runs only while loading and in the foreground.
     func armLoadTimer() {
-        guard !didFinish, bridge.state == .loading,
+        guard !didFinish, !isHeld, bridge.state == .loading,
               UIApplication.shared.applicationState == .active
         else { return }
         let generation = bridge.beginLoading()
@@ -173,10 +185,42 @@ final class GamePresentation: Identifiable, ObservableObject {
     /// Sends the session's `init`: once after the page loads, and again on a
     /// repeated `ready`. Each `init` fully resets the skin.
     func sendInit() {
+        pageFinished = true
+        guard !isHeld else { return }
         send(["type": "init", "payload": initMessage])
         // `init` is built unmuted; a skin that re-announces itself while muted
         // gets the muted facts right after it.
         if isMuted, let lastDevicePush { send(["type": "device", "payload": lastDevicePush]) }
+    }
+
+    /// Adopts a prewarmed game for `request` (the tap's, or the grant's with
+    /// its chance): rebuilds `init` from it, sends `init` if the page already
+    /// finished, and starts the 5 s ready timer, the page having committed.
+    func release(with request: GameOpenRequest) {
+        guard isHeld, !didFinish else { return }
+        self.request = request
+        initMessage = Self.initMessage(for: request)
+        lastDevicePush = GameDeviceInfo.current(sdkVersion: sdkVersion).pushPayload
+        isHeld = false
+        if pageFinished { sendInit() }
+        armLoadTimer()
+    }
+
+    /// Destroys a held game without a word: no callback, no analytics.
+    func discardWarm() {
+        guard isHeld, !didFinish else { return }
+        didFinish = true
+        motion.stopAll()
+        removeObservers()
+        webCoordinator?.view.removeFromSuperview()
+        webCoordinator?.teardown()
+    }
+
+    /// A skin message from the web view. Dropped while held: the skin speaks
+    /// only after `init`, and a held game answers nothing.
+    func receive(_ body: Any) {
+        guard !isHeld else { return }
+        bridge.receive(body)
     }
 
     func toggleMute() {
@@ -468,6 +512,7 @@ final class GamePresentation: Identifiable, ObservableObject {
     }
 
     private func send(_ message: [String: Any]) {
+        guard !isHeld else { return }
         guard let script = GameBridge.receiveScript(for: message) else {
             log.w("Game push dropped — message not JSON", campaign: request.campaignKey)
             return
@@ -476,6 +521,7 @@ final class GamePresentation: Identifiable, ObservableObject {
     }
 
     private func evaluate(_ script: String) {
+        guard !isHeld else { return }
         webCoordinator?.view.evaluateJavaScript(script, completionHandler: nil)
     }
 
@@ -572,7 +618,7 @@ final class GamePresentation: Identifiable, ObservableObject {
     }
 
     private func appDidResignActive() {
-        guard !didFinish else { return }
+        guard !didFinish, !isHeld else { return }
         request.onForeground?(false)
         if bridge.state == .loading { bridge.cancelReadyTimer() }
         pushLifecycle("paused")
@@ -580,7 +626,7 @@ final class GamePresentation: Identifiable, ObservableObject {
     }
 
     private func appDidBecomeActive() {
-        guard !didFinish else { return }
+        guard !didFinish, !isHeld else { return }
         request.onForeground?(true)
         armLoadTimer()
         pushLifecycle("resumed")
@@ -602,6 +648,10 @@ final class GamePresentation: Identifiable, ObservableObject {
     /// the skin's own fallback art. Finishes first so the failure — not a
     /// close — is what the callbacks report.
     func failLoading() {
+        if isHeld {
+            heldLoadFailed = true
+            return
+        }
         guard bridge.state == .loading else { return }
         finish(report: { [request] in request.onFailure?(.bundleLoadFailed) })
         bridge.close()
@@ -609,6 +659,11 @@ final class GamePresentation: Identifiable, ObservableObject {
 
     /// Renderer death: destroy, close quietly, this skin version off for the session.
     func failRendering() {
+        // A held game has shown nothing and been asked for nothing: discard it quietly.
+        if isHeld {
+            GamePrewarmer.discard(reason: "process_killed", campaignKey: id)
+            return
+        }
         GameAvailability.markCrashed(skinId: request.skinId, skinVersion: request.skinVersion)
         guard bridge.state != .closed else { return }
         finish(report: { [request] in request.onFailure?(.renderError) })
@@ -723,6 +778,13 @@ enum GamePresenter {
         guard !isBusy else {
             log.w("Game not opened — another game is already open", error: request.campaignKey)
             request.onFailure?(.busy)
+            return
+        }
+        // A game prewarmed for this very open is adopted instead of loading anew.
+        if let warm = GamePrewarmer.takeGame(matching: request) {
+            log.d("Game loading (prewarmed)", campaign: request.campaignKey)
+            loading = warm
+            warm.release(with: request)
             return
         }
         guard let presentation = GamePresentation(request: request) else {

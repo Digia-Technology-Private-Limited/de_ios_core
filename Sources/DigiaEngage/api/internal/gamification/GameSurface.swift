@@ -161,6 +161,34 @@ final class GameSurface {
                 settle: settle))
     }
 
+    /// Warms this game in the hidden prewarm slot (`GamePrewarmer`), only when
+    /// its skin is already on disk and a user is set: the request is built
+    /// exactly as the open will build it, so the open adopts it. Direct passes
+    /// an empty `chanceId`; the grant's open swaps in the real request.
+    func prewarm(
+        campaign: CampaignModel,
+        config: GamificationConfig,
+        chanceId: String,
+        settle: GameSettle,
+        source: GamePrewarmSource
+    ) {
+        let prewarm = SDKInstance.shared.gamePrewarm
+        guard prewarm.enabled, prewarm.game,
+              let file = sdk.gamification.skinFileCache.cachedFile(
+            skinId: config.skinId, version: config.skinVersion),
+            let userId = sdk.services?.identityManager.userId, !userId.isEmpty
+        else { return }
+        GamePrewarmer.warmGame(
+            makeGameOpenRequest(
+                file: file, chanceId: chanceId, config: config, campaign: campaign,
+                payload: Self.payload(settle: settle, campaign: campaign),
+                userId: Self.storageIdentity(
+                    userId: userId,
+                    deviceId: sdk.services?.identityManager.deviceId),
+                settle: settle),
+            source: source)
+    }
+
     /// The bridge storage identity for one open: the user id, or the device
     /// id when there is no user — Android's `userId ?: deviceId`. Pure, so
     /// the shared case-table run pins the choice without a game.

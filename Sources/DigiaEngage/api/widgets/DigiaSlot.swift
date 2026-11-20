@@ -120,6 +120,7 @@ public struct DigiaSlot<Placeholder: View>: View {
                         // per campaign and resets it when the slot is cleared, so a
                         // redelivery of the same CEP campaign ID impresses again.
                         if visible { SDKInstance.shared.inlineReporter.reportSlotFirstRender(payload) }
+                        GamePrewarmer.entryVisibility(campaignKey: payload.campaignKey, visible: visible)
                     }
             } else {
                 placeholder

@@ -44,6 +44,7 @@ final class InlineReporter {
             guard case .inline(let entry)? = cfg.entryCanvas,
                   controller.getCampaign(entry.slotKey) == payload else { return }
             viewed = InlineCanvasEvent.Viewed(slotKey: entry.slotKey, screenName: ctx.currentScreen)
+            ctx.sdk.gamificationSurface.prewarmEntry(payload)
         default:
             return
         }

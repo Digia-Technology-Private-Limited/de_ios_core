@@ -367,6 +367,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 presentation.noteDropDetail("cancel_cause", "slot_removed")
             }
             self?.events.inlineRemoved(payload, reason: reason)
+            GamePrewarmer.discard(reason: "entry_hidden", campaignKey: payload.campaignKey)
         }
         floaterOrchestrator = FloaterOrchestrator(
             onDismissed: { [weak self] state, reason, metrics, wasVisible in

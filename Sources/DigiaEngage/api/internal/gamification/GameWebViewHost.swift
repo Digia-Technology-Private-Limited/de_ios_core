@@ -156,7 +156,7 @@ final class GameWebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         // foreign iframe from driving the game even if one were ever embedded.
         guard message.frameInfo.isMainFrame else { return }
         let body = message.body
-        Task { @MainActor [weak game] in game?.bridge.receive(body) }
+        Task { @MainActor [weak game] in game?.receive(body) }
     }
 
     // MARK: - WKNavigationDelegate

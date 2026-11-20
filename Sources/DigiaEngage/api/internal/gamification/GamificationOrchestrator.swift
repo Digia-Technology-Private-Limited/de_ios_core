@@ -259,6 +259,13 @@ final class GamificationOrchestrator: ObservableObject {
         let key = campaign.campaignKey
         let triggerId = PlaySession.triggerId(of: payload)
         let testInvocationId = testInvocationIdOf(payload.cepCampaignId)
+        // Direct parallel load: the skin loads hidden while the grant is
+        // asked; the grant's open adopts it, any other answer discards it.
+        if config.entryKind == .direct {
+            sdk.gameSurface.prewarm(
+                campaign: campaign, config: config, chanceId: "",
+                settle: .presentation(payload: payload, entry: .direct), source: .direct)
+        }
         Task { @MainActor [weak self] in
             guard let self else { return }
             let decision = await self.playSession.request(
@@ -293,6 +300,11 @@ final class GamificationOrchestrator: ObservableObject {
         // The grant answer's chance events go to Digia analytics only, whatever
         // the decision (ADR 0002).
         sdk.events.forwardChanceEvents(decision.chanceEvents, payload: payload)
+        if config.entryKind == .direct {
+            if case .open = decision {} else {
+                GamePrewarmer.discard(reason: "grant_denied", campaignKey: campaignKey)
+            }
+        }
         switch decision {
         case .open(let chance):
             log.d(
