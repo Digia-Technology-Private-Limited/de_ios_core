@@ -517,8 +517,10 @@ final class GameSurface {
                 guard !shown else { return }
                 shown = true
                 stats.start()
+                // The skin's `state` answer arrived before `ready`, so this is the chance
+                // the game plays, matching Clicked, Game Played and Dismissed.
                 let viewed = GameEvent.Viewed(
-                    chanceId: chanceId, skinId: config.skinId, skinVersion: config.skinVersion,
+                    chanceId: stats.chanceId, skinId: config.skinId, skinVersion: config.skinVersion,
                     warm: timing.warm ?? GamePrewarmer.warmKind(campaignKey: campaignKey),
                     tier: GamePrewarmer.deviceTier(), msToReady: timing.msElapsed)
                 self?.shown(settle: settle, campaign: campaign, viewed: viewed)

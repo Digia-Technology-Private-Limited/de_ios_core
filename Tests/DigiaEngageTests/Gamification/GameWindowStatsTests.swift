@@ -52,4 +52,15 @@ struct GameWindowStatsTests {
         stats.recordHttp(path: "play", request: ["chanceId": "ch-4"], response: answer(["outcomeKey": "win"]))
         #expect(stats.chanceId == "ch-4")
     }
+
+    // Guards the `state` branch in `recordHttp`: a fresh grant can lose to an older
+    // unplayed chance, and Viewed must name the chance `state` answered with, not the
+    // one the request asked about.
+    @Test func stateAnswerNamesTheChanceButItsRequestNeverDoes() {
+        let stats = GameWindowStats(chanceId: "granted") { 0 }
+        stats.recordHttp(path: "state", request: ["chanceId": "granted"], response: answer(["state": "playable", "chanceId": "older"]))
+        #expect(stats.chanceId == "older")
+        stats.recordHttp(path: "state", request: ["chanceId": "other"], response: answer(["state": "exhausted"]))
+        #expect(stats.chanceId == "older")
+    }
 }
