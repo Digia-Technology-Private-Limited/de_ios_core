@@ -124,8 +124,12 @@ final class GamePresentation: Identifiable, ObservableObject {
         let view = coordinator.view
         view.alpha = 0
         view.isUserInteractionEnabled = false
+        // `keyWindow()` already falls back to the foreground scene's visible
+        // window when none is key (RN hosts). With no window at all the page
+        // still loads detached; `ready` hands the view to the container.
         if let window = ViewControllerUtil.keyWindow() {
             view.frame = window.bounds
+            view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
             window.addSubview(view)
         }
         coordinator.start()
@@ -187,12 +191,12 @@ final class GamePresentation: Identifiable, ObservableObject {
         case .actionOpenLink(let id, let op, let url):
             // The container closes first, then the host opens the link.
             if let id { bridge.answer(id: id, payload: ["ok": true]) }
-            request.onCta?(op)
+            request.onCta?(op, url.absoluteString)
             dismiss(reason: "cta")
             runSkinActionAfterClose(action: .openUrl(url.absoluteString))
         case .actionOpenDeeplink(let id, let url):
             if let id { bridge.answer(id: id, payload: ["ok": true]) }
-            request.onCta?("deeplink")
+            request.onCta?("deeplink", nil)
             dismiss(reason: "cta")
             runSkinActionAfterClose(action: .openDeeplink(url.absoluteString))
         case .actionShare(let id, let text):
@@ -234,7 +238,7 @@ final class GamePresentation: Identifiable, ObservableObject {
             switch action {
             case .openUrl, .openDeeplink:
                 if let id { bridge.answer(id: id, payload: ["ok": true]) }
-                request.onCta?(op)
+                request.onCta?(op, nil)
                 dismiss(reason: "cta")
                 runSkinActionAfterClose(action: action)
             default:
@@ -257,7 +261,7 @@ final class GamePresentation: Identifiable, ObservableObject {
                     dismiss: { [weak self] in self?.dismiss(reason: "skin") }))
             guard self.bridge.state != .closed else { return }
             if let id { self.bridge.answer(id: id, payload: ["ok": true]) }
-            self.request.onCta?(op)
+            self.request.onCta?(op, nil)
         }
     }
 
@@ -581,6 +585,9 @@ final class GamePresentation: Identifiable, ObservableObject {
     /// skin's own `close`, `cta` for a handoff op — the funnel's Dismissed
     /// reason. The bridge fires `onClosed`, which settles.
     func dismiss(reason: String = "user") {
+        // The first close wins: a later dismiss (e.g. screen_exit after a cta)
+        // must not overwrite the reason `onClosed` reports.
+        guard !didFinish, !isClosing else { return }
         closeReason = reason
         pushLifecycle("paused")
         motion.stopAll()

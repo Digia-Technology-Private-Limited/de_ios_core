@@ -183,7 +183,11 @@ struct DigiaInlineCanvasView: View {
                 campaignKey: payload.campaignKey,
                 localActionExecutor: LocalActionExecutor(
                     dismiss: dismiss,
-                    openGame: { SDKInstance.shared.gamification.openGame(forPayload: payload) }
+                    // A primary CTA already sent its CEP `cta_primary` above.
+                    openGame: {
+                        SDKInstance.shared.gamification.openGame(
+                            forPayload: payload, reportClick: !request.isPrimary)
+                    }
                 )
             )
         }

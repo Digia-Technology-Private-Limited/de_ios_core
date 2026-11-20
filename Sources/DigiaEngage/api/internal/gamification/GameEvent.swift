@@ -30,15 +30,19 @@ enum GameEvent {
     struct Clicked: EngageAnalyticsEvent {
         let elementId: String
         let chanceId: String
+        /// The link a skin `openLink` CTA opened; left off the wire otherwise.
+        var actionUrl: String? = nil
 
         var eventName: String { "Digia Experience Clicked" }
 
         var properties: [String: Any] {
-            [
+            var properties: [String: Any] = [
                 "display_style": GameEvent.displayStyle,
                 "element_id": elementId,
                 "chance_id": chanceId,
             ]
+            if let actionUrl { properties["action_url"] = actionUrl }
+            return properties
         }
     }
 

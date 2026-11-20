@@ -181,9 +181,10 @@ struct GameChanceEventsAndCepTests {
         #expect(recorder.clickedElementIds == ["play", "play_again", "play_again"])
     }
 
-    // Fails if a window double-counts or a CTA clicks again: the `guard !shown`
-    // in `onShown` and `onCta: { _ in }` in `makeGameOpenRequest`, or the
-    // `play_refused` omission in `GameEvent.Dismissed.properties`.
+    // Fails if a window double-counts or a CTA is not reported once: the
+    // `guard !shown` in `onShown` and the Digia-only Clicked in `onCta` in
+    // `makeGameOpenRequest`, or the `play_refused` omission in
+    // `GameEvent.Dismissed.properties`.
     @Test("a window reports one Viewed and one Dismissed on the open chance")
     func windowReportsOneViewedAndOneDismissedOnTheOpenChance() async throws {
         let (sdk, recorder) = try await rig()
@@ -192,14 +193,15 @@ struct GameChanceEventsAndCepTests {
         request.onShown?()
         request.onShown?() // a recreated host re-runs the ready handshake
         request.onHttpAnswer?("play", ["chanceId": "ch-1"], Self.envelope(["outcomeKey": "slot-1"]))
-        request.onCta?("copy")
+        request.onCta?("copy", nil)
         request.onClose?("skin")
 
         let events = try await digiaEvents(sdk)
         #expect(named("Digia Experience Viewed", in: events).count == 1)
         #expect(named("Digia Experience Clicked", in: events).map {
             [Self.props($0)["element_id"] as? String, Self.props($0)["chance_id"] as? String]
-        } == [["play", "ch-1"]])
+        } == [["play", "ch-1"], ["copy", "ch-1"]])
+        #expect(recorder.clickedElementIds == ["play"]) // a CTA never reaches the CEP
         let dismissed = named("Digia Experience Dismissed", in: events)
         #expect(dismissed.count == 1)
         let props = Self.props(try #require(dismissed.first))
@@ -217,6 +219,7 @@ struct GameChanceEventsAndCepTests {
         sdk.coordinator.handle(.impressed, payload: recorder.payload)
         let request = try directOpenRequest(sdk, recorder: recorder, entry: .inlineTeaser)
 
+        request.onShown?()
         request.onClose?("skin")
         request.onClose?("user")
 
@@ -225,11 +228,36 @@ struct GameChanceEventsAndCepTests {
         #expect(dismissed.count == 2)
     }
 
+    // Guards `closedBeforeShown` behind `guard shown` in `onClose`: a game
+    // closed before it showed was never Viewed, so it is an open failure
+    // (`closed_before_ready`) that drops its presentation, never a Dismissed;
+    // a cancel was already settled by the coordinator and reports nothing.
+    @Test("a direct game closed before it showed fails to open instead of dismissing")
+    func directGameClosedBeforeShownFailsToOpen() async throws {
+        let (sdk, recorder) = try await rig()
+        let request = try directOpenRequest(sdk, recorder: recorder)
+
+        request.onClose?("user")
+
+        let events = try await digiaEvents(sdk)
+        #expect(named("Digia Experience Dismissed", in: events).isEmpty)
+        let failed = named("game_open_failed", in: events)
+        #expect(failed.map { Self.props($0)["reason"] as? String } == ["closed_before_ready"])
+        #expect(recorder.dropReason == .error)
+
+        let (cancelSdk, cancelRecorder) = try await rig()
+        try directOpenRequest(cancelSdk, recorder: cancelRecorder).onClose?(GamePresentation.cancelledReason)
+        let cancelEvents = try await digiaEvents(cancelSdk)
+        #expect(named("Digia Experience Dismissed", in: cancelEvents).isEmpty)
+        #expect(named("game_open_failed", in: cancelEvents).isEmpty)
+        #expect(!cancelRecorder.isSettled)
+    }
+
     // Fails if the entry's tap is counted twice or a replay is not counted: the
     // `!openedFromEntry || playNumber > 1` gate around the play Clicked, and the
-    // entry check in `shown` that skips a second Viewed.
-    @Test("an entry-opened game sends no second Viewed, no first-play Clicked, one replay Clicked")
-    func entryOpenedGameCountsOnlyThePlayAgainAsAClickAndNoSecondViewed() async throws {
+    // entry check in `shown` that sends the game's Viewed to Digia only.
+    @Test("an entry-opened game sends a Digia-only Viewed, no first-play Clicked, one replay Clicked")
+    func entryOpenedGameCountsOnlyThePlayAgainAsAClickAndViewsDigiaOnly() async throws {
         for entry in [GamificationEntryKind.inlineTeaser, .floating] {
             let (sdk, recorder) = try await rig()
             let request = try directOpenRequest(sdk, recorder: recorder, entry: entry)
@@ -239,7 +267,9 @@ struct GameChanceEventsAndCepTests {
                 "play", ["chanceId": "ch-1"], Self.envelope(["outcomeKey": "slot-1", "isNew": true]))
 
             let firstPlay = try await digiaEvents(sdk)
-            #expect(named("Digia Experience Viewed", in: firstPlay).isEmpty, "\(entry)")
+            #expect(named("Digia Experience Viewed", in: firstPlay).count == 1, "\(entry)")
+            // The entry's CEP presentation is the entry, never the game.
+            #expect(!recorder.displayed, "\(entry)")
             #expect(named("Digia Experience Clicked", in: firstPlay).isEmpty, "\(entry)")
             #expect(named("Digia Game Played", in: firstPlay).count == 1, "\(entry)")
 

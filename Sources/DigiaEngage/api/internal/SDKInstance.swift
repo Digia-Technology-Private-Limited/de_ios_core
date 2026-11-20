@@ -1358,6 +1358,16 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             events.toCep(.dismissed(reason: .screenExit), payload: guide.payload)
         }
 
+        // A Direct game, loading or shown, ends on any real screen change, like a guide:
+        // shown it reports Dismissed(screen_exit), still loading it is closed_before_ready.
+        // A game opened from an inline or floating entry is left to its entry.
+        if let game = controller.activeGame ?? GamePresenter.loading,
+           [GamificationEntryKind.direct, .unknown].map(\.rawValue).contains(game.request.entry) {
+            log.d("Dismissed — screen changed (type=game, currentScreen=\(_currentScreen ?? "<unset>"))",
+                  campaign: game.request.campaignKey)
+            GamePresenter.dismiss(reason: "screen_exit")
+        }
+
         // Floater and Floater Story orchestrators evaluate screen changes against their
         // campaign's targetScreenNames allowlist via their own onScreenChanged methods.
         floaterOrchestrator.onScreenChanged(_currentScreen ?? "")

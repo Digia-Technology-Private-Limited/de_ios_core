@@ -146,9 +146,10 @@ struct GameOpenRequest {
     var onClose: (@MainActor (String) -> Void)?
     var onFailure: (@MainActor (GameFailure) -> Void)?
     /// Fires once the skin's CTA op has run, with the op as the skin sent it
-    /// (`copy`, `openLink`, `share`, or a passthrough op like `requestReview`).
-    /// Not a click: Clicked counts plays only. A skin `close` never fires this.
-    var onCta: (@MainActor (String) -> Void)?
+    /// (`copy`, `openLink`, `share`, or a passthrough op like `requestReview`)
+    /// and, for `openLink` only, the link it opens. The surface reports it as a
+    /// Digia-only Clicked. A skin `close` never fires this.
+    var onCta: (@MainActor (String, String?) -> Void)?
     /// Fires once when the skin sends `ready` and the game becomes visible.
     var onShown: (@MainActor () -> Void)?
     /// Fires after each answered skin `http` call with the validated path,

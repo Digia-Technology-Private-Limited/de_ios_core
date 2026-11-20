@@ -1,6 +1,6 @@
 import Foundation
 
-/// What one open game window did, for its analytics: the chance it opened with,
+/// What one open game window did, for its analytics: its latest chance,
 /// how many `/play` requests the skin sent (for `play` vs `play_again`), how many
 /// plays landed an outcome, the latest refusal, and how long the game was visible
 /// in the foreground after it showed. Fed from
@@ -9,8 +9,7 @@ import Foundation
 final class GameWindowStats: @unchecked Sendable {
     private let lock = NSLock()
     private let clock: () -> Int64
-    /// The chance the window opened with; play again and play next do not move it.
-    let chanceId: String
+    private var latestChanceId: String
     private var playRequests = 0
     private var playCount = 0
     private var lastRefused = ""
@@ -22,9 +21,13 @@ final class GameWindowStats: @unchecked Sendable {
     init(chanceId: String, clock: @escaping () -> Int64 = {
         Int64(ProcessInfo.processInfo.systemUptime * 1000)
     }) {
-        self.chanceId = chanceId
+        latestChanceId = chanceId
         self.clock = clock
     }
+
+    /// The window's latest chance: the one it opened with, then whichever chance
+    /// the last `play`/`peek` answer named (play next moves it).
+    var chanceId: String { lock.withLock { latestChanceId } }
 
     var plays: Int { lock.withLock { playCount } }
     var playRefused: String { lock.withLock { lastRefused } }
@@ -45,6 +48,7 @@ final class GameWindowStats: @unchecked Sendable {
             guard let body = response as? [String: Any],
                   let data = body["data"] as? [String: Any],
                   let answer = data["response"] as? [String: Any] else { return }
+            if let next = answer["chanceId"] as? String, !next.isEmpty { latestChanceId = next }
             if let refused = answer["refused"] as? String, !refused.isEmpty { lastRefused = refused }
             if path == "play", let outcome = answer["outcomeKey"] as? String, !outcome.isEmpty {
                 playCount += 1

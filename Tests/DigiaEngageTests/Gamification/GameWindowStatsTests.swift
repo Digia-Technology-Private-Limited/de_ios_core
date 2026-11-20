@@ -36,4 +36,17 @@ struct GameWindowStatsTests {
         #expect(stats.plays == 2)
         #expect(stats.playRefused == "cooldown")
     }
+
+    // Guards the `latestChanceId` update in `recordHttp`: a replay plays a new
+    // chance, so the window's events must name the latest one, not the open.
+    @Test func chanceIdFollowsTheLatestPlayOrPeekAnswer() {
+        let stats = GameWindowStats(chanceId: "open-chance") { 0 }
+        stats.recordHttp(path: "play", response: answer(["outcomeKey": "win", "chanceId": "ch-2"]))
+        #expect(stats.chanceId == "ch-2")
+        stats.recordHttp(path: "claim", response: answer(["chanceId": "ch-x"]))
+        stats.recordHttp(path: "peek", response: answer(["chanceId": ""]))
+        #expect(stats.chanceId == "ch-2")
+        stats.recordHttp(path: "peek", response: answer(["chanceId": "ch-3"]))
+        #expect(stats.chanceId == "ch-3")
+    }
 }

@@ -74,8 +74,9 @@ final class GamificationOrchestrator: ObservableObject {
 
     /// `Action.openGame` from a gamification entry canvas: opens the game with
     /// the chance stored at the trigger. The adapter lives on the surface.
-    func openGame(forPayload payload: CEPTriggerPayload) {
-        sdk.gamificationSurface.openFromEntry(payload)
+    /// `reportClick` false when the caller already sent the tap's CEP click.
+    func openGame(forPayload payload: CEPTriggerPayload, reportClick: Bool = true) {
+        sdk.gamificationSurface.openFromEntry(payload, reportClick: reportClick)
     }
 
     // MARK: - Rewards

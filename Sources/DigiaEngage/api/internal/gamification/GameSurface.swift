@@ -134,6 +134,11 @@ final class GameSurface {
         if case .presentation(let payload, let entry) = settle, entry != .inlineTeaser, entry != .floating,
            payload.presentationId != nil, sdk.coordinator.ownerOf(payload) == nil {
             log.d("Game not opened — presentation already settled", campaign: campaignKey)
+            // The open still failed: report it. Dropping the settled
+            // presentation again is a no-op in the coordinator.
+            fail(
+                settle: settle, campaign: campaign, config: config,
+                reason: Self.downloadTimeoutReason, chanceId: chanceId)
             return
         }
         // 4. No user, no game.
@@ -200,12 +205,11 @@ final class GameSurface {
     private func closed(settle: GameSettle, campaign: CampaignModel, reason: String, dismissed: GameEvent.Dismissed) {
         switch settle {
         case .presentation(let payload, let entry):
-            // A cancel comes from the coordinator, which already settled and
-            // reported the presentation; it emits nothing more.
-            guard reason != GamePresentation.cancelledReason else { return }
             sdk.events.toDigia(dismissed, payload: payload)
-            // The coordinator settles once, so the CEP hears one Dismissed.
-            if entry != .inlineTeaser, entry != .floating {
+            // The coordinator settles once, so the CEP hears one Dismissed. A
+            // cancel comes from the coordinator, which already settled and
+            // reported the presentation to the CEP.
+            if entry != .inlineTeaser, entry != .floating, reason != GamePresentation.cancelledReason {
                 sdk.coordinator.handle(.dismissed(reason: Self.dismissReason(closeReason: reason)), payload: payload)
             }
             sdk.gamification.refreshRewardsIfLoaded()
@@ -223,6 +227,30 @@ final class GameSurface {
             sdk.events.toDigia(
                 dismissed, payload: Self.rewardsPayload(chanceId: chanceId, campaign: campaign))
             sdk.gamification.refreshRewards()
+        }
+    }
+
+    /// A game window that closed before it was shown was never Viewed, so it
+    /// is never Dismissed. A close by the user, the skin, a CTA or a screen
+    /// change is an open failure (`closed_before_ready`), which also drops a
+    /// direct presentation. A cancel was settled by the coordinator, so it
+    /// reports nothing; a superseded direct game only settles its
+    /// presentation as superseded, since nothing else does. Matches Android.
+    private func closedBeforeShown(
+        settle: GameSettle, campaign: CampaignModel, config: GamificationConfig,
+        reason: String, chanceId: String
+    ) {
+        switch reason {
+        case GamePresentation.cancelledReason:
+            return
+        case "superseded":
+            if case .presentation(let payload, let entry) = settle, entry != .inlineTeaser, entry != .floating {
+                sdk.coordinator.handle(.dismissed(reason: .superseded), payload: payload)
+            }
+        default:
+            fail(
+                settle: settle, campaign: campaign, config: config,
+                reason: GameFailure.closedBeforeReady.wireValue, chanceId: chanceId)
         }
     }
 
@@ -249,42 +277,47 @@ final class GameSurface {
     /// The CEP reason for a direct game's close: the native close button and
     /// the skin's own `close` are the user's (as an authored Hide is on other
     /// campaigns; `completed` is kept for an experience that reached its end),
-    /// a CTA handoff is a CTA, anything else is a cancel. Matches Android.
+    /// a CTA handoff is a CTA, a host screen change is a screen exit,
+    /// anything else is a cancel. Matches Android.
     static func dismissReason(closeReason: String) -> DismissReason {
         switch closeReason {
         case "user", "skin": return .userClose
         case "cta": return .ctaAction
         case "superseded": return .superseded
+        case "screen_exit": return .screenExit
         default: return .cancelled
         }
     }
 
-    /// The `dismiss_reason` analytics value for a game close: `skin`, `cta`,
-    /// `failure` and `superseded` (a test send replaced the game) pass
-    /// through, anything else is the user's. Matches Android's
+    /// The `dismiss_reason` analytics value for a game close: every known
+    /// close reason passes through (`superseded` is a test send replacing
+    /// the game; `back`, `timeout` and `web_process_terminated` are Android's
+    /// and never reach iOS), anything unknown is the user's. Matches Android's
     /// `gameDismissReasonOf`.
     static func gameDismissReason(closeReason: String) -> String {
         switch closeReason {
-        case "skin", "cta", "failure", "superseded": return closeReason
+        case "user", "back", "screen_exit", GamePresentation.cancelledReason, "skin", "cta", "failure",
+             "superseded", "web_process_terminated":
+            return closeReason
         default: return "user"
         }
     }
 
-    /// The impression policy: every entry kind emits Impressed once the
-    /// game WebView is actually displayed. `toCep` marks the owning
-    /// presentation displaying through the coordinator — the iOS equivalent
-    /// of Android's `reportDisplaying(owner)` + `Impressed` pair. The funnel
-    /// Viewed goes to Digia for every settle — but for a rewards game only
-    /// to Digia, never the CEP, whose synthetic payload owns no
-    /// presentation.
+    /// The impression policy: the funnel Viewed goes to Digia for every
+    /// settle once the game WebView is actually displayed. Only a direct game
+    /// also tells the CEP: `toCep` marks the owning presentation displaying
+    /// through the coordinator — the iOS equivalent of Android's
+    /// `reportDisplaying(owner)` + `Impressed` pair. An entry's CEP
+    /// presentation is the entry, already Impressed when it rendered, and a
+    /// rewards game's synthetic payload owns no presentation.
     private func shown(settle: GameSettle, campaign: CampaignModel, viewed: GameEvent.Viewed) {
         switch settle {
         case .presentation(let payload, let entry):
-            // A game opened from an inline or floating entry was already Viewed
-            // (and Impressed to the CEP) when its entry rendered: a second Viewed
-            // would count one presentation twice.
-            if entry == .inlineTeaser || entry == .floating { return }
-            sdk.events.toBoth(.impressed, viewed, payload: payload)
+            if entry == .inlineTeaser || entry == .floating {
+                sdk.events.toDigia(viewed, payload: payload)
+            } else {
+                sdk.events.toBoth(.impressed, viewed, payload: payload)
+            }
         case .rewards(let chanceId):
             sdk.events.toDigia(
                 viewed,
@@ -313,6 +346,10 @@ final class GameSurface {
     /// `element_id` of the Clicked for a window's first `/play`, and for every later one.
     static let clickPlay = "play"
     static let clickPlayAgain = "play_again"
+
+    /// `game_open_failed` reason for a skin download that outlived its
+    /// presentation: the acceptance watchdog settled it before the open.
+    static let downloadTimeoutReason = "download_timeout"
 
     /// The one `GameOpenRequest` builder: shared by entries, direct opens and
     /// rewards chances. Only the settle closures differ. The funnel counts a
@@ -383,7 +420,14 @@ final class GameSurface {
             bundleRoot: file.deletingLastPathComponent(),
             showMute: config.showMute,
             onClose: { [weak self] reason in
-                self?.closed(
+                guard let self else { return }
+                guard shown else {
+                    self.closedBeforeShown(
+                        settle: settle, campaign: campaign, config: config,
+                        reason: reason, chanceId: stats.chanceId)
+                    return
+                }
+                self.closed(
                     settle: settle, campaign: campaign, reason: reason,
                     dismissed: dismissed(Self.gameDismissReason(closeReason: reason)))
             },
@@ -401,13 +445,29 @@ final class GameSurface {
                 self.sdk.events.toDigia(
                     dismissed("failure"), payload: Self.payload(settle: settle, campaign: campaign))
                 // A direct game that displayed and then died ends its
-                // presentation; an entry's teaser stays.
-                if case .presentation(let payload, let entry) = settle, entry != .inlineTeaser, entry != .floating {
-                    self.settleDirectFailure(payload: payload, reason: failure.wireValue)
+                // presentation; an entry's teaser stays and is kept or hidden
+                // as after a close.
+                if case .presentation(let payload, let entry) = settle {
+                    switch entry {
+                    case .direct, .unknown:
+                        self.settleDirectFailure(payload: payload, reason: failure.wireValue)
+                    case .inlineTeaser:
+                        self.sdk.gamification.refreshRewardsIfLoaded()
+                        self.refreshInlineEntryAfterClose(campaignKey: campaignKey, payload: payload)
+                    case .floating:
+                        self.sdk.gamification.refreshRewardsIfLoaded()
+                        self.refreshFloatingEntryAfterClose(campaignKey: campaignKey, payload: payload)
+                    }
                 }
             },
-            // A result action is not a click: Clicked counts plays only.
-            onCta: { _ in },
+            // A result action is a Digia click on its op, never a CEP one: the
+            // CEP counts the tap that opened the game or its plays.
+            onCta: { [weak self] op, actionUrl in
+                guard let self else { return }
+                self.sdk.events.toDigia(
+                    GameEvent.Clicked(elementId: op, chanceId: stats.chanceId, actionUrl: actionUrl),
+                    payload: Self.payload(settle: settle, campaign: campaign))
+            },
             onShown: { [weak self] in
                 // A re-sent `ready` counts the impression once.
                 guard !shown else { return }
