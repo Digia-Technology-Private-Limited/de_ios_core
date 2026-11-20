@@ -218,7 +218,16 @@ private struct SurveySession: View {
                 visible && !vm.isComplete
                     && state.config.settings.display.type == .bottomSheet
             },
-            set: { presented in if !presented { finish(completed: false) } }
+            // As the nudge cover, decided on the next turn: a sheet torn down by a root swap under attach
+            // is ended by re-attaching, not counted as the user's close.
+            set: { presented in
+                guard !presented else { return }
+                let token = state.token
+                DispatchQueue.main.async {
+                    guard orchestrator.state?.token == token, !DigiaHostAttachment.lostHost else { return }
+                    finish(completed: false)
+                }
+            }
         )
     }
 }

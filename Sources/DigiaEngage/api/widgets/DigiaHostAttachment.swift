@@ -5,9 +5,10 @@ import UIKit
 /// *current* root view controller, so its SwiftUI layer is that root's child controller.
 ///
 /// The app calls `attach` once. A root swap (`window.rootViewController = …`) removes the host with the
-/// old root; it is put back before the next campaign is routed (`ensure()`). A campaign that was on
-/// screen in the old root is ended at that point (`endCampaignsForHostTeardown`): it left the screen with
-/// that root, and is not redrawn in the new one.
+/// old root; the host notices it left the window and is put back in the new root on the next main-actor
+/// turn (`ensure()`, also run before each campaign is routed). A campaign that was on screen in the old
+/// root is ended at that point (`endCampaignsForHostTeardown`): it left the screen with that root, and is
+/// not redrawn in the new one.
 ///
 /// A navigation, tab bar, split view or page view controller root is not supported: each of them
 /// treats any child controller as one of its own screens (a pushed page, an extra tab). There the host
@@ -30,6 +31,15 @@ enum DigiaHostAttachment {
         return host.superview === root.view && host.window != nil
     }
 
+    /// Whether the host that draws campaigns has gone, so a cover being torn down is not the user's close.
+    /// Under attach: its host is not in the window's current root (the app replaced the root, or removed the
+    /// host) and has not been put back yet. Otherwise: no `DigiaHost` is mounted.
+    static var lostHost: Bool {
+        guard isInUse else { return HostRegistry.shared.isEmpty }
+        guard attached, let host else { return false }
+        return host.superview !== window?.rootViewController?.view
+    }
+
     /// The first controller the app itself presented in `window`, if any. Digia's own debug
     /// screen is skipped; its nudge covers, surveys and stories are told apart by their state instead.
     static func appPresentation(in window: UIWindow?) -> UIViewController? {
@@ -47,6 +57,14 @@ enum DigiaHostAttachment {
         self.window = window
         HostRegistry.shared.enforce()
         ensure()
+    }
+
+    /// The attached host left the window: the app replaced the root, or removed the host. Re-attach once the
+    /// new root is in place, which ends what the old root was showing. A host that left only because the app
+    /// covered its root with a full-screen modal is still in the root's view, so nothing ends.
+    static func hostLeftWindow(_ leaving: DigiaHostView) {
+        guard attached, leaving === host else { return }
+        DispatchQueue.main.async { ensure() }
     }
 
     /// Puts the host back in the current root, or on top of it, if it is not already there.

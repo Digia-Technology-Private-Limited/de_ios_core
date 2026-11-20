@@ -77,7 +77,15 @@ struct NudgeOverlayView: View {
                 return nudge
             },
             set: { newValue in
-                if newValue == nil { SDKInstance.shared.nudgeOrchestrator.markNudgeDismissed() }
+                guard newValue == nil, let nudge = SDKInstance.shared.controller.activeNudge else { return }
+                // Decided on the next turn, once a root swap has finished: under attach, a cover torn down
+                // because the app replaced its root is not a user close; re-attaching ends it as cancelled.
+                DispatchQueue.main.async {
+                    guard SDKInstance.shared.controller.activeNudge?.id == nudge.id,
+                        !DigiaHostAttachment.lostHost
+                    else { return }
+                    SDKInstance.shared.nudgeOrchestrator.markNudgeDismissed()
+                }
             }
         )
     }

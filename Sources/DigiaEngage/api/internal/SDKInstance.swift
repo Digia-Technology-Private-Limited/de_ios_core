@@ -1394,6 +1394,17 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     func onHostUnmounted(_ id: UUID) {
         HostRegistry.shared.unmount(id)
         isHostMounted = !HostRegistry.shared.isEmpty
+        // Without attach, the last `DigiaHost` leaving (e.g. the app replaced its root) takes what it drew off
+        // the screen: end it now rather than leave it "displaying". Not when a host mounts again within the
+        // same turn, nor when the app's own modal only covers the host. Attach has its own path
+        // (`DigiaHostAttachment.hostLeftWindow`).
+        guard !DigiaHostAttachment.isInUse, HostRegistry.shared.isEmpty else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard HostRegistry.shared.isEmpty,
+                DigiaHostAttachment.appPresentation(in: ViewControllerUtil.keyWindow()) == nil
+            else { return }
+            self?.endCampaignsForHostTeardown()
+        }
     }
 
     /// The app replaced its window's root under the host `Digia.attach(to:)` added, so the host, and every

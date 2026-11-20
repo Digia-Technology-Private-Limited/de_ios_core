@@ -27,7 +27,9 @@ import UIKit
 public final class DigiaHostView: UIView {
     private let log = DigiaLogger()
     private var hostingController: UIHostingController<DigiaHost<EmptyView>>?
-    private let hostId = UUID()
+    /// New for each mount: SwiftUI reports the previous mount's disappearance late, and with a shared id
+    /// that would unregister the host that has just mounted again (`HostRegistry`).
+    private var hostId = UUID()
 
     public override init(frame: CGRect) {
         super.init(frame: frame)
@@ -43,6 +45,7 @@ public final class DigiaHostView: UIView {
         super.didMoveToWindow()
         if window == nil {
             unmount()
+            DigiaHostAttachment.hostLeftWindow(self)
         } else if hostingController == nil {
             mount()
         }
@@ -78,6 +81,7 @@ public final class DigiaHostView: UIView {
                     + "window), so campaigns cannot be drawn")
             return
         }
+        hostId = UUID()
         let controller = UIHostingController(rootView: DigiaHost(hostId: hostId) { EmptyView() })
         controller.view.backgroundColor = .clear
         controller.view.translatesAutoresizingMaskIntoConstraints = false
