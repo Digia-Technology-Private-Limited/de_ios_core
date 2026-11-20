@@ -266,7 +266,7 @@ final class GameSurface {
         let dropReason: DropReason
         switch reason {
         case PlayDropReason.busy: dropReason = .surfaceBusy
-        case GameFailure.readyTimeout.wireValue: dropReason = .timeout
+        case GameFailure.readyTimeout.wireValue, GameFailure.loadTimeout.wireValue: dropReason = .timeout
         default: dropReason = .error
         }
         sdk.liveTestContexts[payload.cepCampaignId]?.reportFailed(dropReason, message: reason)

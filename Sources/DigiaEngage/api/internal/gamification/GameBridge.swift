@@ -55,8 +55,12 @@ final class GameBridge {
     /// The SDK's bridge version, sent in `init`. A skin declaring a higher
     /// version is refused by the presentation.
     nonisolated static let bridgeVersion = 2
-    /// Seconds from load start to `ready` before the container closes quietly.
+    /// Seconds from the page commit to `ready` before the container closes quietly.
     nonisolated static let readyTimeoutSeconds = 5.0
+    /// Seconds from load start to the page commit before the container closes
+    /// quietly. Its own budget, so a slow engine start on a cheap phone does
+    /// not eat the skin's 5 s.
+    nonisolated static let loadTimeoutSeconds = 15.0
     /// Skin messages above this many UTF-8 bytes are dropped, never parsed. Fits a
     /// full 16 KB `storage` value or `http` body plus its envelope.
     nonisolated static let maxMessageBytes = 64 * 1024
@@ -197,11 +201,20 @@ final class GameBridge {
     /// Fires from the one-shot ready timer. Only a session still `loading`
     /// closes here; anything past `ready` is unaffected.
     func readyTimeoutFired(generation: Int) {
+        timeoutFired(generation: generation, failure: .readyTimeout)
+    }
+
+    /// Fires from the one-shot load timer: the page never committed.
+    func loadTimeoutFired(generation: Int) {
+        timeoutFired(generation: generation, failure: .loadTimeout)
+    }
+
+    private func timeoutFired(generation: Int, failure: GameFailure) {
         guard generation == self.generation, state == .loading else { return }
         failPendingAsClosed()
         state = .closed
-        log.w("Game closed — ready timed out")
-        onFailed?(.readyTimeout)
+        log.w("Game closed — \(failure.wireValue)")
+        onFailed?(failure)
     }
 
     /// Native close button, back, skin `close`, or teardown. First call wins;

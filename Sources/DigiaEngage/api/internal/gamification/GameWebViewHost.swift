@@ -116,34 +116,12 @@ final class GameWebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
 
     var view: WKWebView { webView }
 
-    /// Starts the load from the cached file and the 5 s ready timer. The timer
-    /// runs only while the app is active: a load started out of the
-    /// foreground arms it on didBecomeActive instead.
+    /// Starts the load from the cached file and the 15 s load timer; the 5 s
+    /// ready timer starts at the page commit. Timers run only while the app is
+    /// active: a load started out of the foreground arms on didBecomeActive.
     func start() {
         webView.loadFileURL(entryFile, allowingReadAccessTo: bundleRoot)
-        Task { @MainActor [weak self] in
-            guard UIApplication.shared.applicationState == .active else { return }
-            self?.armReadyTimer()
-        }
-    }
-
-    /// Arms the 5 s ready timer for the load in flight. The timer carries the
-    /// bridge generation, so re-arming (or `cancelReadyTimer`) makes any
-    /// earlier timer a stale no-op.
-    func armReadyTimer() {
-        // `beginLoading` runs on the main actor; the timer arms there too, so
-        // the generation it captures is the one from this arm, in order.
-        Task { @MainActor [weak game] in
-            guard let game, game.bridge.state == .loading else { return }
-            let current = game.bridge.beginLoading()
-            DispatchQueue.main.asyncAfter(
-                deadline: .now() + GameBridge.readyTimeoutSeconds
-            ) { [weak game] in
-                Task { @MainActor [weak game] in
-                    game?.bridge.readyTimeoutFired(generation: current)
-                }
-            }
-        }
+        Task { @MainActor [weak game] in game?.armLoadTimer() }
     }
 
     /// Stops the load, detaches the message handler, and closes the bridge.
@@ -191,6 +169,10 @@ final class GameWebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             navigationType: navigationAction.navigationType,
             isMainFrame: isMainFrame
         ) ? .allow : .cancel)
+    }
+
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        Task { @MainActor [weak game] in game?.pageDidCommit() }
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {

@@ -68,6 +68,24 @@ struct GameBridgeTests {
         #expect(failed == .readyTimeout)
     }
 
+    @Test("the commit re-arm makes the load timer stale; the ready timer then fails readyTimeout")
+    func commitHandsLoadTimerToReadyTimer() throws {
+        let bridge = makeBridge()
+        var failed: GameFailure?
+        bridge.onFailed = { failed = $0 }
+
+        let loadGeneration = bridge.beginLoading()
+        let readyGeneration = bridge.beginLoading()
+        // Guards the generation check: the 15 s load timer armed before the
+        // commit must not close a page that already committed.
+        bridge.loadTimeoutFired(generation: loadGeneration)
+        #expect(bridge.state == .loading)
+        #expect(failed == nil)
+
+        bridge.readyTimeoutFired(generation: readyGeneration)
+        #expect(failed == .readyTimeout)
+    }
+
     @Test("ready timeout is a no-op once ready arrived")
     func timeoutNoOpAfterReady() throws {
         let bridge = makeBridge()

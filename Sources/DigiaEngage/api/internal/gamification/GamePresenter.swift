@@ -116,8 +116,8 @@ final class GamePresentation: Identifiable, ObservableObject {
 
     /// Loads the skin before anything is shown. The web view sits in the key
     /// window fully transparent and ignoring touches, so the host app stays
-    /// usable; `ready` presents the game, and a missing `ready` closes it
-    /// silently on the bridge's 5 s timer.
+    /// usable; `ready` presents the game. A page that does not commit within
+    /// 15 s, or sends no `ready` within 5 s of the commit, closes silently.
     func preload() {
         let coordinator = GameWebCoordinator(game: self, entryFile: entryFile, bundleRoot: bundleRoot)
         webCoordinator = coordinator
@@ -133,6 +133,39 @@ final class GamePresentation: Identifiable, ObservableObject {
             window.addSubview(view)
         }
         coordinator.start()
+    }
+
+    /// True once the page committed: the load timer is done and the ready
+    /// timer owns the wait for `ready`.
+    private var didCommitPage = false
+
+    /// Arms the timer for the phase the load is in: 15 s to the page commit,
+    /// then 5 s to `ready`. Each arm carries a fresh bridge generation, so
+    /// re-arming (or `cancelReadyTimer`) makes any earlier timer a stale no-op.
+    /// Runs only while loading and in the foreground.
+    func armLoadTimer() {
+        guard !didFinish, bridge.state == .loading,
+              UIApplication.shared.applicationState == .active
+        else { return }
+        let generation = bridge.beginLoading()
+        let committed = didCommitPage
+        let seconds = committed ? GameBridge.readyTimeoutSeconds : GameBridge.loadTimeoutSeconds
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
+            Task { @MainActor [weak self] in
+                if committed {
+                    self?.bridge.readyTimeoutFired(generation: generation)
+                } else {
+                    self?.bridge.loadTimeoutFired(generation: generation)
+                }
+            }
+        }
+    }
+
+    /// The page committed: the load timer gives way to the 5 s ready timer.
+    func pageDidCommit() {
+        guard !didCommitPage else { return }
+        didCommitPage = true
+        armLoadTimer()
     }
 
     /// Sends the session's `init`: once after the page loads, and again on a
@@ -510,7 +543,7 @@ final class GamePresentation: Identifiable, ObservableObject {
             },
             // Pause on resign-active, like the story and canvas campaigns:
             // a call, Control Center or the app switcher pauses the game, and
-            // the 5 s ready timer never runs while the app is not active.
+            // the load and ready timers never run while the app is not active.
             center.addObserver(
                 forName: UIApplication.willResignActiveNotification,
                 object: nil, queue: .main) { [weak self] _ in
@@ -547,7 +580,7 @@ final class GamePresentation: Identifiable, ObservableObject {
     private func appDidBecomeActive() {
         guard !didFinish else { return }
         request.onForeground?(true)
-        if bridge.state == .loading { webCoordinator?.armReadyTimer() }
+        armLoadTimer()
         pushLifecycle("resumed")
         motion.resume()
     }

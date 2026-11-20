@@ -33,7 +33,10 @@ struct GameSafeArea: Equatable, Sendable {
 /// analytics event from three runtimes and must match character for
 /// character (Android's `GameFailureReason.wireValue`).
 enum GameFailure: String, Equatable, Sendable {
+    /// The page committed but the skin sent no `ready` within 5 s.
     case readyTimeout
+    /// The page did not commit within 15 s of the load starting.
+    case loadTimeout
     case bundleLoadFailed
     case renderError
     case unsupportedWebView
@@ -47,6 +50,7 @@ enum GameFailure: String, Equatable, Sendable {
     var wireValue: String {
         switch self {
         case .readyTimeout: return "ready_timeout"
+        case .loadTimeout: return "load_timeout"
         case .bundleLoadFailed: return "bundle_load_failed"
         case .renderError: return "render_error"
         case .unsupportedWebView: return "unsupported_webview"
