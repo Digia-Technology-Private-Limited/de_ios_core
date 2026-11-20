@@ -613,6 +613,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         appEventLimits = config.appEvents.limits
         services?.appEventsService?.applyPolicy(config.appEvents)
         gamePrewarm = config.gamePrewarm
+        GamePrewarmer.refreshEngine()
     }
 
     private func applyFetchResult(_ fetched: Result<CampaignBundle, Error>) {

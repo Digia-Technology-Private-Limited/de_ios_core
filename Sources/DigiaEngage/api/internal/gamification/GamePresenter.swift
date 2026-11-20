@@ -119,7 +119,9 @@ final class GamePresentation: Identifiable, ObservableObject {
     /// usable; `ready` presents the game. A page that does not commit within
     /// 15 s, or sends no `ready` within 5 s of the commit, closes silently.
     func preload() {
-        let coordinator = GameWebCoordinator(game: self, entryFile: entryFile, bundleRoot: bundleRoot)
+        let coordinator = GameWebCoordinator(
+            game: self, entryFile: entryFile, bundleRoot: bundleRoot,
+            engine: GamePrewarmer.takeEngine())
         webCoordinator = coordinator
         let view = coordinator.view
         view.alpha = 0

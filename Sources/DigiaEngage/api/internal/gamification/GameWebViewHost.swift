@@ -79,13 +79,24 @@ final class GameWebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
     private let bundleRoot: URL
     private let webView: WKWebView
 
-    init(game: GamePresentation, entryFile: URL, bundleRoot: URL) {
+    /// `engine`, when given, is the prewarmed blank web view (same
+    /// configuration); the game adopts that instance instead of building one.
+    init(
+        game: GamePresentation, entryFile: URL, bundleRoot: URL,
+        engine: GamePrewarmer.Engine? = nil
+    ) {
         self.game = game
         self.entryFile = entryFile
         self.bundleRoot = bundleRoot
-        let proxy = WeakScriptMessageProxy(target: nil)
-        let configuration = GameWebViewConfigurationFactory.make(messageProxy: proxy)
-        self.webView = WKWebView(frame: .zero, configuration: configuration)
+        let proxy: WeakScriptMessageProxy
+        if let engine {
+            proxy = engine.proxy
+            self.webView = engine.webView
+        } else {
+            proxy = WeakScriptMessageProxy(target: nil)
+            let configuration = GameWebViewConfigurationFactory.make(messageProxy: proxy)
+            self.webView = WKWebView(frame: .zero, configuration: configuration)
+        }
         if #available(iOS 16.4, *) {
             // Debug builds only: a release web view is never inspectable.
             webView.isInspectable = SDKInstance.shared.isDebugBuild

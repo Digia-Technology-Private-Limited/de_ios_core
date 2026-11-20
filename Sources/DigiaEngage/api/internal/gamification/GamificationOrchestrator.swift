@@ -63,6 +63,7 @@ final class GamificationOrchestrator: ObservableObject {
     /// SDK-owned: cancelled on user change and test reset, like Android's
     /// SDK-scoped prefetcher.
     func prefetchGamificationSkins(_ campaigns: [CampaignModel]) {
+        GamePrewarmer.campaignsSynced(campaigns)
         let skins = campaigns.compactMap(\.gamificationConfig).map {
             (bundleUrl: $0.bundleUrl, skinId: $0.skinId, version: $0.skinVersion)
         }
@@ -149,6 +150,7 @@ final class GamificationOrchestrator: ObservableObject {
     /// Resets the rewards state for a test teardown.
     func resetForTesting() {
         cancelPrefetches()
+        GamePrewarmer.resetForTesting()
         rewardsRefreshTask?.cancel()
         rewardsRefreshTask = nil
         rewardsResponse = nil
