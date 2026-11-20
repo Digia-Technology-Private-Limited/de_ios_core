@@ -591,6 +591,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     private(set) var sdkConfigFetchTask: Task<Void, Never>?
     /// What `trackEvent` validates against; the SDK config's, or the defaults.
     var appEventLimits = AppEventLimits.defaults
+    /// The SDK config's game prewarm switches; off until a config turns them on.
+    var gamePrewarm = GamePrewarmConfig.off
 
     /// Not awaited. A failed call changes nothing, except that a first install with no
     /// cached config runs on the defaults from here, which also sends the held health events.
@@ -610,6 +612,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         healthSink.applyConfig(enabled: config.healthEnabled, sessionCap: config.healthSessionCap)
         appEventLimits = config.appEvents.limits
         services?.appEventsService?.applyPolicy(config.appEvents)
+        gamePrewarm = config.gamePrewarm
     }
 
     private func applyFetchResult(_ fetched: Result<CampaignBundle, Error>) {
@@ -2311,6 +2314,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         fetchTask = nil
         sdkConfigFetchTask?.cancel()
         sdkConfigFetchTask = nil
+        gamePrewarm = .off
         services?.tearDown()
         services = nil
         currentSession.set(nil, requestHeaders: [:])

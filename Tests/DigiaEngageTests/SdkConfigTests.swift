@@ -96,6 +96,26 @@ struct SdkConfigAppEventsTests {
     }
 }
 
+@Suite("SdkConfig game prewarm")
+struct SdkConfigGamePrewarmTests {
+    @Test("game prewarm is opt-in: on only for explicit true, eligible only on tier full above the RAM floor")
+    func gamePrewarmOptIn() {
+        #expect(SdkConfig.resolve().gamePrewarm == .off)
+        #expect(SdkConfig.defaults.gamePrewarm == .off)
+        let mistyped = SdkConfig.resolve(fetched: object(
+            #"{"gamification":{"prewarm":{"enabled":"true","engine":1,"game":true,"minRamMb":"big"}}}"#)).gamePrewarm
+        #expect(mistyped == GamePrewarmConfig(enabled: false, engine: false, game: true, minRamMb: 0))
+        #expect(mistyped.allowsGame(tier: "full", ramMb: 8000) == false, "game on without enabled stays off")
+
+        let on = SdkConfig.resolve(fetched: object(
+            #"{"gamification":{"prewarm":{"enabled":true,"engine":true,"minRamMb":6144}}}"#)).gamePrewarm
+        #expect(on.allowsEngine(tier: "full", ramMb: 6144))
+        #expect(on.allowsEngine(tier: "full", ramMb: 6143) == false)
+        #expect(on.allowsEngine(tier: "lite", ramMb: 8000) == false)
+        #expect(on.allowsGame(tier: "full", ramMb: 8000) == false, "game defaults off")
+    }
+}
+
 @MainActor
 @Suite("SdkConfigStore")
 struct SdkConfigStoreTests {

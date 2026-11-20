@@ -3,17 +3,23 @@ import Foundation
 private let log = DigiaLogger()
 
 /// The flags and limits the backend can change without an SDK release.
-/// `sdkHealth` and `appEvents` are read here; the saved response is kept whole.
+/// `sdkHealth`, `appEvents` and `gamification.prewarm` are read here; the saved response is kept whole.
 struct SdkConfig: Equatable, Sendable {
     let healthEnabled: Bool
     let healthSessionCap: Int
     /// The app-event upload switch, rate, burst, blocklist and limits.
     let appEvents: AppEventUploadPolicy
+    /// The game prewarm switches. Off unless the response turns them on.
+    let gamePrewarm: GamePrewarmConfig
 
-    init(healthEnabled: Bool, healthSessionCap: Int, appEvents: AppEventUploadPolicy = .unlimited) {
+    init(
+        healthEnabled: Bool, healthSessionCap: Int, appEvents: AppEventUploadPolicy = .unlimited,
+        gamePrewarm: GamePrewarmConfig = .off
+    ) {
         self.healthEnabled = healthEnabled
         self.healthSessionCap = healthSessionCap
         self.appEvents = appEvents
+        self.gamePrewarm = gamePrewarm
     }
 
     /// What the SDK runs on with no cache and no answer. A test pins it to the shared fixture.
@@ -40,10 +46,15 @@ struct SdkConfig: Equatable, Sendable {
         func flag(_ path: [String]) -> Bool {
             (section(primary, path) as? NSNumber).flatMap(boolean) ?? true
         }
+        /// An opt-in switch: on only for an explicit `true`.
+        func optIn(_ path: [String]) -> Bool {
+            (section(primary, path) as? NSNumber).flatMap(boolean) ?? false
+        }
 
         let limits = ["appEvents", "limits"]
         let defaults = AppEventLimits.defaults
         let blocked = section(primary, ["appEvents", "blockedNames"]) as? [Any]
+        let prewarm = ["gamification", "prewarm"]
         return SdkConfig(
             healthEnabled: flag(["sdkHealth", "enabled"]),
             healthSessionCap: number(["sdkHealth", "sessionCap"], min: 0, fallback: HealthSink.defaultSessionCap),
@@ -61,6 +72,12 @@ struct SdkConfig: Equatable, Sendable {
                         limits + ["stringMaxLength"], min: 1, fallback: defaults.stringMaxLength),
                     listMaxItems: number(limits + ["listMaxItems"], min: 1, fallback: defaults.listMaxItems)
                 )
+            ),
+            gamePrewarm: GamePrewarmConfig(
+                enabled: optIn(prewarm + ["enabled"]),
+                engine: optIn(prewarm + ["engine"]),
+                game: optIn(prewarm + ["game"]),
+                minRamMb: number(prewarm + ["minRamMb"], min: 0, fallback: 0)
             )
         )
     }
@@ -76,6 +93,33 @@ struct SdkConfig: Equatable, Sendable {
               (Double(min)...Double(Int32.max)).contains(value)
         else { return nil }
         return number.intValue
+    }
+}
+
+/// `gamification.prewarm`: `engine` keeps one blank game web view warm, `game` loads a
+/// whole game ahead of the tap (and the Direct load alongside the grant). Every switch is
+/// off unless the response says `true`, so a missing block leaves today's behaviour.
+struct GamePrewarmConfig: Equatable, Sendable {
+    var enabled = false
+    var engine = false
+    var game = false
+    /// An extra RAM floor on top of tier `full`; 0 lets the tier alone decide.
+    var minRamMb = 0
+
+    static let off = GamePrewarmConfig()
+
+    /// Eligible for the engine prewarm: enabled, `engine` on, tier `full`, RAM ≥ `minRamMb`.
+    func allowsEngine(tier: String, ramMb: Int) -> Bool {
+        enabled && engine && deviceQualifies(tier: tier, ramMb: ramMb)
+    }
+
+    /// Eligible for the game prewarm and the Direct parallel load.
+    func allowsGame(tier: String, ramMb: Int) -> Bool {
+        enabled && game && deviceQualifies(tier: tier, ramMb: ramMb)
+    }
+
+    private func deviceQualifies(tier: String, ramMb: Int) -> Bool {
+        tier == "full" && ramMb >= minRamMb
     }
 }
 
