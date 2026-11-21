@@ -96,9 +96,13 @@ final class PlaySession {
     }
 
     /// The tap decision: a shown entry opens with its stored chance, unless a
-    /// game is already visible. Pure, so both platforms share it exactly.
-    nonisolated static func decideTap(gameVisible: Bool, chance: GrantedChance?) -> TapDecision {
-        if gameVisible {
+    /// game is already visible. A live-test tap is not busy — the open
+    /// replaces the visible game (`GamePresenter.replace`), as every new test
+    /// send does. Pure, so both platforms share it exactly.
+    nonisolated static func decideTap(
+        gameVisible: Bool, isLiveTest: Bool = false, chance: GrantedChance?
+    ) -> TapDecision {
+        if gameVisible && !isLiveTest {
             return .fail(reason: PlayDropReason.busy)
         }
         guard let chance else {

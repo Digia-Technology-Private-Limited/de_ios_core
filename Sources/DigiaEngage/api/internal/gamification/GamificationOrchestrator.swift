@@ -372,7 +372,7 @@ final class GamificationOrchestrator: ObservableObject {
                 detail = reason
             }
             log.d("Gamification chance not granted (reason=\(reason))", campaign: campaignKey)
-            sdk.liveTestContexts[cepCampaignId]?.reportFailed(DropReason.error, message: detail)
+            sdk.liveTestContexts[cepCampaignId]?.reportFailed(dropReason, message: detail)
             // Only a client failure is an open failure: denied, not-shown
             // and busy are expected drops, recorded on the delivery outcome.
             if dropReason == .error {

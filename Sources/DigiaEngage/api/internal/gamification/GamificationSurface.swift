@@ -35,19 +35,32 @@ final class GamificationSurface: CampaignSurface {
         return false
     }
 
-    /// The granted chance stored at the trigger, keyed by campaign key. A tap
+    /// The granted chance stored at the trigger, keyed by `entryKey`. A tap
     /// opens the game with this, never with a new grant.
     var chances = [String: GrantedChance]()
 
-    /// The campaign behind each shown entry, keyed by campaign key. A live
+    /// The campaign behind each shown entry, keyed by `entryKey`. A live
     /// test's campaign leaves `liveTestCampaigns` once the entry is shown, so
     /// a later tap or close resolves it from here.
     private(set) var entryCampaigns = [String: CampaignModel]()
 
+    /// The key an entry's chance and campaign are stored under: a live test's
+    /// own `cepCampaignId` (unique per send), else the campaign key. A test
+    /// and the published campaign share a campaign key, so keying a test by it
+    /// would let one overwrite or hide the other's chance.
+    nonisolated static func entryKey(_ payload: CEPTriggerPayload) -> String {
+        isLiveTestCepId(payload.cepCampaignId) ? payload.cepCampaignId : payload.campaignKey
+    }
+
     /// The campaign for `payload`: the live-test or stored campaign, else the
-    /// shown entry's.
+    /// shown entry's. A live-test payload never falls through to the published
+    /// campaign — a tap after the test reported shown opens the test version.
     func entryCampaign(_ payload: CEPTriggerPayload) -> CampaignModel? {
-        sdk.findCampaign(payload) ?? entryCampaigns[payload.campaignKey]
+        if isLiveTestCepId(payload.cepCampaignId) {
+            return sdk.liveTestCampaigns[payload.cepCampaignId]
+                ?? entryCampaigns[payload.cepCampaignId]
+        }
+        return sdk.findCampaign(payload) ?? entryCampaigns[payload.campaignKey]
     }
 
     /// Routes an accepted gamification campaign: the OS and SDK gates, then
@@ -162,7 +175,7 @@ final class GamificationSurface: CampaignSurface {
         chance: GrantedChance,
         driver: CampaignDriver
     ) {
-        let key = campaign.campaignKey
+        let key = Self.entryKey(payload)
         chances[key] = chance
         entryCampaigns[key] = campaign
         let verdict: RoutingVerdict
@@ -191,7 +204,8 @@ final class GamificationSurface: CampaignSurface {
         case .direct, .unknown:
             chances.removeValue(forKey: key)
             gamificationSurfaceLog.d(
-                "Gamification show entry for a non-entry campaign — dropping", campaign: key)
+                "Gamification show entry for a non-entry campaign — dropping",
+                campaign: campaign.campaignKey)
             sdk.coordinator.drop(
                 payload, reason: .error, detail: "gamification entry has no renderable canvas")
             return
@@ -201,7 +215,8 @@ final class GamificationSurface: CampaignSurface {
         {
             chances.removeValue(forKey: key)
             gamificationSurfaceLog.d(
-                "Dropped — entry render failed (\(detail ?? reason.value))", campaign: key)
+                "Dropped — entry render failed (\(detail ?? reason.value))",
+                campaign: campaign.campaignKey)
             sdk.coordinator.drop(
                 payload, reason: reason, detail: detail, deliveryDetail: deliveryDetail)
         }
@@ -228,8 +243,12 @@ final class GamificationSurface: CampaignSurface {
                 campaign: payload.campaignKey)
             return
         }
-        let key = campaign.campaignKey
-        switch PlaySession.decideTap(gameVisible: GamePresenter.isBusy, chance: chances[key]) {
+        let key = Self.entryKey(payload)
+        switch PlaySession.decideTap(
+            gameVisible: GamePresenter.isBusy,
+            isLiveTest: isLiveTestCepId(payload.cepCampaignId),
+            chance: chances[key])
+        {
         case .fail(let reason):
             // Busy is not a failure, so it reports nothing.
             if reason != PlayDropReason.busy {
@@ -238,7 +257,7 @@ final class GamificationSurface: CampaignSurface {
                         reason: reason, chanceId: chances[key]?.chanceId ?? "",
                         entry: config.entryKind.rawValue,
                         skinId: config.skinId, skinVersion: config.skinVersion,
-                        warm: GamePrewarmer.warmKind(campaignKey: key),
+                        warm: GamePrewarmer.warmKind(campaignKey: campaign.campaignKey),
                         tier: GamePrewarmer.deviceTier(),
                         msElapsed: 0, stage: GameOpenTiming.stageGrant),
                     payload: payload)
@@ -261,7 +280,7 @@ final class GamificationSurface: CampaignSurface {
         guard let campaign = entryCampaign(payload),
               let config = campaign.gamificationConfig,
               config.entryKind == .inlineTeaser || config.entryKind == .floating,
-              let chance = chances[campaign.campaignKey]
+              let chance = chances[Self.entryKey(payload)]
         else { return }
         sdk.gameSurface.prewarm(
             campaign: campaign, config: config, chanceId: chance.chanceId,
@@ -283,9 +302,9 @@ final class GamificationSurface: CampaignSurface {
 
     /// Forgets a floating entry's spent chance. A later trigger asks
     /// `grantChance` again, which decides whether the entry shows.
-    func hideFloatingEntry(campaignKey: String) {
-        chances.removeValue(forKey: campaignKey)
-        GamePrewarmer.discard(reason: "chance_gone", campaignKey: campaignKey)
+    func hideFloatingEntry(_ payload: CEPTriggerPayload) {
+        chances.removeValue(forKey: Self.entryKey(payload))
+        GamePrewarmer.discard(reason: "chance_gone", campaignKey: payload.campaignKey)
     }
 
     /// Clears the session entry state for a user change: the next user must

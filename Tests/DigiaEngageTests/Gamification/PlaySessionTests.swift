@@ -220,4 +220,15 @@ struct PlaySessionTests {
     func playedKeepsEntry() {
         #expect(PlaySession.decideAfterClose(.played(chanceId: "ch-1")) == .keep(nil))
     }
+
+    // Fails if the busy gate stops exempting a live test, or exempts a live
+    // campaign: the `gameVisible && !isLiveTest` line in `decideTap`.
+    @Test("a live-test tap opens over a visible game; a live tap stays busy")
+    func liveTestTapReplacesVisibleGame() {
+        let chance = granted(show: true)
+        #expect(PlaySession.decideTap(gameVisible: true, isLiveTest: true, chance: chance) == .open(chance))
+        #expect(
+            PlaySession.decideTap(gameVisible: true, isLiveTest: false, chance: chance)
+                == .fail(reason: PlayDropReason.busy))
+    }
 }
