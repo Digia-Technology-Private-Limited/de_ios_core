@@ -661,6 +661,7 @@ final class GameSurface {
                         durationMs: Int(Date().timeIntervalSince(start) * 1000)),
                     payload: payload)
             }
+            log.d("Gamification state after close (state=\(result))", campaign: campaignKey)
             switch PlaySession.decideAfterClose(result) {
             case .keep(let replacement):
                 if let replacement {
