@@ -214,11 +214,12 @@ struct PlaySessionTests {
         #expect(source.lastRequest?.userHash == "h-1")
     }
 
-    // Fails if a played chance stops keeping the entry (the `.played` arm of
-    // `decideAfterClose`): a reopen would then lose the outcome already won.
-    @Test("a played chance keeps the entry and its stored chance after close")
-    func playedKeepsEntry() {
-        #expect(PlaySession.decideAfterClose(.played(chanceId: "ch-1")) == .keep(nil))
+    // Fails if a played chance keeps the floater (the `.played` case in
+    // `decideAfterClose`), or a failed call dismisses it (the `.failed` arm).
+    @Test("a played chance hides the entry after close; a failed call keeps it")
+    func playedHidesEntry() {
+        #expect(PlaySession.decideAfterClose(.played(chanceId: "ch-1")) == .hide)
+        #expect(PlaySession.decideAfterClose(.failed(.transport("offline"))) == .keep(nil))
     }
 
     // Fails if the busy gate stops exempting a live test, or exempts a live
