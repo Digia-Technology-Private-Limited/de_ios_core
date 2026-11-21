@@ -1430,13 +1430,14 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
         floaterOrchestrator.dismiss(.hostTeardown)
         floaterStoryOrchestrator.dismiss(.hostTeardown)
+        // Each ends as a close would, cancelled: Digia's Dismissed for one on screen, the CEP's outcome, and a
+        // live test's dashboard row, which has no presentation to cancel.
         for occupant in ended {
             switch occupant.kind {
-            case .nudge, .survey, .guide:
-                guard let id = occupant.presentationId else { continue }
-                coordinator.controller(forPresentationId: id)?.presentation.cancel()
-            case .floaterExpanded, .floaterCollapsed, .inline:
-                continue
+            case .nudge: nudgeSurface.end(occupant, reason: .cancelled)
+            case .survey: surveySurface.end(occupant, reason: .cancelled)
+            case .guide: guideSurface.end(occupant, reason: .cancelled)
+            case .floaterExpanded, .floaterCollapsed, .inline: continue
             }
         }
     }

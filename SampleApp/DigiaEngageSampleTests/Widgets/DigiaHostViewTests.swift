@@ -146,6 +146,61 @@ struct DigiaHostViewTests {
         #expect(sdk.outcome(of: sheet) == .dismissed(reason: .cancelled, completed: false))
     }
 
+    // Fails if: `endCampaignsForHostTeardown` stops ending a survey through `SurveySurface.end`
+    // (`markSurveyDismissed`), e.g. back to cancelling its presentation: the survey would leave with no Digia
+    // Dismissed, leaving its Viewed orphaned.
+    @Test("when the app replaces its root under a survey, the survey ends cancelled with Digia's dismissal")
+    func rootSwapEndsASurveyWithItsDismissal() async throws {
+        let sdk = try await SdkHarness.start(loadCampaign("campaigns/survey/survey_stacked_cta.json"))
+        defer { sdk.tearDown() }
+        let window = makeWindow(root: AppScreen(), sdk)
+        Digia.attach(to: window)
+        ComponentTestHost.drainRunLoop(for: 0.3)
+        let survey = try sdk.deliver("test_survey_stacked_cta")
+        try await sdk.waitUntil("the survey is on screen") { sdk.isShowing("Option Alpha") }
+
+        window.rootViewController = AppScreen()
+        try await sdk.waitUntil("the survey left with the old root is ended") { sdk.outcome(of: survey) != nil }
+
+        #expect(sdk.outcome(of: survey) == .dismissed(reason: .cancelled, completed: false))
+        let dismissals = try await sdk.events().filter {
+            $0["campaign_key"] as? String == "test_survey_stacked_cta"
+                && $0["event_name"] as? String == "Digia Experience Dismissed"
+        }
+        #expect(dismissals.count == 1)
+        #expect((dismissals.first?["properties"] as? [String: Any])?["dismiss_reason"] as? String == "cancelled")
+    }
+
+    // Fails if: `endCampaignsForHostTeardown` goes back to finding what to end by presentation id: a live
+    // test has none, so it would stay on screen over the new root and its dashboard row would never hear the end.
+    @Test("when the app replaces its root under a live test, the test ends and its dashboard row hears cancelled")
+    func rootSwapEndsALiveTest() async throws {
+        let campaign = try loadCampaign("campaigns/nudge_dialog/nudge_dialog.json")
+        let sdk = try await SdkHarness.start(campaigns: [])
+        defer { sdk.tearDown() }
+        sdk.sdk.liveTestService.ackReporter.configure(config: DigiaConfig(apiKey: "test-api-key"))
+        let window = makeWindow(root: AppScreen(), sdk)
+        Digia.attach(to: window)
+        ComponentTestHost.drainRunLoop(for: 0.3)
+        sdk.sdk.handleLiveTestCampaign(LiveTestInvocation(
+            testInvocationId: "inv-1", campaignId: campaign["id"] as? String ?? "live", campaign: campaign,
+            variables: [:]))
+        try await sdk.waitUntil("the live test is on screen") { sdk.isShowing("Dialog Test Nudge") }
+
+        window.rootViewController = AppScreen()
+        try await sdk.waitUntil("the live test leaves the controller") { sdk.sdk.controller.activeNudge == nil }
+
+        try await sdk.waitUntil("the dismissal reaches the dashboard") {
+            sdk.network.recordedRequests.contains { $0.url.absoluteString == DigiaEndpoints.liveTestEvent }
+        }
+        let event = sdk.network.recordedRequests
+            .last { $0.url.absoluteString == DigiaEndpoints.liveTestEvent }
+            .flatMap { $0.body }
+            .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+        #expect(event?["type"] as? String == "dismissed")
+        #expect((event?["payload"] as? [String: Any])?["reason"] as? String == "cancelled")
+    }
+
     // Fails if: `SDKInstance.onHostUnmounted` stops ending what the last `DigiaHost` drew when it leaves
     // without attach: the dialog would stay "displaying" off screen, holding the CEP's slot.
     @Test("without attach, replacing the root that holds the DigiaHost ends the campaign at once")
