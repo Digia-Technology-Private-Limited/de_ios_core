@@ -728,6 +728,122 @@ enum FloaterEvent {
     }
 }
 
+// ── Gamification (chances) ───────────────────────────────────────────────────
+// Built by the SDK from the facts the gamification server returns in its `grantChance`
+// and `play` answers, and sent to Digia analytics only, never the CEP. Each gets a fresh
+// event id and time on the normal capture path. Never sent for a test invocation.
+// Mirrors Android's `GamificationAssigned`, `ChanceGranted`, `ChanceDenied`, `GamePlayed`.
+
+/// A JSON number kept as the server sent it (an integer stays an integer), as
+/// Android keeps a `Number`.
+enum ChanceNumber: Equatable, Sendable {
+    case int(Int64)
+    case double(Double)
+
+    /// A JSON number, or nil for anything else — a boolean included, though
+    /// JSONSerialization hands booleans as `NSNumber` too.
+    init?(_ raw: Any?) {
+        guard let n = raw as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID() else { return nil }
+        self = CFNumberIsFloatType(n) ? .double(n.doubleValue) : .int(n.int64Value)
+    }
+
+    var value: Any {
+        switch self {
+        case .int(let i): return i
+        case .double(let d): return d
+        }
+    }
+}
+
+/// A non-test trigger was put in an experiment group; `group` is `shown`,
+/// `campaignHoldout` or `globalHoldout`.
+struct GamificationAssigned: EngageAnalyticsEvent, Equatable, Sendable {
+    let group: String
+    let period: ChanceNumber
+
+    var eventName: String { "Digia Gamification Assigned" }
+    var properties: [String: Any] { ["group": group, "period": period.value] }
+}
+
+/// A new chance was created: `source` is `trigger` (grant) or `extraPlay` (a
+/// play's extra chance).
+struct ChanceGranted: EngageAnalyticsEvent, Equatable, Sendable {
+    static let sourceTrigger = "trigger"
+    static let sourceExtraPlay = "extraPlay"
+
+    let chanceId: String
+    let source: String
+    let expiresAt: String?
+
+    var eventName: String { "Digia Chance Granted" }
+    var properties: [String: Any] {
+        nonNull([("chance_id", chanceId), ("source", source), ("expires_at", expiresAt)])
+    }
+}
+
+/// The server refused a new grant after finding the campaign; `cap` is `day`
+/// or `total` for `capReached`.
+struct ChanceDenied: EngageAnalyticsEvent, Equatable, Sendable {
+    let reason: String
+    let cap: String?
+
+    var eventName: String { "Digia Chance Denied" }
+    var properties: [String: Any] { nonNull([("reason", reason), ("cap", cap)]) }
+}
+
+/// The server committed a new play. `playNumber` is 1-based within the game
+/// window, so `isReplay` is every play after the first.
+struct GamePlayed: EngageAnalyticsEvent, Equatable, Sendable {
+    let chanceId: String?
+    let outcomeKey: String?
+    let outcomeKind: String?
+    let rewardId: String?
+    let grantId: String?
+    let valueMinor: ChanceNumber?
+    let currency: String?
+    let fallback: Bool
+    let playNumber: Int
+
+    var isReplay: Bool { playNumber > 1 }
+
+    var eventName: String { "Digia Game Played" }
+    var properties: [String: Any] {
+        nonNull([
+            ("chance_id", chanceId),
+            ("outcome_key", outcomeKey),
+            ("outcome_kind", outcomeKind),
+            ("reward_id", rewardId),
+            ("grant_id", grantId),
+            ("value_minor", valueMinor?.value),
+            ("currency", currency),
+            ("fallback", fallback),
+            ("play_number", playNumber),
+            ("is_replay", isReplay),
+        ])
+    }
+}
+
+/// One chance event. A closed set, so the grant results and play decisions that
+/// carry these stay `Equatable`.
+enum ChanceEvent: EngageAnalyticsEvent, Equatable, Sendable {
+    case assigned(GamificationAssigned)
+    case granted(ChanceGranted)
+    case denied(ChanceDenied)
+    case played(GamePlayed)
+
+    private var event: EngageAnalyticsEvent {
+        switch self {
+        case .assigned(let e): return e
+        case .granted(let e): return e
+        case .denied(let e): return e
+        case .played(let e): return e
+        }
+    }
+
+    var eventName: String { event.eventName }
+    var properties: [String: Any] { event.properties }
+}
+
 // ── Delivery (every campaign type; ai_docs/campaign-delivery-events.md) ──────
 
 enum DeliveryEvent {

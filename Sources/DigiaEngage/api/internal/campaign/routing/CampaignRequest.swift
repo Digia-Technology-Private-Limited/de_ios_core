@@ -45,6 +45,15 @@ extension CampaignModel {
         case .survey: return .survey
         case .guide: return .guide
         case .floater, .floaterStory: return .floaterCollapsed
+        case .gamification(let cfg):
+            switch cfg.entryKind {
+            case .direct: return .gamification
+            case .inlineTeaser:
+                if case .inline(let entry)? = cfg.entryCanvas { return .inline(slot: entry.slotKey) }
+                return nil
+            case .floating: return .floaterCollapsed
+            case .unknown: return nil
+            }
         case .unsupported: return nil
         }
     }

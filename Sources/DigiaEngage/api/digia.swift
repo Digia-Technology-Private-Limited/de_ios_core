@@ -78,9 +78,45 @@ public enum Digia {
     /// `true`; otherwise returns `false` so the host can continue its own routing.
     @discardableResult
     public static func handleDeepLink(_ url: URL, from presenter: UIViewController) -> Bool {
+        if isRewardsDeepLink(url) {
+            openRewards()
+            return true
+        }
         guard isDebugSettingsDeepLink(url) else { return false }
         presentDebugSettings(from: presenter)
         return true
+    }
+
+    /// Path suffix for the SDK's rewards deep link. Like the debug-settings
+    /// path, this is a convention the host routes from its own deep-linking:
+    /// map the app's own reward URL (universal link or scheme) to
+    /// `openRewards()`, or hand the SDK-owned `_digia/rewards` URL to
+    /// `handleDeepLink(_:from:)`.
+    public static let rewardsDeepLinkPath = "_digia/rewards"
+
+    /// Whether `url` is the SDK's rewards deep link (same matching as
+    /// `isDebugSettingsDeepLink`).
+    public static func isRewardsDeepLink(_ url: URL) -> Bool {
+        let raw = url.absoluteString
+        let afterScheme: Substring
+        if let range = raw.range(of: "://") {
+            afterScheme = raw[range.upperBound...]
+        } else {
+            afterScheme = raw[...]
+        }
+        let trimmed = afterScheme.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return trimmed == rewardsDeepLinkPath
+            || trimmed.hasSuffix("/\(rewardsDeepLinkPath)")
+    }
+
+    /// Opens the hosted rewards page full screen over the top-most view
+    /// controller. Games open over the page and it refreshes when they close.
+    ///
+    /// Call this from the app's own button or menu, or map the app's own deep
+    /// link to it in the host's deep-link handling. No-op below iOS 17.
+    public static func openRewards() {
+        guard #available(iOS 17, *) else { return }
+        SDKInstance.shared.openRewards()
     }
     /// Initializes the Digia SDK. No-ops below iOS 17 — the SDUI rendering layer
     /// requires APIs (`Layout`, newer `SwiftUI` scroll/animation modifiers) that
@@ -201,10 +237,12 @@ public enum Digia {
     /// Leaving it out is not a degraded hit test but no hit test at all: a host that has not been
     /// told an overlay is active claims only the window's old rect and every tap on the story —
     /// advance, close, mute — falls through to the app behind it.
+    /// A dialog game renders inline in the same overlay, so an active game counts too.
     public static var hasActiveOverlay: Bool {
         let ctrl = SDKInstance.shared.controller
         return ctrl.activeStoryOverlay != nil
             || ctrl.activeNudge != nil
+            || ctrl.activeGame != nil
             || SDKInstance.shared.surveyOrchestrator.state != nil
             || SDKInstance.shared.floaterStoryOrchestrator.storyOverlayActive
             || SDKInstance.shared.guideOrchestrator.state != nil

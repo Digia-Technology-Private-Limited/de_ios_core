@@ -57,6 +57,7 @@ struct NudgeOverlayView: View {
                 }
 
                 NudgeCoverPresenter(presentation: coverBinding)
+                GameCoverPresenter(presentation: gameCoverBinding)
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
         }
@@ -78,6 +79,22 @@ struct NudgeOverlayView: View {
             },
             set: { newValue in
                 if newValue == nil { SDKInstance.shared.nudgeOrchestrator.markNudgeDismissed() }
+            }
+        )
+    }
+
+    /// Drives the game cover from the controller's active game. Clearing it
+    /// routes through `GamePresenter.dismiss()` so the session settles exactly once.
+    private var gameCoverBinding: Binding<GamePresentation?> {
+        Binding(
+            get: {
+                // A game the open rewards page owns shows over the page instead.
+                controller.activeGame.flatMap {
+                    GameLayerOwner.layer(for: ObjectIdentifier($0)) == .root ? $0 : nil
+                }
+            },
+            set: { newValue in
+                if newValue == nil { GamePresenter.dismiss() }
             }
         )
     }
@@ -122,6 +139,38 @@ private struct NudgeCoverPresenter: View {
         } else {
             NudgeSheetView(presentation: nudge)
         }
+    }
+}
+
+/// The game surface, shared by the root cover and the rewards page.
+struct GameLayerView: View {
+    let game: GamePresentation
+
+    var body: some View {
+        GameContainerView(game: game, safeAreaInsets: activeWindowSafeAreaInsets).id(game.id)
+    }
+}
+
+/// Isolates the game full-screen-cover transaction like `NudgeCoverPresenter`
+/// does for nudges. The game fills the window over a clear presentation
+/// background and closes through the native button or the skin, never through
+/// a gesture.
+private struct GameCoverPresenter: View {
+    let presentation: Binding<GamePresentation?>
+
+    var body: some View {
+        Color.clear
+            .fullScreenCover(item: presentation) { game in
+                // `.id(game.id)`: a direct swap between two games (no nil in
+                // between) must still create a fresh presentation view.
+                if #available(iOS 16.4, *) {
+                    GameLayerView(game: game)
+                        .presentationBackground(.clear)
+                } else {
+                    GameLayerView(game: game)
+                }
+            }
+            .transaction { $0.disablesAnimations = true }
     }
 }
 
