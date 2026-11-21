@@ -72,6 +72,8 @@ internal enum CaptureEvidenceWalker {
             }
         }
 
+        visited = collapsingPassThroughDuplicates(visited, profile: profile)
+
         var included = Set(visited.filter(\.selected).map(\.id))
         for (index, node) in visited.enumerated().reversed() {
             if index > 0, index.isMultiple(of: nodesPerYield) { await Task.yield() }
@@ -123,6 +125,35 @@ internal enum CaptureEvidenceWalker {
             : .succeeded(nodes: nodes, traversal: traversal)
     }
 
+    /// Merges a node into its parent when both occupy the same rectangle (within a point), so one
+    /// element is not reported twice: a `UISwitch` and the view or accessibility element that
+    /// shares its rect, or a chain of wrappers around one view. The survivor is the parent, which
+    /// keeps its id and takes the more meaningful type; the merged node's children move to it.
+    /// Two meaningful elements of different kinds (a button and a label that happen to share a
+    /// size) are distinct and stay apart.
+    private static func collapsingPassThroughDuplicates(
+        _ visited: [VisitedNode],
+        profile: CaptureProfile
+    ) -> [VisitedNode] {
+        var kept: [VisitedNode] = []
+        var indexById: [String: Int] = [:]
+        var survivorById: [String: String] = [:]
+        for var node in visited {
+            if let parentId = node.parentId {
+                let resolvedId = survivorById[parentId] ?? parentId
+                node.parentId = resolvedId
+                if let index = indexById[resolvedId], let merged = kept[index].absorbing(node, profile: profile) {
+                    kept[index] = merged
+                    survivorById[node.id] = resolvedId
+                    continue
+                }
+            }
+            indexById[node.id] = kept.count
+            kept.append(node)
+        }
+        return kept
+    }
+
     private static func selected(
         _ type: CaptureNodeType,
         scrollAxis: CaptureScrollAxis?,
@@ -170,13 +201,44 @@ internal enum CaptureEvidenceWalker {
 
     private struct VisitedNode {
         let id: String
-        let parentId: String?
+        var parentId: String?
         let rect: CaptureEdgeRect
         let visibleRect: CaptureEdgeRect?
         let visible: Bool
-        let nodeType: CaptureNodeType
-        let scrollAxis: CaptureScrollAxis?
-        let selected: Bool
+        var nodeType: CaptureNodeType
+        var scrollAxis: CaptureScrollAxis?
+        var selected: Bool
+
+        /// What this node becomes by taking in `child`, or nil when they are different elements
+        /// (or not in the same place).
+        @MainActor
+        func absorbing(_ child: VisitedNode, profile: CaptureProfile) -> VisitedNode? {
+            guard visible, child.visible, rect.isSame(as: child.rect, within: 1) else { return nil }
+            let own = rank, other = child.rank
+            if own >= Self.meaningfulRank && other >= Self.meaningfulRank && own != other { return nil }
+            if (scrollAxis != nil && other >= Self.meaningfulRank) ||
+                (child.scrollAxis != nil && own >= Self.meaningfulRank) { return nil }
+            var merged = self
+            if other > own { merged.nodeType = child.nodeType }
+            merged.scrollAxis = scrollAxis ?? child.scrollAxis
+            merged.selected = CaptureEvidenceWalker.selected(
+                merged.nodeType, scrollAxis: merged.scrollAxis, profile: profile
+            )
+            return merged
+        }
+
+        private static let meaningfulRank = 3
+
+        /// interactive > text > image > scroll container > container > unknown.
+        private var rank: Int {
+            switch nodeType {
+            case .interactive: return 5
+            case .text: return 4
+            case .image: return 3
+            case .container: return scrollAxis == nil ? 1 : 2
+            case .unknown: return 0
+            }
+        }
     }
 }
 
@@ -191,7 +253,24 @@ internal struct UIKitCaptureNode: CaptureNodeSource {
     }
 
     internal var childNodes: [CaptureNodeSource] {
-        view.subviews.map { UIKitCaptureNode(view: $0, rootView: rootView) }
+        let subviewNodes: [CaptureNodeSource] = view.subviews.map {
+            UIKitCaptureNode(view: $0, rootView: rootView)
+        }
+        // SwiftUI draws a hosting view's content without one UIView per element, so its
+        // subviews say almost nothing. Its accessibility tree does, so it is walked too.
+        // Only hosting views: a UIKit or React Native container's accessibility elements
+        // mirror its subviews and would be counted twice.
+        guard AccessibilityCaptureNode.exposesContentThroughAccessibility(view) else {
+            return subviewNodes
+        }
+        let elements = AccessibilityCaptureNode.children(
+            of: view,
+            rootView: rootView,
+            hostShown: shown,
+            hostAlpha: alpha,
+            depth: 0
+        )
+        return subviewNodes + elements
     }
 
     internal var rootBounds: CaptureEdgeRect {
@@ -247,8 +326,17 @@ internal struct UIKitCaptureNode: CaptureNodeSource {
         return nil
     }
 
+    // Not a control: a hosting view, which carries recognizers of its own for everything SwiftUI
+    // draws inside it (the content's controls are its accessibility elements), and a view whose only
+    // recognizers are UIKit's own plumbing (`_UIParallaxTransitionPanGestureRecognizer` on a
+    // navigation controller's container, `_UISecondaryClickDriverGestureRecognizer` on a bar).
     private var hasGesture: Bool {
-        !(view is UIWindow) && !(view.gestureRecognizers?.isEmpty ?? true)
+        guard !(view is UIWindow), !AccessibilityCaptureNode.exposesContentThroughAccessibility(view) else {
+            return false
+        }
+        return view.gestureRecognizers?.contains {
+            !NSStringFromClass(type(of: $0)).hasPrefix("_")
+        } ?? false
     }
 
     private var isAccessibilityIntentUnit: Bool {
@@ -259,6 +347,123 @@ internal struct UIKitCaptureNode: CaptureNodeSource {
             (view.accessibilityAttributedLabel?.length ?? 0) > 0 { return true }
         let traits: UIAccessibilityTraits = [.button, .link, .adjustable, .searchField, .keyboardKey]
         return !view.accessibilityTraits.intersection(traits).isEmpty
+    }
+}
+
+/// A view whose content is reached through its accessibility tree rather than its
+/// subviews. SwiftUI hosting views qualify by class; tests adopt it on a plain UIView.
+@MainActor
+internal protocol CaptureAccessibilityHost: UIView {}
+
+/// One element of a SwiftUI hosting view's accessibility tree, as a capture node.
+/// Public UIAccessibility APIs only: `accessibilityElements` /
+/// `accessibilityElementCount()` / `accessibilityElement(at:)` for children,
+/// `accessibilityFrame` (screen coordinates) for bounds, traits for the node type.
+@MainActor
+internal struct AccessibilityCaptureNode: CaptureNodeSource {
+    /// Guards against cyclic or pathological accessibility trees; the walker's own
+    /// time budget still applies on top.
+    private static let maximumDepth = 24
+    private static let maximumChildren = 512
+
+    private let element: NSObject
+    private let rootView: UIView
+    private let hostShown: Bool
+    private let hostAlpha: Double
+    private let depth: Int
+
+    internal static func exposesContentThroughAccessibility(_ view: UIView) -> Bool {
+        if view is CaptureAccessibilityHost { return true }
+        // e.g. "_TtGC7SwiftUI14_UIHostingView…" or "SwiftUI.UIHostingView<…>". A SwiftUI ScrollView is
+        // a "SwiftUI.HostingScrollView" inside it (not its "HostingScrollView.PlatformContainer"
+        // parts), which would keep the accessibility elements of its rows.
+        let name = NSStringFromClass(type(of: view))
+        return name.contains("HostingView") || name.hasSuffix("HostingScrollView")
+    }
+
+    internal static func children(
+        of container: NSObject,
+        rootView: UIView,
+        hostShown: Bool,
+        hostAlpha: Double,
+        depth: Int
+    ) -> [CaptureNodeSource] {
+        guard depth < maximumDepth else { return [] }
+        return accessibilityChildren(of: container)
+            // A child that is itself a UIView is already walked as a subview.
+            .filter { !($0 is UIView) }
+            .prefix(maximumChildren)
+            .map {
+                AccessibilityCaptureNode(
+                    element: $0,
+                    rootView: rootView,
+                    hostShown: hostShown,
+                    hostAlpha: hostAlpha,
+                    depth: depth + 1
+                )
+            }
+    }
+
+    private static func rect(of element: NSObject, in rootView: UIView) -> CGRect {
+        let screenSpace = rootView.window?.screen.coordinateSpace
+            ?? (rootView as? UIWindow)?.screen.coordinateSpace
+        let frame = element.accessibilityFrame
+        return screenSpace.map { rootView.convert(frame, from: $0) } ?? frame
+    }
+
+    private static func accessibilityChildren(of container: NSObject) -> [NSObject] {
+        if let elements = container.accessibilityElements, !elements.isEmpty {
+            return elements.compactMap { $0 as? NSObject }
+        }
+        let count = container.accessibilityElementCount()
+        guard count != NSNotFound, count > 0 else { return [] }
+        return (0..<min(count, maximumChildren)).compactMap {
+            container.accessibilityElement(at: $0) as? NSObject
+        }
+    }
+
+    internal var childNodes: [CaptureNodeSource] {
+        Self.children(
+            of: element,
+            rootView: rootView,
+            hostShown: hostShown,
+            hostAlpha: hostAlpha,
+            depth: depth
+        )
+    }
+
+    internal var rootBounds: CaptureEdgeRect {
+        CaptureEdgeRect(Self.rect(of: element, in: rootView))
+    }
+
+    internal var shown: Bool { hostShown && !element.accessibilityElementsHidden }
+
+    internal var alpha: Double { hostAlpha }
+
+    internal var nodeType: CaptureNodeType {
+        let traits = element.accessibilityTraits
+        let interactive: UIAccessibilityTraits = [
+            .button, .link, .adjustable, .searchField, .keyboardKey,
+        ]
+        if !traits.intersection(interactive).isEmpty { return .interactive }
+        if traits.contains(.image) { return .image }
+        if traits.contains(.staticText) || traits.contains(.header) { return .text }
+        if !Self.accessibilityChildren(of: element).isEmpty { return .container }
+        return .unknown
+    }
+
+    // A SwiftUI ScrollView is backed by a UIScrollView subview, walked as a subview.
+    internal var scrollAxis: CaptureScrollAxis? { nil }
+}
+
+extension CaptureEdgeRect {
+    fileprivate init(_ rect: CGRect) {
+        self.init(
+            left: Int(rect.minX.rounded()),
+            top: Int(rect.minY.rounded()),
+            right: Int(rect.maxX.rounded()),
+            bottom: Int(rect.maxY.rounded())
+        )
     }
 }
 

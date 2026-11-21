@@ -48,6 +48,7 @@ struct SurfaceRuleTests {
             isLiveTest: liveTest, hasDisplayed: displayed)
     }
 
+    // dmc-case: dmc.drop_reason.empty_slot_shows
     @Test("each §2.1 cell", arguments: cells)
     func cell(arrivalName: String, occupantName: String) throws {
         let arrival = try #require(Self.arrivals.first { $0.0 == arrivalName }?.1)
@@ -65,24 +66,28 @@ struct SurfaceRuleTests {
         }
     }
 
+    // dmc-case: dmc.drop_reason.empty_slot_shows
     @Test("an expanded floater arriving reads the floater row")
     func expandedArrivalIsFloaterRow() {
         #expect(SurfaceRule.decide(.floaterExpanded, occupants: [Self.occupant(.floaterCollapsed)])
             == .busy(blocker: Self.occupant(.floaterCollapsed)))
     }
 
+    // dmc-case: dmc.drop_reason.replace_vs_busy_with_priority
     @Test("same slot, displayed → busy")
     func sameSlotDisplayed() {
         let occ = Self.occupant(.inline(slot: Self.slot), displayed: true)
         #expect(SurfaceRule.decide(.inline(slot: Self.slot), occupants: [occ]) == .busy(blocker: occ))
     }
 
+    // dmc-case: dmc.drop_reason.live_test_displaces_real
     @Test("same slot held by an undisplayed live test → busy (a real campaign never displaces a test)")
     func sameSlotLiveTest() {
         let occ = Self.occupant(.inline(slot: Self.slot), liveTest: true)
         #expect(SurfaceRule.decide(.inline(slot: Self.slot), occupants: [occ]) == .busy(blocker: occ))
     }
 
+    // dmc-case: dmc.drop_reason.blocker_reported_with_wire_name
     @Test("with several occupants the blocking one is reported (§2.5)")
     func blockerPrecedence() {
         let collapsed = Self.occupant(.floaterCollapsed, key: "pip")
@@ -91,6 +96,7 @@ struct SurfaceRuleTests {
             == .busy(blocker: nudge))
     }
 
+    // dmc-case: dmc.drop_reason.live_test_displaces_real
     @Test("live test displaces every non-show occupant and keeps the rest")
     func liveTestDisplaced() {
         let nudge = Self.occupant(.nudge, key: "n")
@@ -104,5 +110,37 @@ struct SurfaceRuleTests {
 
         let displayed = Self.occupant(.inline(slot: Self.slot), displayed: true)
         #expect(SurfaceRule.liveTestDisplaced(.inline(slot: Self.slot), occupants: [displayed]) == [displayed])
+    }
+
+    // surface_rule_test.dart › by priority (D5)
+    private static func held(_ priority: Double?, displayed: Bool = false) -> SurfaceOccupant {
+        SurfaceOccupant(
+            kind: .inline(slot: slot), campaignKey: "held", cepCampaignId: "c-held",
+            isLiveTest: false, hasDisplayed: displayed, priority: priority)
+    }
+
+    // dmc-case: dmc.drop_reason.replace_vs_busy_with_priority
+    @Test("by priority: a higher priority replaces a never-displayed occupant")
+    func higherPriorityReplaces() {
+        let occ = Self.held(600)
+        #expect(SurfaceRule.decide(.inline(slot: Self.slot), occupants: [occ], priority: 601) == .replace(occ))
+    }
+
+    // dmc-case: dmc.drop_reason.replace_vs_busy_with_priority
+    @Test("by priority: an equal or lower priority is busy", arguments: [600.0, 599.0])
+    func equalOrLowerPriorityIsBusy(priority: Double) {
+        let occ = Self.held(600)
+        #expect(
+            SurfaceRule.decide(.inline(slot: Self.slot), occupants: [occ], priority: priority)
+                == .busy(blocker: occ))
+    }
+
+    // dmc-case: dmc.drop_reason.replace_vs_busy_with_priority
+    @Test("by priority: a displayed occupant is kept whatever the priority")
+    func displayedKeptWhateverPriority() {
+        let shown = Self.held(100, displayed: true)
+        #expect(
+            SurfaceRule.decide(.inline(slot: Self.slot), occupants: [shown], priority: 1000)
+                == .busy(blocker: shown))
     }
 }

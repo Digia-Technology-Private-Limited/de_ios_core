@@ -10,6 +10,9 @@ import Testing
 struct SDKInstanceSdkConfigTests {
 
     private let apiKey = "test_key"
+    /// Stamped on this test's health records. The analytics queue is one store shared by every
+    /// SDK instance in the process, so counting by event name alone also counts parallel suites'.
+    private let runKey = "sdk-config-\(UUID().uuidString)"
 
     private func makeDefaults() -> UserDefaults {
         UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!
@@ -34,14 +37,26 @@ struct SDKInstanceSdkConfigTests {
     private func healthRecord(_ key: String) -> TimelineRecord {
         TimelineRecord(
             timestamp: Date(timeIntervalSince1970: 0), severity: .error, tag: "DIGIA", message: "m",
-            stage: .parse, reason: TimelineReason.malformedCampaignSkipped, campaignKey: key, extras: [:])
+            stage: .parse, reason: TimelineReason.malformedCampaignSkipped, campaignKey: "\(runKey)-\(key)",
+            extras: [:])
     }
 
-    private func sentHealthEvents(_ sdk: SDKInstance) async throws -> Int {
+    /// This test's health events queued so far. With [expected], keeps looking for up to 3 s until
+    /// that many arrive, so a loaded simulator's slow enqueue is not read as nothing sent.
+    private func sentHealthEvents(_ sdk: SDKInstance, awaiting expected: Int = 0) async throws -> Int {
         try await Task.sleep(nanoseconds: 150_000_000)
         let analytics = try #require(sdk.services?.analyticsService)
-        return await analytics.queue.peek(maxCount: 100)
-            .filter { ($0.payload["event_name"] as? String) == HealthSink.eventName }.count
+        let deadline = Date().addingTimeInterval(3)
+        while true {
+            let count = await analytics.queue.peek(maxCount: 100)
+                .filter {
+                    ($0.payload["event_name"] as? String) == HealthSink.eventName
+                        && ($0.payload["campaign_key"] as? String)?.hasPrefix(runKey) == true
+                }
+                .count
+            if count >= expected || Date() > deadline { return count }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
     }
 
     @Test("the config call runs on every initialize, even with a cache")
@@ -81,7 +96,7 @@ struct SDKInstanceSdkConfigTests {
         try await sdk.initialize(DigiaConfig(apiKey: apiKey))
         sink.emit(healthRecord("a"))
 
-        #expect(try await sentHealthEvents(sdk) == 1)
+        #expect(try await sentHealthEvents(sdk, awaiting: 1) == 1)
         network.answer("{}")
     }
 
@@ -97,7 +112,7 @@ struct SDKInstanceSdkConfigTests {
 
         network.answer(#"{"sdkHealth":{"enabled":true}}"#)
         await sdk.sdkConfigFetchTask?.value
-        #expect(try await sentHealthEvents(sdk) == 1)
+        #expect(try await sentHealthEvents(sdk, awaiting: 1) == 1)
     }
 
     @Test("first install with switch-off in the answer drops the held health")
@@ -126,7 +141,7 @@ struct SDKInstanceSdkConfigTests {
         network.fail()
         await sdk.sdkConfigFetchTask?.value
 
-        #expect(try await sentHealthEvents(sdk) == 1)
+        #expect(try await sentHealthEvents(sdk, awaiting: 1) == 1)
     }
 
     @Test("a failed call leaves the cached switch-off in force")
@@ -160,7 +175,7 @@ struct SDKInstanceSdkConfigTests {
 
         #expect(sink.isRegistered)
         sink.emit(healthRecord("a"))
-        #expect(try await sentHealthEvents(sdk) == 1)
+        #expect(try await sentHealthEvents(sdk, awaiting: 1) == 1)
     }
 
     @Test("a fetched config replaces the cache for the next launch")
@@ -178,6 +193,66 @@ struct SDKInstanceSdkConfigTests {
             storage: UserDefaultsLocalStorage(defaults: defaults).scoped("sdk_config"),
             projectKey: apiKey)
         #expect(next.cached == SdkConfig(healthEnabled: true, healthSessionCap: 5))
+    }
+
+    private func queuedAppEvents(_ sdk: SDKInstance, named names: Set<String>) async throws -> [[String: Any]] {
+        try await Task.sleep(nanoseconds: 300_000_000)
+        let service = try #require(sdk.services?.appEventsService)
+        return await service.queuedPayloads().filter { names.contains($0["event_name"] as? String ?? "") }
+    }
+
+    @Test("a cached upload switch-off drops an event tracked before the call answers")
+    func cachedUploadOffAtLaunch() async throws {
+        let defaults = makeDefaults()
+        seedCache(defaults, #"{"appEvents":{"upload":false}}"#)
+        let network = ConfigNetworkClient()
+        let sdk = makeInstance(defaults: defaults, network: network, sink: HealthSink())
+
+        try await sdk.initialize(DigiaConfig(apiKey: apiKey))
+        let name = "off_\(UUID().uuidString)"
+        sdk.trackEvent(name)
+
+        #expect(try await queuedAppEvents(sdk, named: [name]).isEmpty)
+        network.answer("{}")
+    }
+
+    @Test("a cached blocked name is dropped at launch and others are kept")
+    func cachedBlockedNameAtLaunch() async throws {
+        let id = UUID().uuidString
+        let blocked = "search_\(id)", allowed = "other_\(id)"
+        let defaults = makeDefaults()
+        seedCache(defaults, #"{"appEvents":{"blockedNames":["\#(blocked)"]}}"#)
+        let network = ConfigNetworkClient()
+        let sdk = makeInstance(defaults: defaults, network: network, sink: HealthSink())
+
+        try await sdk.initialize(DigiaConfig(apiKey: apiKey))
+        sdk.trackEvent(blocked)
+        sdk.trackEvent(allowed)
+
+        let queued = try await queuedAppEvents(sdk, named: [blocked, allowed])
+        #expect(queued.map { $0["event_name"] as? String } == [allowed])
+        network.answer("{}")
+    }
+
+    @Test("a cached maxProperties limit keeps that many properties and warns")
+    func cachedMaxPropertiesAtLaunch() async throws {
+        let defaults = makeDefaults()
+        seedCache(defaults, #"{"appEvents":{"limits":{"maxProperties":3}}}"#)
+        let network = ConfigNetworkClient()
+        let sdk = makeInstance(defaults: defaults, network: network, sink: HealthSink())
+        let sink = ConfigWarningSink()
+        DigiaLogger.registerSink(sink)
+        defer { DigiaLogger.unregisterSink(sink) }
+
+        try await sdk.initialize(DigiaConfig(apiKey: apiKey))
+        let name = "props_\(UUID().uuidString)"
+        sdk.trackEvent(name, properties: ["a": 1, "b": 2, "c": 3, "d": 4, "e": 5])
+
+        let queued = try await queuedAppEvents(sdk, named: [name])
+        let properties = try #require(queued.first?["properties"] as? [String: Any])
+        #expect(properties.keys.filter { ["a", "b", "c", "d", "e"].contains($0) }.sorted() == ["a", "b", "c"])
+        #expect(sink.invalidWarnings(forEvent: name) == 1)
+        network.answer("{}")
     }
 }
 
@@ -246,5 +321,22 @@ final class ConfigNetworkClient: NetworkClient, @unchecked Sendable {
 
     func openSseStream(request: NetworkRequest, handler: any SseStreamHandler) -> any CancellableSubscription {
         MockNetworkClient().openSseStream(request: request, handler: handler)
+    }
+}
+
+/// Collects `app_event_invalid` warnings.
+private final class ConfigWarningSink: DiagnosticSink, @unchecked Sendable {
+    private let lock = NSLock()
+    private var records: [TimelineRecord] = []
+
+    func accepts(_ record: TimelineRecord) -> Bool { true }
+    func emit(_ record: TimelineRecord) { lock.withLock { records.append(record) } }
+
+    func invalidWarnings(forEvent name: String) -> Int {
+        lock.withLock {
+            records.filter {
+                $0.reason?.wire == TimelineReason.appEventInvalid.wire && $0.extras["event_name"] == name
+            }.count
+        }
     }
 }

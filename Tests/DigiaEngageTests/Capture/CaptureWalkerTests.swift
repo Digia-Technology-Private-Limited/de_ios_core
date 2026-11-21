@@ -195,6 +195,107 @@ struct CaptureWalkerTests {
         #expect(button.parentId == "0.0")
     }
 
+    // MARK: - One element, one node
+
+    @Test("a view that shares its parent's rectangle is merged into it, not reported twice")
+    func sameRectParentAndChildMerge() async throws {
+        let kept = nodes(await walk([
+            box(10, 10, 100, 40, .button, children: [
+                box(0, 0, 100, 40, .button, children: [box(0, 0, 100, 40)]),
+            ]),
+        ]))
+
+        let buttons = ofType(kept, .interactive)
+        #expect(buttons.count == 1, "the wrapper chain is one control")
+        #expect(kept.filter { $0.rootBoundsPx.width == 100 }.count == 1, "no wrapper of the same size is left")
+    }
+
+    @Test("a merged node's children move to the node it merged into, keeping ids and indexes consistent")
+    func mergedChildrenAreReparented() async throws {
+        let kept = nodes(await walk([
+            box(0, 0, 300, 200, children: [
+                box(0, 0, 300, 200, children: [
+                    box(10, 10, 100, 40, .button),
+                    box(10, 60, 100, 40, .button),
+                ]),
+            ]),
+        ]))
+
+        let ids = Set(kept.map(\.nodeId))
+        #expect(ids.count == kept.count, "ids stay unique")
+        for node in kept {
+            if let parentId = node.parentId { #expect(ids.contains(parentId), "\(node.nodeId) has a parent") }
+        }
+        let buttons = ofType(kept, .interactive)
+        #expect(buttons.count == 2)
+        #expect(Set(buttons.map(\.parentId)).count == 1, "both buttons hang from the same node")
+        #expect(buttons.map(\.childIndex).sorted() == [0, 1])
+    }
+
+    @Test("a merged pair keeps the more meaningful type")
+    func mergedPairKeepsMostMeaningfulType() async throws {
+        let kept = nodes(await walk([
+            box(10, 10, 100, 40, children: [box(0, 0, 100, 40, .button)]),
+            box(10, 100, 100, 40, children: [box(0, 0, 100, 40, .text)]),
+        ], profile: Self.everything))
+
+        #expect(ofType(kept, .interactive).count == 1)
+        #expect(ofType(kept, .text).count == 1)
+        #expect(kept.filter { $0.rootBoundsPx.top == 10 }.count == 1)
+        #expect(kept.filter { $0.rootBoundsPx.top == 100 }.count == 1)
+    }
+
+    @Test("two different meaningful elements that share a size are both kept")
+    func distinctMeaningfulElementsNeverMerge() async throws {
+        let kept = nodes(await walk([
+            box(10, 10, 100, 40, .button, children: [box(0, 0, 100, 40, .text), box(0, 0, 100, 40, .image)]),
+        ], profile: Self.everything))
+
+        #expect(ofType(kept, .interactive).count == 1)
+        #expect(ofType(kept, .text).count == 1, "the label is not swallowed by the button")
+        #expect(ofType(kept, .image).count == 1, "the icon is not swallowed by the button")
+    }
+
+    @Test("a rectangle within a point of its parent's is the same rectangle, two points is not")
+    func mergeToleranceIsOnePoint() async throws {
+        let kept = nodes(await walk([
+            box(10, 10, 100, 40, .button, children: [box(0, 0, 101, 40, .button)]),
+            box(10, 100, 100, 40, .button, children: [box(0, 0, 102, 40, .button)]),
+        ]))
+
+        #expect(kept.filter { $0.rootBoundsPx.top == 10 }.count == 1)
+        #expect(kept.filter { $0.rootBoundsPx.top == 100 }.count == 2)
+    }
+
+    @Test("a switch is one interactive node, not the switch and a copy of it")
+    func switchIsOneNode() async throws {
+        let toggle = UISwitch(frame: CGRect(x: 10, y: 10, width: 51, height: 31))
+
+        let kept = nodes(await walk([toggle]))
+        let frame = toggle.frame
+
+        let atSwitch = kept.filter { node in
+            node.nodeType == .interactive &&
+                abs(node.rootBoundsPx.left - Int(frame.minX.rounded())) <= 1 &&
+                abs(node.rootBoundsPx.top - Int(frame.minY.rounded())) <= 1 &&
+                abs(node.rootBoundsPx.right - Int(frame.maxX.rounded())) <= 1 &&
+                abs(node.rootBoundsPx.bottom - Int(frame.maxY.rounded())) <= 1
+        }
+        #expect(atSwitch.count == 1, "interactive nodes at the switch: \(atSwitch.map(\.nodeId))")
+    }
+
+    @Test("a view with a tap gesture is interactive, one with only UIKit's own plumbing is not")
+    func gestureMakesInteractive() async throws {
+        let tappable = box(10, 10, 100, 40)
+        tappable.addGestureRecognizer(UITapGestureRecognizer())
+        let plumbing = box(10, 100, 100, 40)
+        plumbing.addGestureRecognizer(PlumbingGestureRecognizer())
+
+        let kept = nodes(await walk([tappable, plumbing]))
+
+        #expect(ofType(kept, .interactive).map(\.rootBoundsPx.top) == [10])
+    }
+
     // MARK: - Scrolling
 
     @Test("a scroll view is a scroll container, kept without being asked for", arguments: [
@@ -361,6 +462,11 @@ struct CaptureWalkerTests {
         all.filter { $0.nodeType == type }
     }
 }
+
+/// Stands in for UIKit's own recognizers (`_UIParallaxTransitionPanGestureRecognizer`), which no
+/// app installed and which do not make their view a control.
+@objc(_PlumbingGestureRecognizer)
+private final class PlumbingGestureRecognizer: UIGestureRecognizer {}
 
 /// A root that stalls past the walker's half-second budget while handing over its children,
 /// so the budget check before the next node fires. Optionally cancels the walking task first.

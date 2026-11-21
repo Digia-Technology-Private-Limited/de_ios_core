@@ -12,8 +12,12 @@ import Foundation
 // MARK: - Types
 
 struct FrequencyWindow: Equatable {
+    static let supported: Set<String> = ["session", "day", "week", "month"]
+
     let count: Int
     let window: String
+
+    var isSupported: Bool { Self.supported.contains(window) }
 }
 
 struct FrequencyPolicy: Equatable {
@@ -35,12 +39,12 @@ struct FrequencyPolicy: Equatable {
     /// / inline). Legacy snake_case payloads carry no recognised keys → `nil`.
     static func fromJson(_ json: [String: Any]?) -> FrequencyPolicy? {
         guard let json else { return nil }
-        let maxTotal = json.positiveInt("maxTotal")
+        let maxTotal = json.capInt("maxTotal")
         var window: FrequencyWindow?
         if let w = json.object("maxPerWindow") {
-            let count = w.int("count", default: 0)
+            let count = w.capInt("count")
             let unit = w.nonBlankString("window")
-            if count > 0, let unit { window = FrequencyWindow(count: count, window: unit) }
+            if let count, let unit { window = FrequencyWindow(count: count, window: unit) }
         }
         let stopOn = json.nonBlankString("stopOn")
         let policy = FrequencyPolicy(maxTotal: maxTotal, maxPerWindow: window, stopOn: stopOn)
@@ -83,20 +87,21 @@ enum FrequencyEvaluator {
     ]
 
     /// Pure eligibility check. Blocks if ANY active constraint is exceeded:
-    /// permanent stop, lifetime total, or the current window.
+    /// permanent stop, lifetime total, or the current window. With no stored
+    /// state a campaign has never been shown and is allowed.
     static func evaluate(
         _ policy: FrequencyPolicy,
         _ state: FrequencyState?,
         _ now: Int64,
         _ sessionId: String?
     ) -> FrequencyEvalResult {
-        guard let state else { return FrequencyEvalResult(true) }
-        if state.stoppedAt != nil { return FrequencyEvalResult(false, .stopped) }
-        if let maxTotal = policy.maxTotal, state.total >= maxTotal {
+        guard let current = state else { return FrequencyEvalResult(true) }
+        if current.stoppedAt != nil { return FrequencyEvalResult(false, .stopped) }
+        if let maxTotal = policy.maxTotal, current.total >= maxTotal {
             return FrequencyEvalResult(false, .maxTotal)
         }
         if let w = policy.maxPerWindow {
-            let effective = isWindowExpired(w, state, now, sessionId) ? 0 : state.windowCount
+            let effective = isWindowExpired(w, current, now, sessionId) ? 0 : current.windowCount
             if effective >= w.count { return FrequencyEvalResult(false, .window) }
         }
         return FrequencyEvalResult(true)
@@ -177,7 +182,9 @@ final class FrequencyManager {
     /// the route emit a verbose "why it was dropped" log without re-deriving it.
     func blockReason(campaignKey: String, policy: FrequencyPolicy?) -> FrequencySkipReason? {
         guard let policy, policy.hasConstraint else { return nil }
-        return FrequencyEvaluator.evaluate(policy, load(campaignKey), clock(), sessionIdProvider()).reason
+        return FrequencyEvaluator.evaluate(
+            policy, load(campaignKey), clock(), sessionIdProvider()
+        ).reason
     }
 
     /// Bump on "Digia Experience Viewed". No-op for an uncapped policy.

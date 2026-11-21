@@ -9,6 +9,35 @@ All notable changes to Digia Engage (iOS) are documented in this file.
 - Image placeholders disappear once the picture draws, and Lottie animations no longer sit on a backdrop.
 - Blank, templated or schemeless image and Lottie URLs are reported once as `invalid_url` without a network fetch.
 
+## [4.4.0] - 2026-11-17
+
+### New Features
+
+- A campaign can carry its own trigger rule, which the SDK evaluates on the device without a call from your messaging platform.
+- Rules can fire when an anchor or slot comes into view, each time it appears again.
+- Campaigns that carry a rule can use `{{user.<attribute>}}` and `{{event.<property>}}` in copy, falling back to the authored value.
+- Added `Digia.trackEvent(name:properties:)` to record an event your app performed, which Digia rules can react to.
+- Added `Digia.setUserAttributes(_:)` to set attributes for the current user; call `Digia.setUserId` first.
+- Added `Digia.setUserId(_:userHash:)` to pass your backend's HMAC-SHA256 of the user ID and receive imported attributes; `setUserId(_:)` is unchanged.
+- Debug builds of native iOS apps can now capture the current screen's layout, including SwiftUI, for authoring anchorless guides.
+
+### Improvements
+
+- `Digia.setUserId`, `clearUserId` and `setCurrentScreen` can now be called from any thread.
+- Inline campaigns now ignore their target screen list, including those decided by your messaging platform, because the slot decides where they show.
+- `{{ }}` copy expressions now accept uppercase, underscore-leading and dotted names and line breaks, and never print `-0`.
+- A `number` or `bool` campaign variable whose value, from your messaging platform or otherwise, does not fit its type now uses the authored fallback.
+- Frequency caps now apply as whole numbers of 1 or more, given as numbers or numeric text; any other value means no cap.
+- A campaign type the SDK cannot render is now reported to your messaging platform as invalid config instead of an unknown campaign.
+
+### Bug Fixes
+
+- Taps on carousel slides now work when a neighbouring slide's image is zoomed or larger than its slide.
+- Carousels in a dialog with the close button outside the card can be swiped again.
+- A nudge now records one Viewed event and one frequency count per presentation, instead of repeating when its view reappears.
+- A guide shown by the React Native layer that ends before it displayed now reports as dropped, not dismissed, to your messaging platform.
+- iOS page capture uploads, React Native included, are accepted by Digia again, and screenshots stay under the upload size limit.
+
 ## [4.3.2] - 2026-11-04
 
 ### Bug Fixes

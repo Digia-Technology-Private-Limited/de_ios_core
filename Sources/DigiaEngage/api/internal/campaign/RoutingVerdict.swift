@@ -20,7 +20,11 @@ enum RoutingVerdict {
     ///
     /// `detail` is debug-only free text. Log it, never branch on it.
     /// `cause` is the fixed `invalid_config` token that health sends.
-    case dropped(reason: DropReason, detail: String?, cause: String? = nil)
+    /// `extras` ride on the drop's timeline record (e.g. the surface blocker).
+    /// `deliveryDetail` rides on the `Digia Experience Dropped` event.
+    case dropped(
+        reason: DropReason, detail: String?, cause: String? = nil,
+        extras: [String: String] = [:], deliveryDetail: [String: Any] = [:])
 
     var isAccepted: Bool {
         if case .accepted = self { return true }
