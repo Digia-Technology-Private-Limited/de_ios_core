@@ -581,7 +581,7 @@ final class GameSurface {
     ) {
         refreshEntryAfterClose(
             campaignKey: campaignKey, payload: payload, chanceId: chanceId,
-            hide: { [weak self] in self?.hideFloatingEntry(campaignKey: campaignKey, payload: payload) },
+            hide: { [weak self] in self?.hideFloatingEntry(payload) },
             onKept: { [weak self] in self?.rewarmEntry(payload) })
     }
 
@@ -596,8 +596,8 @@ final class GameSurface {
     /// chance and dismisses the
     /// floater — if it still shows this payload — as completed, never as a
     /// user close.
-    private func hideFloatingEntry(campaignKey: String, payload: CEPTriggerPayload) {
-        sdk.gamificationSurface.hideFloatingEntry(campaignKey: campaignKey)
+    private func hideFloatingEntry(_ payload: CEPTriggerPayload) {
+        sdk.gamificationSurface.hideFloatingEntry(payload)
         if sdk.floaterStoryOrchestrator.state?.payload.cepCampaignId == payload.cepCampaignId {
             sdk.floaterStoryOrchestrator.dismiss(.completed)
         }
@@ -664,7 +664,8 @@ final class GameSurface {
             switch PlaySession.decideAfterClose(result) {
             case .keep(let replacement):
                 if let replacement {
-                    self.sdk.gamificationSurface.chances[campaignKey] = replacement
+                    self.sdk.gamificationSurface.chances[
+                        GamificationSurface.entryKey(payload)] = replacement
                 }
                 log.d(
                     "Gamification entry kept after close (\(result))",
