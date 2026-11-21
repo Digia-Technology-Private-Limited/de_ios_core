@@ -52,7 +52,7 @@ private struct Phone {
     ) async throws -> SDKInstance {
         let network = HeldBundleNetworkClient()
         network.release(.success(firstOpenBundle(triggers)))
-        let sdk = SDKInstance(defaults: defaults, legacyDefaults: legacy, makeNetworkClient: { _ in network })
+        let sdk = { let instance = SDKInstance(defaults: defaults, legacyDefaults: legacy, makeNetworkClient: { _ in network }); instance.onHostMounted(SDKInstance.testHostId); return instance }()
         sdk.launchedInBackground = { inBackground }
         try await sdk.initialize(DigiaConfig(apiKey: "test-api-key"))
         for _ in 0..<300 where sdk.sdkState != .ready { try await Task.sleep(nanoseconds: 10_000_000) }

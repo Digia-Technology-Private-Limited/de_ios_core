@@ -111,6 +111,28 @@ public enum Digia {
         try await SDKInstance.shared.initialize(config)
     }
 
+    /// Draws Digia Engage campaigns over a UIKit app. Call it once, with your window, after setting its
+    /// root view controller:
+    ///
+    /// ```swift
+    /// window.rootViewController = HomeViewController()
+    /// window.makeKeyAndVisible()
+    /// Digia.attach(to: window)
+    /// ```
+    ///
+    /// The SDK adds its layer as a child of the window's root view controller. After you replace the root
+    /// (`window.rootViewController = …`), it moves to the new root before the next campaign shows; a
+    /// campaign that was on screen when you replaced the root is ended. Call it again only for a new
+    /// `UIWindow`.
+    ///
+    /// The root must be a plain view controller. A `UINavigationController`, `UITabBarController`,
+    /// `UISplitViewController` or `UIPageViewController` root is not supported, because it would treat
+    /// Digia's layer as one of its own screens; then nothing is drawn and a warning is logged. SwiftUI apps
+    /// use `DigiaHost` instead.
+    public static func attach(to window: UIWindow) {
+        DigiaHostAttachment.attach(to: window)
+    }
+
     public static var requestHeaders: [String: String] { SDKInstance.shared.requestHeaders }
 
     public static var sdkVersion: String? {

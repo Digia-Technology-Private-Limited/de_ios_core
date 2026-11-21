@@ -16,10 +16,10 @@ private func readySDK(campaigns: [[String: Any]]) async throws -> SDKInstance {
     let network = HeldBundleNetworkClient()
     let body = try JSONSerialization.data(withJSONObject: ["campaigns": campaigns])
     network.release(.success(NetworkResponse(statusCode: 200, headers: [:], body: body, isSuccessful: true)))
-    let sdk = SDKInstance(
+    let sdk = { let instance = SDKInstance(
         defaults: UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!,
         legacyDefaults: UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!,
-        makeNetworkClient: { _ in network })
+        makeNetworkClient: { _ in network }); instance.onHostMounted(SDKInstance.testHostId); return instance }()
     try await sdk.initialize(DigiaConfig(apiKey: "test-api-key"))
     for _ in 0..<300 where sdk.sdkState != .ready { try await Task.sleep(nanoseconds: 10_000_000) }
     #expect(sdk.sdkState == .ready)
@@ -79,10 +79,10 @@ struct DMCHostTriggerTests {
     // dmc-case: dmc.trigger.calls_before_init_dropped_not_held
     @Test("a host trigger before initialize drops at once, not silently")
     func dropsBeforeInitialize() {
-        let sdk = SDKInstance(
+        let sdk = { let instance = SDKInstance(
             defaults: UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!,
             legacyDefaults: UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!,
-            makeNetworkClient: { _ in HeldBundleNetworkClient() })
+            makeNetworkClient: { _ in HeldBundleNetworkClient() }); instance.onHostMounted(SDKInstance.testHostId); return instance }()
         #expect(sdk.sdkState == .notInitialized)
 
         let presentation = sdk.triggerCampaign("home_banner", variables: nil)
@@ -168,10 +168,10 @@ struct DMCTrackEventTests {
             statusCode: 200, headers: [:],
             body: try JSONSerialization.data(withJSONObject: ["campaigns": [campaign]]),
             isSuccessful: true)))
-        let sdk = SDKInstance(
+        let sdk = { let instance = SDKInstance(
             defaults: UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!,
             legacyDefaults: UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!,
-            makeNetworkClient: { _ in network })
+            makeNetworkClient: { _ in network }); instance.onHostMounted(SDKInstance.testHostId); return instance }()
 
         sdk.trackEvent("cart_landed")
         await sdk.setUserAttributes(["plan": "pro"])
