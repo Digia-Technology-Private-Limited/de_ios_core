@@ -61,6 +61,9 @@ final class GameBridge {
     /// quietly. Its own budget, so a slow engine start on a cheap phone does
     /// not eat the skin's 5 s.
     nonisolated static let loadTimeoutSeconds = 15.0
+    /// Seconds of wall clock from the open to `ready`, whatever phase the load
+    /// is in, before the open fails `open_timeout` and frees the busy slot.
+    nonisolated static let openWatchdogSeconds = 15.0
     /// Skin messages above this many UTF-8 bytes are dropped, never parsed. Fits a
     /// full 16 KB `storage` value or `http` body plus its envelope.
     nonisolated static let maxMessageBytes = 64 * 1024

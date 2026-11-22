@@ -156,6 +156,25 @@ final class GamePresentation: Identifiable, ObservableObject {
         }
         if !didCommitPage { request.timing.stage = GameOpenTiming.stageCommit }
         coordinator.start()
+        if !held { armOpenWatchdog() }
+    }
+
+    /// The overall deadline for an open: 15 s of wall clock from the open to
+    /// `ready`, across every phase (download, load, commit, `ready`) and
+    /// across background time. The phase timers pause while the app is
+    /// inactive and can be re-armed; this one cannot, so a game never holds
+    /// the one busy slot longer. A game that is ready, finished or held is
+    /// left alone.
+    private func armOpenWatchdog() {
+        DispatchQueue.main.asyncAfter(wallDeadline: .now() + GameBridge.openWatchdogSeconds) { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self, !self.didFinish, !self.isReady, !self.isHeld else { return }
+                log.w("Game not shown within \(Int(GameBridge.openWatchdogSeconds)) s — cancelled",
+                      error: self.request.campaignKey)
+                self.finish(report: { [request = self.request] in request.onFailure?(.openTimeout) })
+                self.bridge.close()
+            }
+        }
     }
 
     /// True once the page committed: the load timer is done and the ready
@@ -222,6 +241,7 @@ final class GamePresentation: Identifiable, ObservableObject {
         initMessage = Self.initMessage(for: request)
         lastDevicePush = GameDeviceInfo.current(sdkVersion: sdkVersion).pushPayload
         isHeld = false
+        armOpenWatchdog()
         if pageFinished { sendInit() }
         armLoadTimer()
         // A skin that booted while held already sent its one `ready`.

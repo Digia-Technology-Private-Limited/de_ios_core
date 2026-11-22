@@ -61,6 +61,8 @@ enum GameFailure: String, Equatable, Sendable {
     case closedBeforeReady
     /// The web content process died before `ready`.
     case webProcessTerminated
+    /// No `ready` within 15 s of the open, wall clock, whatever phase it was in.
+    case openTimeout
 
     var wireValue: String {
         switch self {
@@ -73,6 +75,7 @@ enum GameFailure: String, Equatable, Sendable {
         case .bridgeVersionUnsupported: return "bridge_version_unsupported"
         case .closedBeforeReady: return "closed_before_ready"
         case .webProcessTerminated: return "web_process_terminated"
+        case .openTimeout: return "open_timeout"
         }
     }
 }
