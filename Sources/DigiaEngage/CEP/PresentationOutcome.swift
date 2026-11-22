@@ -107,7 +107,7 @@ public enum DropReason: String, CaseIterable, Sendable {
     /// The generic gamification refusal: the backend denied the chance with a
     /// reason this SDK does not know (or none), or granted it without asking the
     /// SDK to show it. Never a cap.
-    case notEligible = "not_eligible"
+    case notEligible = "holdout"
 
     /// An unexpected error — specifics in the dropped arm's `detail`.
     case error = "error"
