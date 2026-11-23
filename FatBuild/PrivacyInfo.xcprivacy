@@ -8,9 +8,6 @@
   app calls setUserId; used for App Functionality and Analytics): device ID,
   user ID, campaign interactions, SDK health diagnostics and survey answers.
   UserDefaults (CA92.1): DigiaEngage's own app-local state.
-  SystemBootTime (35F9.1): ProcessInfo.systemUptime, only to measure time elapsed
-  between in-app events (game open and ready timings, dwell, motion sample spacing).
-  Only durations leave the device, never the uptime value itself.
   Keep this file identical in Sources/DigiaEngage/Resources, SharedBuild and FatBuild.
 -->
 <plist version="1.0">
@@ -103,14 +100,6 @@
 			<key>NSPrivacyAccessedAPITypeReasons</key>
 			<array>
 				<string>CA92.1</string>
-			</array>
-		</dict>
-		<dict>
-			<key>NSPrivacyAccessedAPIType</key>
-			<string>NSPrivacyAccessedAPICategorySystemBootTime</string>
-			<key>NSPrivacyAccessedAPITypeReasons</key>
-			<array>
-				<string>35F9.1</string>
 			</array>
 		</dict>
 	</array>

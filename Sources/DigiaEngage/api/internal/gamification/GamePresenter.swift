@@ -230,7 +230,7 @@ final class GamePresentation: Identifiable, ObservableObject {
     /// Charges the running timer's foreground time to the phase budget.
     private func spendPhaseBudget() {
         guard let armedAt = phaseArmedAt, let remaining = phaseRemaining else { return }
-        phaseRemaining = max(0, remaining - (ProcessInfo.processInfo.systemUptime - armedAt))
+        phaseRemaining = max(0, remaining - (MonotonicClock.nowSeconds() - armedAt))
         phaseArmedAt = nil
     }
 
@@ -250,7 +250,7 @@ final class GamePresentation: Identifiable, ObservableObject {
         let seconds = phaseRemaining
             ?? (committed ? GameBridge.readyTimeoutSeconds : GameBridge.loadTimeoutSeconds)
         phaseRemaining = seconds
-        phaseArmedAt = ProcessInfo.processInfo.systemUptime
+        phaseArmedAt = MonotonicClock.nowSeconds()
         let generation = bridge.beginLoading()
         DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
             Task { @MainActor [weak self] in

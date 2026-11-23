@@ -271,7 +271,7 @@ final class GamificationOrchestrator: ObservableObject {
     ) {
         let key = campaign.campaignKey
         // The analytics timings (`ms_elapsed`, `ms_to_ready`) run from here.
-        let intentAt = ProcessInfo.processInfo.systemUptime
+        let intentAt = MonotonicClock.nowSeconds()
         let triggerId = PlaySession.triggerId(of: payload)
         let testInvocationId = testInvocationIdOf(payload.cepCampaignId)
         // Direct parallel load: the skin loads hidden while the grant is

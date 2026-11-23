@@ -109,9 +109,9 @@ final class GameMotionSource: NSObject {
         let rate = Self.clampedHz(hz)
         guard isAvailable(sensor) else { return false }
         if active.isEmpty {
-            startUptime = ProcessInfo.processInfo.systemUptime
+            startUptime = MonotonicClock.nowSeconds()
         }
-        active[sensor] = ActiveSensor(hz: rate, lastEmit: ProcessInfo.processInfo.systemUptime - 1 / rate)
+        active[sensor] = ActiveSensor(hz: rate, lastEmit: MonotonicClock.nowSeconds() - 1 / rate)
         self.handler = handler
         restartHardware()
         return true
@@ -195,7 +195,7 @@ final class GameMotionSource: NSObject {
 
     private func emitSamples() {
         guard let handler else { return }
-        let now = ProcessInfo.processInfo.systemUptime
+        let now = MonotonicClock.nowSeconds()
         // Snapshot the keys: emitting writes each sensor's `lastEmit` back.
         for sensor in Array(active.keys) {
             guard var state = active[sensor],

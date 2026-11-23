@@ -26,7 +26,7 @@ final class GameSurface {
 
     /// Opens the game for `campaign` with the chance `chanceId`, settling by
     /// `settle`. Every former open path (direct, entry tap, rewards chance)
-    /// funnels through here. `intentAt` (`ProcessInfo.systemUptime`) is when
+    /// funnels through here. `intentAt` (`MonotonicClock.nowSeconds()`) is when
     /// the open was asked for: a Direct trigger passes its trigger time, so
     /// the analytics timings run from it.
     func open(
@@ -34,7 +34,7 @@ final class GameSurface {
         config: GamificationConfig,
         chanceId: String,
         settle: GameSettle,
-        intentAt: TimeInterval = ProcessInfo.processInfo.systemUptime
+        intentAt: TimeInterval = MonotonicClock.nowSeconds()
     ) {
         let campaignKey = campaign.campaignKey
         let timing = GameOpenTiming(intentAt: intentAt)
@@ -427,7 +427,7 @@ final class GameSurface {
         payload: CEPTriggerPayload,
         userId: String,
         settle: GameSettle,
-        timing: GameOpenTiming = GameOpenTiming(intentAt: ProcessInfo.processInfo.systemUptime)
+        timing: GameOpenTiming = GameOpenTiming(intentAt: MonotonicClock.nowSeconds())
     ) -> GameOpenRequest {
         let campaignKey = campaign.campaignKey
         // The funnel counts a shown game: `shown` arms the failure Dismissed,

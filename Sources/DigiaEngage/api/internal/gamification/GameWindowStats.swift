@@ -19,7 +19,7 @@ final class GameWindowStats: @unchecked Sendable {
     private var dwellTotalMs: Int64 = 0
 
     init(chanceId: String, clock: @escaping () -> Int64 = {
-        Int64(ProcessInfo.processInfo.systemUptime * 1000)
+        Int64(MonotonicClock.nowMs())
     }) {
         latestChanceId = chanceId
         self.clock = clock

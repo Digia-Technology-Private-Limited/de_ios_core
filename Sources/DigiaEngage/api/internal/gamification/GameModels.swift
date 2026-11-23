@@ -211,7 +211,7 @@ struct GameOpenRequest {
     /// `init.slots`: outcome-keyed slot values, read whenever present.
     var slots: [GamificationSlotConfig] = []
     /// The open's analytics timing: shared by the surface and the presentation.
-    var timing = GameOpenTiming(intentAt: ProcessInfo.processInfo.systemUptime)
+    var timing = GameOpenTiming(intentAt: MonotonicClock.nowSeconds())
 }
 
 /// One open's analytics timing, from the intent (trigger or tap) to `ready`
@@ -219,7 +219,7 @@ struct GameOpenRequest {
 /// open got: `grant`, `download`, `load`, `commit` or `ready`. Mirrors
 /// Android's `GameOpenTiming`.
 final class GameOpenTiming {
-    /// `ProcessInfo.systemUptime` at the intent, in seconds.
+    /// `MonotonicClock.nowSeconds()` at the intent, in seconds.
     let intentAt: TimeInterval
     var warm: String?
     var stage: String = GameOpenTiming.stageDownload
@@ -238,6 +238,6 @@ final class GameOpenTiming {
     var msElapsed: Int64 { GameOpenTiming.ms(since: intentAt) }
 
     static func ms(since intentAt: TimeInterval) -> Int64 {
-        Int64(max(0, (ProcessInfo.processInfo.systemUptime - intentAt) * 1000))
+        Int64(max(0, (MonotonicClock.nowSeconds() - intentAt) * 1000))
     }
 }
