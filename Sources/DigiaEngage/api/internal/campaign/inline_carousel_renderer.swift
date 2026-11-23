@@ -233,7 +233,7 @@ private struct InlineCarouselItemImage: View {
     var body: some View {
         MediaImage(
             url: item.imageUrl,
-            fit: MediaFit(rawValue: item.fit.rawValue) ?? .cover,
+            fit: MediaFit(authored: item.fit.rawValue),
             blurHash: item.placeholder?.stillBlurHash
         )
             .frame(width: width, height: height)

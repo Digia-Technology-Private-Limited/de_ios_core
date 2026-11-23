@@ -12,7 +12,8 @@ private let anchorlessImageLoadTimeout: TimeInterval = 3
 private func prefetchAnchorlessImage(_ url: URL?) {
     guard let url else { return }
     DigiaImagePipeline.configureIfNeeded()
-    SDWebImagePrefetcher.shared.prefetchURLs([url])
+    SDWebImagePrefetcher.shared.prefetchURLs(
+        [url], options: MediaImage.loadOptions, context: MediaImage.loadContext, progress: nil, completed: nil)
 }
 
 @MainActor
@@ -255,13 +256,7 @@ private struct GuideStepOverlay: View {
                         url: imageURL.absoluteString,
                         fit: .cover,
                         onSuccess: { imageLoaded = true },
-                        onFailure: {
-                            SDKInstance.shared.guideOrchestrator.reportGuideRenderFailure(
-                                nil,
-                                guideToken: guideToken,
-                                stepIndex: stepIndex
-                            )
-                        }
+                        onFailure: reportImageFailure
                     )
                     .frame(width: anchorRect.width, height: anchorRect.height)
                     .clipShape(
@@ -303,11 +298,7 @@ private struct GuideStepOverlay: View {
             prefetchAnchorlessImage(nextImageURL)
             try? await Task.sleep(nanoseconds: UInt64(anchorlessImageLoadTimeout * 1_000_000_000))
             guard !Task.isCancelled, !imageLoaded else { return }
-            SDKInstance.shared.guideOrchestrator.reportGuideRenderFailure(
-                nil,
-                guideToken: guideToken,
-                stepIndex: stepIndex
-            )
+            reportImageFailure()
         }
         .task(id: stepIndex) {
             delayElapsedForStep = nil
@@ -330,6 +321,14 @@ private struct GuideStepOverlay: View {
                 onOutsideTap()
             }
         }
+    }
+
+    private func reportImageFailure() {
+        SDKInstance.shared.guideOrchestrator.reportGuideRenderFailure(
+            nil,
+            guideToken: guideToken,
+            stepIndex: stepIndex
+        )
     }
 
     @ViewBuilder

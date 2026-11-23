@@ -7,7 +7,6 @@ let DIGIA_IMAGE_USER_AGENT = "DigiaEngage/1.0 (iOS)"
 enum DigiaImagePipeline {
     private static let configureOnce: Void = {
         SDImageCodersManager.shared.addCoder(SDImageSVGCoder.shared)
-        SDWebImageDownloader.shared.setValue(DIGIA_IMAGE_USER_AGENT, forHTTPHeaderField: "User-Agent")
     }()
 
     static func configureIfNeeded() {

@@ -1893,7 +1893,7 @@ private struct CanvasRemoteLottie: View {
     var body: some View {
         MediaLottie(
             url: url,
-            fit: canvasMediaFit(fit),
+            fit: MediaFit(authored: fit),
             blurHash: placeholder?.stillBlurHash,
             loop: loop,
             autoplay: autoplay,
@@ -2302,7 +2302,7 @@ private struct FocalCanvasImage: View {
         GeometryReader { geometry in
             MediaImage(
                 url: resolved,
-                fit: canvasMediaFit(fit),
+                fit: MediaFit(authored: fit),
                 blurHash: source.placeholder?.stillBlurHash,
                 tintColor: tint.map { CampaignCanvasTheme.shared.color($0, isDark: isDark) },
                 focalX: x,
@@ -2320,16 +2320,6 @@ private struct FocalCanvasImage: View {
         // The image's own frame still absorbs touches, so a tap on a canvas
         // background keeps not falling through — but only within that frame.
         .contentShape(Rectangle())
-    }
-}
-
-/// The wrapper fit for a canvas-authored fit value: `contain` letterboxes, `fill` stretches,
-/// anything else covers.
-private func canvasMediaFit(_ fit: String) -> MediaFit {
-    switch fit {
-    case "contain": .contain
-    case "fill": .fill
-    default: .cover
     }
 }
 

@@ -737,7 +737,7 @@ private struct ChoiceCardRow: View {
                     .frame(width: 20, height: 20)
 
                     if showMedia, let media = option.media, media.hasUrl {
-                        SurveyMediaImage(url: media.url, fit: .cover, placeholder: media.placeholder)
+                        MediaImage(url: media.url, fit: .cover, blurHash: media.placeholder?.stillBlurHash)
                         .frame(width: 36, height: 36)
                         .clipShape(RoundedRectangle(cornerRadius: 4))
                     }

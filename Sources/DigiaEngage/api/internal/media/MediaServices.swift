@@ -10,7 +10,7 @@ internal import Lottie
 /// and put the defaults back with `reset`. Images load through the shared SDWebImage downloader,
 /// so there is no image loader here.
 struct MediaServices: Sendable {
-    /// Reports a media content fault: (campaign key, kind, cause). A nil key drops it.
+    /// Reports a media content fault: (campaign key, kind, cause). A nil key still reports.
     var reportHealth: @Sendable (String?, HealthMediaKind, String) -> Void
     /// Loads a Lottie animation; on failure, the health cause when the author can fix it.
     var loadLottie: @Sendable (URL) async -> (source: LottieAnimationSource?, failureCause: String?)

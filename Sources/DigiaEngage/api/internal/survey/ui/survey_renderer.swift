@@ -943,7 +943,7 @@ private struct SurveyBody: View {
                 .buttonStyle(.plain)
             }
         case .textMedia:
-            if !block.media.hasUrl { MediaPlaceholder() }
+            EmptyView()
         default:
             SurveyQuestionContent(
                 block: block,
@@ -1101,56 +1101,18 @@ private struct BlockTitleView: View {
 private struct BlockMediaImage: View {
     let media: BlockMedia
 
-    private var fit: MediaFit {
-        switch media.boxFit {
-        case "contain": return .contain
-        case "fill": return .fill
-        default: return .cover
-        }
-    }
-
     var body: some View {
         if media.hasUrl {
-            SurveyMediaImage(url: media.url, fit: fit, placeholder: media.placeholder)
+            MediaImage(
+                url: media.url,
+                fit: MediaFit(authored: media.boxFit),
+                blurHash: media.placeholder?.stillBlurHash
+            )
             .frame(height: 176)
             .frame(maxWidth: .infinity)
             .clipShape(RoundedRectangle(cornerRadius: 10))
             .overlay(RoundedRectangle(cornerRadius: 10).stroke(SurveyTokens.border, lineWidth: 1))
         }
-    }
-}
-
-/// A survey picture: the image wrapper over the survey's sunken fill, which shows until the
-/// picture draws (so a loading picture is a sunken box with its BlurHash on it, and a failed one the
-/// bare sunken box).
-struct SurveyMediaImage: View {
-    let url: String
-    let fit: MediaFit
-    let placeholder: ImagePlaceholder?
-    @State private var loaded = false
-
-    var body: some View {
-        ZStack {
-            if !loaded { SurveyTokens.surfaceSunken }
-            MediaImage(
-                url: url,
-                fit: fit,
-                blurHash: placeholder?.stillBlurHash,
-                onSuccess: { loaded = true }
-            )
-        }
-        .onChange(of: url) { _ in loaded = false }
-    }
-}
-
-private struct MediaPlaceholder: View {
-    var body: some View {
-        Text("— image / video —")
-            .font(surveyFont(size: 12))
-            .foregroundColor(SurveyTokens.textTertiary)
-            .frame(maxWidth: .infinity)
-            .frame(height: 96)
-            .background(RoundedRectangle(cornerRadius: 10).fill(SurveyTokens.surfaceSunken))
     }
 }
 

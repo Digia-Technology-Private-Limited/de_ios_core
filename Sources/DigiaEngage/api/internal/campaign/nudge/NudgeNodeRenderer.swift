@@ -383,7 +383,7 @@ private struct NudgeLottieView: View {
         // empty. A blank or unresolved URL reports invalid_url from the wrapper.
         MediaLottie(
             url: interpolate(node.url, context: variables),
-            fit: MediaFit(rawValue: node.fit.rawValue) ?? .cover,
+            fit: MediaFit(authored: node.fit.rawValue),
             loop: node.loop,
             autoplay: node.autoplay
         )
@@ -405,14 +405,15 @@ private struct NudgeCarouselView: View {
     @State private var autoPlayTimer: Timer? = nil
 
     private var images: [String] {
-        node.images.map { interpolate($0, context: variables) }
+        // A slide whose URL is blank or still holds an unresolved `{{variable}}` takes no page.
+        node.images.map { interpolate($0, context: variables) }.filter { mediaUsableURL($0) != nil }
     }
     private var pageCount: Int { node.loop ? 9999 : images.count }
 
     var body: some View {
         let images = self.images
         if images.isEmpty {
-            // No slides authored at all: nothing to load or report, the box keeps its height.
+            // No usable slides: nothing to load or report, the box keeps its height.
             Color.clear.frame(height: node.height)
         } else {
             VStack(spacing: 0) {

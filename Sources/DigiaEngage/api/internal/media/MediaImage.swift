@@ -31,6 +31,14 @@ struct MediaImage: View {
     /// set, so its picture lands in the cache entry this wrapper reads instead of being fetched again.
     static let loadOptions: SDWebImageOptions = [.retryFailed, .scaleDownLargeImages]
 
+    /// The context every Engage image load passes: the SDK's `User-Agent`, set on these requests
+    /// only (the shared downloader's headers belong to the host app). It does not touch the cache
+    /// key, so a preload and the draw share one entry.
+    static let loadContext: [SDWebImageContextOption: Any] = [
+        .downloadRequestModifier: SDWebImageDownloaderRequestModifier(
+            headers: ["User-Agent": DIGIA_IMAGE_USER_AGENT])
+    ]
+
     let url: String
     var fit: MediaFit = .cover
     var blurHash: String? = nil
@@ -81,7 +89,7 @@ struct MediaImage: View {
                 placed(fitted(Image(uiImage: cached)))
                     .task(id: url) { reportSuccess() }
             } else {
-                WebImage(url: target, options: Self.loadOptions) { image in
+                WebImage(url: target, options: Self.loadOptions, context: Self.loadContext) { image in
                     placed(fitted(image))
                 } placeholder: {
                     still

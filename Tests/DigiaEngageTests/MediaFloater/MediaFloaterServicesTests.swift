@@ -45,7 +45,7 @@ struct MediaFloaterServicesTests {
 
     // Fails if: floater_overlay_view.swift `FloaterOverlayView` loses its
     // `.environment(\.digiaCampaignKey, state.payload.campaignKey)` on `FloaterSessionView`: the
-    // window's image then fails with no campaign key and `reportMediaLoadFailed` drops the report.
+    // window's image then fails with no campaign key, so its report is not this campaign's.
     @Test("a floater image that fails once the window is up is reported with the floater's campaign key")
     func windowImageFailureCarriesTheCampaignKey() async throws {
         MediaOrigin.install()
