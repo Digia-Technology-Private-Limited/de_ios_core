@@ -317,7 +317,8 @@ final class GameSurface {
         let dropReason: DropReason
         switch reason {
         case PlayDropReason.busy: dropReason = .surfaceBusy
-        case GameFailure.readyTimeout.wireValue, GameFailure.loadTimeout.wireValue: dropReason = .timeout
+        case GameFailure.readyTimeout.wireValue, GameFailure.loadTimeout.wireValue,
+             GameFailure.openTimeout.wireValue: dropReason = .timeout
         default: dropReason = .error
         }
         sdk.liveTestContexts[payload.cepCampaignId]?.reportFailed(dropReason, message: reason)
@@ -338,6 +339,9 @@ final class GameSurface {
         case "cta": return .ctaAction
         case "superseded": return .superseded
         case "screen_exit": return .screenExit
+        // A shown game whose skin call hung: the SDK withdrew it, like any
+        // other shown failure on Android (which reports CANCELLED the same way).
+        case GameFailure.httpTimeout.wireValue: return .cancelled
         default: return .cancelled
         }
     }
@@ -351,7 +355,7 @@ final class GameSurface {
     static func gameDismissReason(closeReason: String) -> String {
         switch closeReason {
         case "user", "back", "screen_exit", GamePresentation.cancelledReason, "skin", "cta", "failure",
-             "superseded", "web_process_terminated":
+             "superseded", "web_process_terminated", GameFailure.httpTimeout.wireValue:
             return closeReason
         default: return "user"
         }
@@ -564,6 +568,35 @@ final class GameSurface {
                         playEventsOf(request: request, envelope: response, playNumber: playNumber),
                         payload: payload)
                 }
+            },
+            // A watched skin `http` call hung with no answer: the game it stuck
+            // closes through the normal path right after this (the presentation
+            // closes on this callback). Always `game_rewards_failed` with the
+            // hung path; plus `game_open_failed(http_timeout)` when the game
+            // was already showing — the stuck window counts as an open
+            // failure, unlike any other shown failure. Before shown, the
+            // presentation fails instead and that path reports it once.
+            onHttpTimeout: { [weak self] path, durationMs in
+                guard let self else { return }
+                let health = GameHealthContext(
+                    campaignId: campaign.id, skinId: config.skinId,
+                    skinVersion: config.skinVersion, entry: entryValue)
+                self.sdk.events.toDigia(
+                    GameRewardsFailedEvent(
+                        health: health, op: path,
+                        code: GameBridgeErrorCode.timeout.rawValue, status: nil,
+                        durationMs: durationMs),
+                    payload: Self.payload(settle: settle, campaign: campaign))
+                guard shown else { return }
+                self.sdk.events.toDigia(
+                    GameOpenFailedEvent(
+                        reason: GameFailure.httpTimeout.wireValue,
+                        chanceId: stats.chanceId, entry: entryValue,
+                        skinId: config.skinId, skinVersion: config.skinVersion,
+                        warm: timing.warm ?? GamePrewarmer.warmKind(campaignKey: campaignKey),
+                        tier: GamePrewarmer.deviceTier(),
+                        msElapsed: timing.msElapsed, stage: GameOpenTiming.stageReady),
+                    payload: Self.payload(settle: settle, campaign: campaign))
             },
             onForeground: { stats.setForeground($0) },
             payload: payload,
