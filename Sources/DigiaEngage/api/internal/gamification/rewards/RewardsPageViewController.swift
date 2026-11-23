@@ -278,6 +278,10 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
         observers.forEach(NotificationCenter.default.removeObserver)
         observers = []
         gameWatch = nil
+        // With the watch gone nothing else removes this cover, and a clear full-screen
+        // cover left behind swallows every touch in the app.
+        gameHost?.dismiss(animated: false)
+        gameHost = nil
         if let layerToken { GameLayerOwner.release(layerToken) }
         layerToken = nil
         // A game still open falls back to the root cover: have it re-read the gate.
@@ -392,7 +396,20 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
         host.modalPresentationStyle = .overFullScreen
         host.view.backgroundColor = .clear
         gameHost = host
+        Self.lastGameHost = host
         ViewControllerUtil.topViewController(base: self)?.present(host, animated: false)
+    }
+
+    /// The game cover last presented by any page. Weak: it stays set only while UIKit holds it.
+    private static weak var lastGameHost: UIViewController?
+
+    /// Orphan sweep (W9): once a game has fully closed, no game cover may stay on screen.
+    static func sweepOrphanGameHost() {
+        guard SDKInstance.shared.controller.activeGame == nil, GamePresenter.loading == nil,
+              let host = lastGameHost, host.presentingViewController != nil else { return }
+        log.e("Orphaned game cover removed")
+        assertionFailure("Orphaned rewards game cover")
+        host.dismiss(animated: false)
     }
 
     private func observe() {

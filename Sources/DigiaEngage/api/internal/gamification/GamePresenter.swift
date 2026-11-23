@@ -929,6 +929,7 @@ final class GamePresentation: Identifiable, ObservableObject {
             webCoordinator?.teardown()
         }
         SDKInstance.shared.controller.dismissGame()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { RewardsPageViewController.sweepOrphanGameHost() }
         report()
         // A test send that superseded this game opens now that it is gone.
         if !GamePresenter.isBusy, let next = GamePresenter.pendingTestOpen {
