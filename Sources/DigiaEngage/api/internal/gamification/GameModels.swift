@@ -61,6 +61,13 @@ enum GameFailure: String, Equatable, Sendable {
     case closedBeforeReady
     /// The web content process died before `ready`.
     case webProcessTerminated
+    /// No `ready` within 15 s of the open, wall clock, whatever phase it was in.
+    case openTimeout
+    /// A skin `http` call (`state`, `play` or `getRewards`) had no answer
+    /// within 30 s. Reported by `game_open_failed` even when the game was
+    /// already showing: the stuck window closes through the normal close path,
+    /// and the hang still counts as an open failure.
+    case httpTimeout
 
     var wireValue: String {
         switch self {
@@ -73,6 +80,8 @@ enum GameFailure: String, Equatable, Sendable {
         case .bridgeVersionUnsupported: return "bridge_version_unsupported"
         case .closedBeforeReady: return "closed_before_ready"
         case .webProcessTerminated: return "web_process_terminated"
+        case .openTimeout: return "open_timeout"
+        case .httpTimeout: return "http_timeout"
         }
     }
 }
@@ -178,6 +187,11 @@ struct GameOpenRequest {
     /// Fires after each answered skin `http` call with the validated path,
     /// the sent body and the answered body, for the window's play stats.
     var onHttpAnswer: (@MainActor (String, [String: Any]?, Any?) -> Void)?
+    /// Fires when a watched skin `http` call (`state`, `play`, `getRewards`)
+    /// hangs with no answer: the path and how long it hung in milliseconds.
+    /// The surface reports it; the presentation then closes the game through
+    /// the normal close path.
+    var onHttpTimeout: (@MainActor (String, Int) -> Void)?
     /// Fires when the app enters (`true`) or leaves (`false`) the foreground
     /// while the game is open, for the window's dwell time.
     var onForeground: (@MainActor (Bool) -> Void)?
