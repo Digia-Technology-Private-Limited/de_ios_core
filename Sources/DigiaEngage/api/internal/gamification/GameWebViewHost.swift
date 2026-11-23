@@ -27,7 +27,7 @@ final class WeakScriptMessageProxy: NSObject, WKScriptMessageHandler {
 /// Builds the locked-down `WKWebViewConfiguration`:
 /// non-persistent storage (DOM storage and cookies off), the `digia` handler
 /// on the main frame only, selection and callout off outside text inputs, bounce off, playback
-/// gated on a user gesture, inspection in debug builds only.
+/// without a user gesture, inspection in debug builds only.
 enum GameWebViewConfigurationFactory {
     /// Defines `window.digia.postMessage` for skins that speak the
     /// Android/Flutter spelling. Skins using the iOS spelling
@@ -53,9 +53,11 @@ enum GameWebViewConfigurationFactory {
         configuration.websiteDataStore = .nonPersistent()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
         configuration.allowsInlineMediaPlayback = true
-        // Matches Android's setMediaPlaybackRequiresUserGesture(true): the
-        // skin starts audio after the user's first tap.
-        configuration.mediaTypesRequiringUserActionForPlayback = .all
+        // Skins play sound cues (spin ticks, win/lose) from animation frames
+        // and after async work, outside a tap handler, so playback must not
+        // need a user gesture. This also covers Web Audio. Matches Android's
+        // mediaPlaybackRequiresUserGesture = false. Skins still own mute.
+        configuration.mediaTypesRequiringUserActionForPlayback = []
 
         let controller = configuration.userContentController
         controller.add(messageProxy, name: "digia")
