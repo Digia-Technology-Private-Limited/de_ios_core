@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// "I set up my campaign and used the app — what happened?"
 ///
@@ -33,17 +34,29 @@ struct DigiaCampaignTimelineView: View {
             if entries.isEmpty {
                 emptyState
             } else {
-                List(entries) { entry in
-                    if entry.isDelivery {
-                        deliveryCard(entry.records)
-                    } else if let record = entry.records.first {
-                        flatRow(record)
+                // A List would wrap every row in the host's inset grouped
+                // cells — dividers and all — while Flutter and Android render
+                // full-width plain rows with explicit cards, so this is a
+                // plain stack with the same rhythm (4pt between rows, 8pt at
+                // the ends).
+                ScrollView {
+                    LazyVStack(spacing: 4) {
+                        ForEach(entries) { entry in
+                            if entry.isDelivery {
+                                deliveryCard(entry.records)
+                            } else if let record = entry.records.first {
+                                flatRow(record)
+                            }
+                        }
                     }
+                    .padding(.vertical, 8)
                 }
+                .background(Color(.systemGroupedBackground))
             }
         }
         .navigationTitle("Campaign timeline")
         .navigationBarTitleDisplayMode(.inline)
+        .background(TimelineNavBarStyle())
     }
 
     private var emptyState: some View {
@@ -61,6 +74,9 @@ struct DigiaCampaignTimelineView: View {
     }
 
     /// One showing of one campaign, its beats in the order they happened.
+    ///
+    /// An explicit card — full width minus the 12pt margin both stacks use —
+    /// rather than the host list's cells, whose shape iOS picks per context.
     private func deliveryCard(_ records: [TimelineRecord]) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
@@ -79,12 +95,19 @@ struct DigiaCampaignTimelineView: View {
                         .font(digiaFont(size: 13))
                     Spacer(minLength: 0)
                 }
+                .padding(.vertical, 2)
             }
         }
+        .padding(EdgeInsets(top: 10, leading: 12, bottom: 12, trailing: 12))
+        .background(Color(.systemBackground))
+        .cornerRadius(12)
+        .padding(.horizontal, 12)
         .padding(.vertical, 4)
     }
 
     /// A record that belongs to no delivery — the session, the fetch, a parse.
+    ///
+    /// A full-width plain row, no card and no dividers, like both stacks.
     private func flatRow(_ record: TimelineRecord) -> some View {
         HStack(alignment: .top, spacing: 10) {
             dot(record.severity)
@@ -95,6 +118,8 @@ struct DigiaCampaignTimelineView: View {
                 .font(digiaFont(size: 12))
                 .foregroundColor(.secondary)
         }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 6)
     }
 
     /// Severity as a colour, read before it is read as a word.
@@ -225,6 +250,60 @@ struct DigiaCampaignTimelineView: View {
         "cancelled": "Cancelled",
         "plugin_detached": "Your messaging platform was disconnected",
     ]
+}
+
+/// Pins the nav bar to an opaque adaptive background with an adaptive title
+/// while the timeline is on screen, then hands the host's bar back.
+///
+/// The harness presents this screen in a bare `NavigationView` and production
+/// hosts bring their own bar style; either can leave the default transparent
+/// bar with an unreadable title, so the title borrows nothing from the host.
+/// Scoped to the enclosing navigation controller — no global appearance
+/// proxy — and restored when the screen leaves.
+private struct TimelineNavBarStyle: UIViewRepresentable {
+    func makeUIView(context: Context) -> StyleView { StyleView() }
+    func updateUIView(_ uiView: StyleView, context: Context) {}
+
+    final class StyleView: UIView {
+        private weak var bar: UINavigationBar?
+        private var previous: (standard: UINavigationBarAppearance,
+                               scrollEdge: UINavigationBarAppearance?,
+                               compact: UINavigationBarAppearance?)?
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            guard window != nil, bar == nil, let bar = Self.navBar(of: self) else { return }
+            previous = (bar.standardAppearance, bar.scrollEdgeAppearance, bar.compactAppearance)
+            let appearance = UINavigationBarAppearance()
+            appearance.configureWithOpaqueBackground()
+            appearance.backgroundColor = .systemBackground
+            bar.standardAppearance = appearance
+            bar.scrollEdgeAppearance = appearance
+            bar.compactAppearance = appearance
+            self.bar = bar
+        }
+
+        override func willMove(toWindow newWindow: UIWindow?) {
+            super.willMove(toWindow: newWindow)
+            guard newWindow == nil, let bar, let previous else { return }
+            bar.standardAppearance = previous.standard
+            bar.scrollEdgeAppearance = previous.scrollEdge
+            bar.compactAppearance = previous.compact
+            self.bar = nil
+            self.previous = nil
+        }
+
+        private static func navBar(of view: UIView) -> UINavigationBar? {
+            var responder: UIResponder? = view.next
+            while let current = responder {
+                if let controller = current as? UIViewController {
+                    return controller.navigationController?.navigationBar
+                }
+                responder = current.next
+            }
+            return nil
+        }
+    }
 }
 
 /// One row of the timeline list: a delivery card, or a single flat record.
