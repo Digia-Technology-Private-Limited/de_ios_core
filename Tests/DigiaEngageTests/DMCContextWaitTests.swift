@@ -94,11 +94,11 @@ struct DMCContextWaitTests {
             bundle: NetworkResponse(statusCode: 200, headers: [:], body: body, isSuccessful: true))
         let defaults = UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!
         if let user { defaults.set(user, forKey: "identity.user_id") }
-        let sdk = SDKInstance(
+        let sdk = { let instance = SDKInstance(
             defaults: defaults,
             legacyDefaults: UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!,
             makeNetworkClient: { _ in network }
-        )
+        ); instance.onHostMounted(SDKInstance.testHostId); return instance }()
         let sink = WaitSink()
         DigiaLogger.registerSink(sink)
         let plugin = WaitPlugin()

@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import UIKit
 @testable import DigiaEngage
 
 @Suite("Digia overlay controller", .serialized, .tags(.nudge, .unit))
@@ -84,16 +85,21 @@ struct DigiaOverlayControllerTests {
         controller.forceNudgeDismiss()
     }
 
-    @Test("showStoryOverlay and dismissStoryOverlay manage active story state") @MainActor
+    // Fails if: `showStoryOverlay` records the story as open when the present did not happen, or stops
+    // recording it when it did. A headless test may have no screen to present from; either way the
+    // answer and the recorded state must agree.
+    @Test("showStoryOverlay records the story only when it was shown, and dismissStoryOverlay clears it") @MainActor
     func testStoryOverlayState() {
         let controller = DigiaOverlayController()
         let config = InlineStoryConfig(slotKey: "test_slot", items: [])
         let payload = CEPTriggerPayload(cepCampaignId: "story_campaign", campaignKey: "campaign_1", cepMetadata: [:])
 
-        controller.showStoryOverlay(config: config, initialIndex: 0, payload: payload)
-        #expect(controller.activeStoryOverlay != nil)
-        #expect(controller.activeStoryOverlay?.config.slotKey == "test_slot")
-        #expect(controller.activeStoryOverlay?.payload.cepCampaignId == "story_campaign")
+        let shown = controller.showStoryOverlay(config: config, initialIndex: 0, payload: payload)
+        #expect((controller.activeStoryOverlay != nil) == shown)
+        if shown {
+            #expect(controller.activeStoryOverlay?.config.slotKey == "test_slot")
+            #expect(controller.activeStoryOverlay?.payload.cepCampaignId == "story_campaign")
+        }
 
         controller.dismissStoryOverlay()
         #expect(controller.activeStoryOverlay == nil)

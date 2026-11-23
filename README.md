@@ -131,6 +131,48 @@ struct ContentView: View {
 DigiaSlot("hero-banner")
 ```
 
+### UIKit
+
+UIKit apps use views instead of SwiftUI's `DigiaHost` and `DigiaSlot`, with the same names as on Android.
+
+Make `DigiaHostViewController` the window's root, holding your own root controller:
+
+```swift
+window.rootViewController = DigiaHostViewController(content: navigationController)
+```
+
+It draws campaigns above every screen you push, every tab and every split column, and lets touches through
+to your views unless one is showing. Your screens keep their status bar style, home indicator and
+orientation choices. `window.rootViewController` is then this controller; reach yours through `content`.
+
+If your app cannot change its window's root, add a `DigiaHostView` as the last, full-screen subview of
+**each** screen's view instead. A host in one screen's view works only while that screen is on screen.
+
+```swift
+let host = DigiaHostView(frame: view.bounds)
+host.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+view.addSubview(host) // last, so it draws on top
+```
+
+Do not add a `DigiaHostView` directly to the view of a `UINavigationController`, `UITabBarController`,
+`UISplitViewController` or `UIPageViewController` (those treat a child controller as one of their own
+screens), nor straight to a `UIWindow`. It draws nothing there and logs a warning.
+
+Without a host, a campaign is accepted but never drawn, and is dropped as `timeout` after 15 seconds.
+
+Show an inline campaign with a `DigiaSlotView`. Pin its position and width and let the content set the
+height; it takes no space while its placement has no campaign.
+
+```swift
+let slot = DigiaSlotView()
+slot.placementKey = "hero-banner" // or set it in Interface Builder
+stack.addArrangedSubview(slot)
+```
+
+Report screens so campaigns can target them, either with `DigiaNavigationScreenObserver` as a
+navigation controller's delegate (keep a strong reference to it) or with `digiaScreen("Home")` from
+`viewDidAppear`.
+
 ## Plugins
 
 Digia Engage has a plugin architecture for CEP integrations.

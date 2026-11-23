@@ -70,6 +70,10 @@ public enum DropReason: String, CaseIterable, Sendable {
     /// No host was mounted when the render was due.
     case hostNotMounted = "host_not_mounted"
 
+    /// The host app had a modal of its own open when a nudge or survey was about to show, so it would
+    /// have been refused or drawn under it. Dropped at once, never queued.
+    case hostModalOpen = "host_modal_open"
+
     /// Watchdog: no verdict, or no layout, in time.
     case timeout = "timeout"
 

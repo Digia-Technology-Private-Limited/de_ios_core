@@ -34,6 +34,7 @@ struct CEPInterfaceEnumValuesTests {
         #expect(DropReason.superseded.value == "superseded")
         #expect(DropReason.hostSuppressed.value == "host_suppressed")
         #expect(DropReason.hostNotMounted.value == "host_not_mounted")
+        #expect(DropReason.hostModalOpen.value == "host_modal_open")
         #expect(DropReason.timeout.value == "timeout")
         #expect(DropReason.cancelled.value == "cancelled")
         #expect(DropReason.pluginDetached.value == "plugin_detached")
@@ -46,7 +47,7 @@ struct CEPInterfaceEnumValuesTests {
         #expect(DropReason.chanceExpired.value == "chance_expired")
         #expect(DropReason.notEligible.value == "user_held_out")
         #expect(DropReason.error.value == "error")
-        #expect(DropReason.allCases.count == 24)
+        #expect(DropReason.allCases.count == 25)
     }
 
     @Test("DismissReason values")

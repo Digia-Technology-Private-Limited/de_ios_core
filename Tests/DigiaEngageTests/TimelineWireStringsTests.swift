@@ -47,6 +47,8 @@ struct TimelineWireStringsTests {
         #expect(TimelineReason.pluginNotRegistered.wire == "plugin_not_registered")
         #expect(TimelineReason.unsupportedActionType.wire == "unsupported_action_type")
         #expect(TimelineReason.mediaLoadFailed.wire == "media_load_failed")
+        #expect(TimelineReason.hostTeardown.wire == "host_teardown")
+        #expect(TimelineReason.storyPresentFailed.wire == "story_present_failed")
         #expect(TimelineReason.actionHandlerMissing.wire == "action_handler_missing")
         #expect(TimelineReason.surveySubmissionFailed.wire == "survey_submission_failed")
         #expect(TimelineReason.appEventInvalid.wire == "app_event_invalid")
@@ -70,7 +72,7 @@ struct TimelineWireStringsTests {
         #expect(TimelineReason.waitCancelled.wire == "wait_cancelled")
         #expect(TimelineReason.waitEnded.wire == "wait_ended")
         #expect(CEPPluginReason.bridgeUnavailable.wire == "cep_bridge_unavailable")
-        #expect(TimelineReason.allCases.count == 44)
+        #expect(TimelineReason.allCases.count == 46)
     }
 
     /// The delivery enums *are* the timeline's reasons for a delivery — no
@@ -128,12 +130,14 @@ struct TimelineWireStringsTests {
                 "app_event_blocked",
                 "app_event_queue_full",
                 "digia_managed",
+                "story_present_failed",
             ])
     }
 
     @Test("HealthReasons detail-key projections")
     func healthReasonsDetailKeys() {
         #expect(HealthReasons.detailKeys["timeout"] == ["surface_kind"])
+        #expect(HealthReasons.detailKeys["story_present_failed"] == ["cause"])
         #expect(HealthReasons.detailKeys["pending_expired"] == ["cep"])
         #expect(HealthReasons.detailKeys["superseded"] == ["cep"])
         #expect(HealthReasons.detailKeys["unknown_campaign_key"] == [])

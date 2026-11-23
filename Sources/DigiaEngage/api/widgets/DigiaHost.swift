@@ -7,22 +7,35 @@ public struct DigiaHost<Content: View>: View {
     private let content: Content
     @ObservedObject private var controller = SDKInstance.shared.controller
     @ObservedObject private var surveyOrchestrator = SDKInstance.shared.surveyOrchestrator
+    @ObservedObject private var hosts = HostRegistry.shared
+    /// This host's identity in `HostRegistry`, which decides which host draws when there are several.
+    @State private var hostId: UUID
 
     public init(@ViewBuilder content: () -> Content) {
         self.content = content()
+        _hostId = State(initialValue: UUID())
     }
+
+    /// For `DigiaHostView`, which must know the id to stop taking touches while another host draws.
+    init(hostId: UUID, @ViewBuilder content: () -> Content) {
+        self.content = content()
+        _hostId = State(initialValue: hostId)
+    }
+
+    /// Only the active host draws (`HostRegistry`): with more than one host under `Digia.attach(to:)`,
+    /// every other one renders just its content.
+    private var drawsOverlays: Bool { hosts.isActive(hostId) }
 
     public var body: some View {
         ZStack {
             content
-                .onAppear { SDKInstance.shared.onHostMounted() }
-                .onDisappear { SDKInstance.shared.onHostUnmounted() }
 
             // Above the floaters (3): a guide may show over a collapsed floater
             // (surface rule), and must be drawn over it like a nudge or survey.
             GuideOverlayView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .zIndex(3.5)
+                .shownIf(drawsOverlays)
 
             // Between guide and survey/nudge: lets a survey/nudge that starts
             // while a floater is collapsed cover it "for free" via layering,
@@ -44,25 +57,43 @@ public struct DigiaHost<Content: View>: View {
             // dispatch to disagree with itself across.
             FloaterOverlayView()
                 .zIndex(3)
+                .shownIf(drawsOverlays)
 
             // Beside it, at the same layer: the two floater subtypes are separate
             // campaigns, and only one of them can ever be on screen at a time.
             FloaterStoryOverlayView()
                 .zIndex(3)
+                .shownIf(drawsOverlays)
 
             NudgeOverlayView()
                 .zIndex(5)
+                .shownIf(drawsOverlays)
 
             SurveyRenderer(orchestrator: surveyOrchestrator)
                 .zIndex(4)
+                .shownIf(drawsOverlays)
 
             RecordingBadgeView()
                 .zIndex(6)
+                .shownIf(drawsOverlays)
 
             CaptureFlashView()
                 .zIndex(7)
+                .shownIf(drawsOverlays)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // On the full-size host, not on `content`: SwiftUI never reports an `EmptyView` appearing, and
+        // that is the content of every UIKit and React Native host.
+        .onAppear { SDKInstance.shared.onHostMounted(hostId) }
+        .onDisappear { SDKInstance.shared.onHostUnmounted(hostId) }
+    }
+}
+
+private extension View {
+    /// The view, or nothing at all: no drawing, no touches, no presentations.
+    @ViewBuilder
+    func shownIf(_ shown: Bool) -> some View {
+        if shown { self }
     }
 }
 

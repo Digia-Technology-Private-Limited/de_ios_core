@@ -41,13 +41,14 @@ struct DigiaInlineStoryView: View {
     }
 
     private func openStory(at index: Int) {
-        SDKInstance.shared.storyReporter.reportStoryOpened(payload)
-        SDKInstance.shared.storyReporter.reportClassicStoryOpened(payload, index: index)
-        SDKInstance.shared.controller.showStoryOverlay(
+        // Reported only for a story that was shown.
+        guard SDKInstance.shared.controller.showStoryOverlay(
             config: config,
             initialIndex: index,
             payload: payload
-        )
+        ) else { return }
+        SDKInstance.shared.storyReporter.reportStoryOpened(payload)
+        SDKInstance.shared.storyReporter.reportClassicStoryOpened(payload, index: index)
     }
 
     private var rail: some View {
@@ -489,7 +490,10 @@ final class DigiaStoryPresenter {
 
     private init() {}
 
-    func present(state: InlineStoryOverlayState) {
+    /// Presents the story, answering why it could not: `no_presenter`, `presenter_transitioning` (UIKit refuses to present from a controller mid
+    /// present or dismiss) or `present_refused`; nil once presented.
+    @discardableResult
+    func present(state: InlineStoryOverlayState) -> String? {
         // Replace any story already showing (e.g. tapping another story).
         // Tear the old one down without animation so it doesn't collide with
         // the incoming present.
@@ -498,7 +502,8 @@ final class DigiaStoryPresenter {
             presented.presentingViewController?.dismiss(animated: false)
         }
 
-        guard let presenter = ViewControllerUtil.topViewController() else { return }
+        guard let presenter = ViewControllerUtil.topViewController() else { return "no_presenter" }
+        if presenter.isBeingPresented || presenter.isBeingDismissed { return "presenter_transitioning" }
 
         let host = DigiaStoryHostingController(
             rootView: InlineStoryOverlayContent(state: state)
@@ -510,12 +515,26 @@ final class DigiaStoryPresenter {
         host.modalTransitionStyle = .crossDissolve
         presented = host
         presenter.present(host, animated: true)
+        if presenter.presentedViewController !== host {
+            presented = nil
+            return "present_refused"
+        }
+        return nil
     }
 
     func dismiss() {
         guard let presented else { return }
         self.presented = nil
         presented.presentingViewController?.dismiss(animated: true)
+    }
+
+    /// UIKit took a story down without the SDK asking (the app dismissed it, or its root went away). Clears the
+    /// story state, else `hasActiveOverlay` stays true and the host swallows every touch. Not for a story a
+    /// newer one already replaced.
+    func storyWentAway(_ controller: UIViewController) {
+        guard presented == nil || presented === controller else { return }
+        presented = nil
+        SDKInstance.shared.controller.storyOverlayEnded()
     }
 }
 
@@ -542,6 +561,14 @@ private final class DigiaStoryHostingController<Content: View>: UIHostingControl
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         becomeFirstResponder()
+    }
+
+    /// Dismissed, by the SDK or from outside it. Covered by something presented on top is not a dismissal.
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        if isBeingDismissed || presentingViewController == nil {
+            DigiaStoryPresenter.shared.storyWentAway(self)
+        }
     }
 
     @objc private func dismissStoryOverlay() {

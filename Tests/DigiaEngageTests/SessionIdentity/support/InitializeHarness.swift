@@ -27,7 +27,7 @@ final class InitializeHarness {
     func launch() {
         let network = network
         var session: CurrentSessionRef?
-        sdk = SDKInstance(
+        sdk = { let instance = SDKInstance(
             defaults: defaults,
             legacyDefaults: UserDefaults(suiteName: "digia.test.legacy.\(UUID().uuidString)")!,
             makeNetworkClient: { ref in
@@ -36,7 +36,7 @@ final class InitializeHarness {
             },
             clock: clock.closure,
             makeAnalyticsQueue: { [analyticsQueue] _ in analyticsQueue }
-        )
+        ); instance.onHostMounted(SDKInstance.testHostId); return instance }()
         self.session = session
     }
 
