@@ -37,10 +37,10 @@ struct InlineStoryStripBehaviourTests {
     }
 
     /// Five items are authored: one with an empty URL, one with none, one whose URL is wrapped as
-    /// `{"value": …}` and two plain ones. The wrapped URL is read, as in Flutter, so three stay, and
-    /// a tap opens the item at its place among those that stayed.
+    /// `{"value": …}` and two plain ones. The wrapped URL is not a usable url, so only the two
+    /// plain ones stay, and a tap opens the item at its place among those that stayed.
     // Fails if: Sources/DigiaEngage/api/internal/campaign/inline_story_config.swift:36
-    // `guard let url = storyLiteral(json["url"]) as? String, !url.isEmpty else { return nil }` ->
+    // `guard let url = json["url"] as? String, !url.isEmpty else { return nil }` ->
     // `let url = json["url"] as? String ?? ""` (the items with no media stay in the rail, and the
     // second card is the 2nd of five).
     @Test("items without media are dropped, and a tap opens the item at its place among the ones that stayed")
@@ -49,7 +49,7 @@ struct InlineStoryStripBehaviourTests {
         defer { sdk.tearDown() }
 
         #expect(config.items.allSatisfy { !$0.url.isEmpty })
-        #expect(config.items.count == 3)
+        #expect(config.items.count == 2)
 
         try await sdk.tapStoryCard(1, in: frame, card: config.card)
         try await sdk.waitForStoryViewer()

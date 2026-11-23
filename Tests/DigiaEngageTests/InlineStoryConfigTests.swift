@@ -58,6 +58,30 @@ struct InlineStoryConfigTests {
         #expect(!legacy.startMuted)
     }
 
+    @Test("a {value} envelope is not unwrapped: wrapped urls are dropped, wrapped flags stay default")
+    func dropsValueEnvelopes() throws {
+        let config = try #require(InlineStoryConfig.fromJson([
+            "slotKey": "home_stories",
+            "items": [
+                ["type": "image", "url": ["value": "https://example.com/wrapped.jpg"]],
+                ["type": "image", "url": "https://example.com/plain.jpg", "ctaEnabled": ["value": true]],
+                ["type": "image", "url": "https://example.com/cta.jpg", "ctaEnabled": true],
+            ],
+        ]))
+
+        #expect(config.items.count == 2)
+        #expect(config.items[0].url == "https://example.com/plain.jpg")
+        #expect(config.items[0].ctaEnabled == false)
+        #expect(config.items[1].url == "https://example.com/cta.jpg")
+        #expect(config.items[1].ctaEnabled == true)
+
+        let onlyWrapped = InlineStoryConfig.fromJson([
+            "slotKey": "home_stories",
+            "items": [["type": "image", "url": ["value": "https://example.com/wrapped.jpg"]]],
+        ])
+        #expect(onlyWrapped == nil)
+    }
+
     private func baseStory() -> [String: Any] {
         [
             "slotKey": "home_stories",
