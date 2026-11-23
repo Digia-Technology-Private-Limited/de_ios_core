@@ -90,8 +90,9 @@ enum GameHttpBridge {
 
     /// Sends one skin call and maps the outcome to a bridge answer: `{status,
     /// body}` on 2xx and 4xx, `server` on 5xx, `network` on any other status
-    /// or transport failure, `timeout` on a timeout. The method rides verbatim
-    /// from the intake; only exact `GET`/`POST` run — anything else answers
+    /// (a redirect is not followed, so a 3xx lands here) or transport
+    /// failure, `timeout` on a timeout. The method rides verbatim from the
+    /// intake; only exact `GET`/`POST` run — anything else answers
     /// `bad_request` without touching the network, like Android's
     /// `GameHttpBridge.call`.
     static func send(
@@ -115,7 +116,8 @@ enum GameHttpBridge {
             response = try await client.execute(request: NetworkRequest(
                 url: url, method: httpMethod, headers: headers,
                 body: httpMethod == .post ? body : nil,
-                connectTimeout: timeoutSeconds, readTimeout: timeoutSeconds))
+                connectTimeout: timeoutSeconds, readTimeout: timeoutSeconds,
+                followRedirects: false))
         } catch {
             if gameTransportIsTimeout(error) {
                 return .failure(Failure(code: .timeout, status: nil))
