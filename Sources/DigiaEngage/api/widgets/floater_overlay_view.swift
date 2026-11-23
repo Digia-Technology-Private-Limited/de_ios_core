@@ -1020,7 +1020,11 @@ private struct FloaterChromeView: View {
         let collapsedIconSize = config.controls.iconSize
         let collapsedMargin = config.controls.margin
         let showsProgress = config.controls.showProgress && config.media.kind.isPlayable
-        let bottomInset: CGFloat = showsProgress ? 8 : collapsedMargin.bottom
+        // Lifted clear of the progress bar so the two never overlap on a window
+        // this small: the authored bottom margin plus the bar's own 4pt, the same
+        // rule Flutter's `bottomInset` uses (`controlsMargin.bottom + 4`), so the
+        // chrome sits at the same height on every stack.
+        let bottomInset: CGFloat = showsProgress ? collapsedMargin.bottom + 4 : collapsedMargin.bottom
         let showsMute = config.controls.showMute && config.media.kind == .video
         let showsPlayPause = config.controls.showPlayPause && config.media.kind.isPlayable
 
@@ -1079,9 +1083,16 @@ private struct FloaterChromeView: View {
                     .padding(.bottom, bottomInset)
                 }
             }
-            .overlay {
+            .overlay(alignment: .bottom) {
                 if showsProgress {
                     FloaterProgressBarView(orchestrator: orchestrator)
+                        // The window border straddles the window's edge
+                        // (SwiftUI strokes centre on the path), so its inner
+                        // half would bury the bar's lower rows: lift the bar
+                        // above it, so the full 4pt reads exactly like
+                        // Flutter's, whose bar sits directly above its border
+                        // in the goldens.
+                        .padding(.bottom, config.collapsed.borderWidthDp / 2)
                 }
             }
     }
@@ -1390,16 +1401,19 @@ private struct FloaterProgressBarView: View {
     private let timer = Timer.publish(every: 0.2, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        VStack {
-            Spacer()
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Color.white.opacity(0.3)
-                    Color.white.opacity(0.9).frame(width: geo.size.width * fraction)
-                }
+        // Bottom-anchored explicitly (the overlay above requests it): a bare
+        // centred overlay sized this stack to its ideal size instead of the
+        // window's, so the bar never reached the bottom edge it belongs to.
+        // Geometry matches Flutter's indicator: a 4pt bar (its
+        // `LinearProgressIndicator` default height), white at 0.9 played over
+        // white at 0.3, full-bleed along the bottom edge.
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Color.white.opacity(0.3)
+                Color.white.opacity(0.9).frame(width: geo.size.width * fraction)
             }
-            .frame(height: 2)
         }
+        .frame(height: 4)
         .onReceive(timer) { _ in
             guard let player = orchestrator.player,
                 let duration = player.currentItem?.duration.seconds,
