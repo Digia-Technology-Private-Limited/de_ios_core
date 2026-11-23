@@ -22,9 +22,7 @@ struct RecordingBadgeView: View {
 @MainActor
 private struct DraggableBadge: View {
     private static let margin: CGFloat = 8
-    // Cleared well below a typical nav bar, not just the status bar — a
-    // host's headerShown nav bar would otherwise sit right in that gap.
-    private static let defaultTopClearance: CGFloat = 100
+    private static let defaultTopClearance: CGFloat = 8
 
     @State private var offset: CGSize?
     @State private var dragStartOffset: CGSize?
