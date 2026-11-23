@@ -12,8 +12,6 @@ extension DigiaEndpoints {
 struct GameRewardChance: Equatable, Sendable {
     let chanceId: String
     let campaignId: String
-    let format: String?
-    let rewardsPageTitle: String?
     let expiresAt: Date?
     /// A chance with `playable: false` shows as unavailable, never hidden.
     let playable: Bool
@@ -23,8 +21,6 @@ struct GameRewardChance: Equatable, Sendable {
         return GameRewardChance(
             chanceId: chanceId,
             campaignId: raw.nonBlankString("campaignId") ?? "",
-            format: raw.nonBlankString("format"),
-            rewardsPageTitle: raw.nonBlankString("rewardsPageTitle"),
             expiresAt: Self.expiry(raw["expiresAt"]),
             playable: Self.strictBool(raw["playable"]) ?? true
         )
@@ -57,74 +53,22 @@ struct GameRewardChance: Equatable, Sendable {
     }
 }
 
-/// One grant from `getRewards`, in any of the active/used/expired-grants
-/// lists. The backend's flat grant shape: the copy plus its id, no nested
-/// objects. An unknown `type` skips the grant; a grant with nothing to show
-/// is dropped at parse time so the lists never render an empty row.
+/// The widget's latest reward, from the backend's flat grant shape: the name
+/// and code it shows. An unknown `type` skips the grant; a grant with nothing
+/// to show is dropped at parse time so the widget never renders an empty row.
 struct GameReward: Equatable, Sendable {
-    let grantId: String
-    let expiresAt: Date?
     let name: String?
-    let type: GameRewardType
-    let imageUrl: String?
-    let offeredBy: String?
-    let partnerName: String?
-    let bannerImageUrl: String?
-    let headline: String?
-    let description: String?
-    let terms: String?
-    let referenceKey: String?
-    let value: GameRewardValue?
-    let howToUse: String?
-    /// The grant CTA's label and deep link. A missing label renders as
-    /// "Use now".
-    let ctaLabel: String?
-    let ctaDeepLink: String?
     let code: String?
-    let amount: Double?
-    let unit: String?
-    let displayText: String?
 
     static func fromJson(_ raw: [String: Any]) -> GameReward? {
-        guard let grantId = raw.nonBlankString("grantId"),
+        guard raw.nonBlankString("grantId") != nil,
               let typeRaw = raw.nonBlankString("type"),
-              let type = GameRewardType(rawValue: typeRaw)
+              GameRewardType(rawValue: typeRaw) != nil,
+              ["name", "code", "description", "howToUse", "headline", "displayText", "imageUrl"]
+                .contains(where: { raw.nonBlankString($0) != nil })
+                || raw.object("cta")?.nonBlankString("deepLink") != nil
         else { return nil }
-        let cta = raw.object("cta") ?? [:]
-        let reward = GameReward(
-            grantId: grantId,
-            expiresAt: GameRewardChance.expiry(raw["expiresAt"]),
-            name: raw.nonBlankString("name"),
-            type: type,
-            imageUrl: raw.nonBlankString("imageUrl"),
-            offeredBy: raw.nonBlankString("offeredBy"),
-            partnerName: raw.nonBlankString("partnerName"),
-            bannerImageUrl: raw.nonBlankString("bannerImageUrl"),
-            headline: raw.nonBlankString("headline"),
-            description: raw.nonBlankString("description"),
-            terms: raw.nonBlankString("terms"),
-            referenceKey: raw.nonBlankString("referenceKey"),
-            value: (raw.object("value")).flatMap(GameRewardValue.fromJson),
-            howToUse: raw.nonBlankString("howToUse"),
-            ctaLabel: cta.nonBlankString("label"),
-            ctaDeepLink: cta.nonBlankString("deepLink"),
-            code: raw.nonBlankString("code"),
-            amount: Self.number(raw["amount"]),
-            unit: raw.nonBlankString("unit"),
-            displayText: raw.nonBlankString("displayText")
-        )
-        guard reward.name != nil || reward.code != nil || reward.description != nil
-            || reward.howToUse != nil || reward.headline != nil || reward.displayText != nil
-            || reward.imageUrl != nil || reward.ctaDeepLink != nil
-        else { return nil }
-        return reward
-    }
-
-    /// A JSON number as a Double. Non-numbers and non-finite values read as nil.
-    private static func number(_ raw: Any?) -> Double? {
-        guard let value = raw as? NSNumber, CFGetTypeID(value) != CFBooleanGetTypeID() else { return nil }
-        let double = value.doubleValue
-        return double.isFinite ? double : nil
+        return GameReward(name: raw.nonBlankString("name"), code: raw.nonBlankString("code"))
     }
 }
 
@@ -135,44 +79,10 @@ enum GameRewardType: String, Equatable, Sendable {
     case perk
 }
 
-/// A grant's value, in integer minor units with an ISO currency code.
-struct GameRewardValue: Equatable, Sendable {
-    let amountMinor: Int
-    let currency: String
-
-    static func fromJson(_ raw: [String: Any]) -> GameRewardValue? {
-        guard let amount = raw["amountMinor"] as? NSNumber,
-              CFGetTypeID(amount) != CFBooleanGetTypeID(),
-              let currency = raw.nonBlankString("currency")
-        else { return nil }
-        return GameRewardValue(amountMinor: amount.intValue, currency: currency)
-    }
-}
-
-/// One spent chance from `getRewards`: it had a game, but it expired
-/// unplayed. Renders in the expired section under its page title.
-struct GameExpiredChance: Equatable, Sendable {
-    let chanceId: String
-    let campaignId: String
-    let rewardsPageTitle: String?
-    let expiredAt: Date?
-
-    static func fromJson(_ raw: [String: Any]) -> GameExpiredChance? {
-        guard let chanceId = raw.nonBlankString("chanceId") else { return nil }
-        return GameExpiredChance(
-            chanceId: chanceId,
-            campaignId: raw.nonBlankString("campaignId") ?? "",
-            rewardsPageTitle: raw.nonBlankString("rewardsPageTitle"),
-            expiredAt: GameRewardChance.expiry(raw["expiredAt"])
-        )
-    }
-}
-
 /// The `widget` object of `getRewards`: what the `digia_rewards_widget` slot
 /// shows, and what its tap does. A null widget — including for holdout users —
 /// degrades to the same hidden slot as an unknown content kind.
 struct GameRewardsWidget: Equatable, Sendable {
-    let layoutKey: String?
     /// `soonestChance` opens the soonest playable chance, `rewardsPage`
     /// opens the page. Unknown values open the page.
     let tapAction: String?
@@ -180,7 +90,6 @@ struct GameRewardsWidget: Equatable, Sendable {
 
     static func fromJson(_ raw: [String: Any]) -> GameRewardsWidget {
         GameRewardsWidget(
-            layoutKey: raw["layoutKey"] as? String,
             tapAction: raw.nonBlankString("tapAction"),
             content: (raw.object("content")).flatMap(GameRewardsWidgetContentData.fromJson)
         )
@@ -237,8 +146,8 @@ enum GameRewardsTap: Equatable, Sendable {
     case openPage
 }
 
-/// The `getRewards` response: `{ chances, campaigns, rewards: { active, used,
-/// expired: { grants, chances } }, widget, emptyMessage }`. A chance whose
+/// The `getRewards` response fields the SDK reads: `{ chances, campaigns,
+/// widget, page }`. A chance whose
 /// campaign is paused or ended is not in the campaign bundle; its campaign
 /// comes in `campaigns` in the same shape as the bundle.
 struct GameRewardsResponse {
@@ -246,36 +155,19 @@ struct GameRewardsResponse {
     /// Raw campaign JSONs for paused/ended campaigns, same shape as the
     /// bundle. Parsed by `SDKInstance` when the response is stored.
     let campaigns: [[String: Any]]
-    let active: [GameReward]
-    let used: [GameReward]
-    let expiredGrants: [GameReward]
-    let expiredChances: [GameExpiredChance]
     let widget: GameRewardsWidget?
-    let emptyMessage: String?
     /// `page.url`: where the hosted rewards page lives for this environment.
     var pageUrl: String? = nil
-
-    var isEmpty: Bool {
-        chances.isEmpty && active.isEmpty && used.isEmpty
-            && expiredGrants.isEmpty && expiredChances.isEmpty
-    }
 
     static func fromJson(_ raw: [String: Any]) -> GameRewardsResponse {
         let chances =
             raw.objectArray("chances")
             .compactMap(GameRewardChance.fromJson)
             .sorted { ($0.expiresAt ?? .distantFuture) < ($1.expiresAt ?? .distantFuture) }
-        let rewards = raw.object("rewards") ?? [:]
-        let expired = rewards.object("expired") ?? [:]
         return GameRewardsResponse(
             chances: chances,
             campaigns: raw.objectArray("campaigns"),
-            active: rewards.objectArray("active").compactMap(GameReward.fromJson),
-            used: rewards.objectArray("used").compactMap(GameReward.fromJson),
-            expiredGrants: expired.objectArray("grants").compactMap(GameReward.fromJson),
-            expiredChances: expired.objectArray("chances").compactMap(GameExpiredChance.fromJson),
             widget: raw.object("widget").map(GameRewardsWidget.fromJson),
-            emptyMessage: raw.nonBlankString("emptyMessage"),
             pageUrl: raw.object("page")?.nonBlankString("url")
         )
     }

@@ -455,8 +455,8 @@ final class RewardsPageViewController: UIViewController, WKNavigationDelegate, W
             guard state == .ready else { return }
             SDKInstance.shared.gamification.openGameForRewardsChance(
                 GameRewardChance(
-                    chanceId: chanceId, campaignId: campaignId, format: nil,
-                    rewardsPageTitle: nil, expiresAt: nil, playable: true))
+                    chanceId: chanceId, campaignId: campaignId, expiresAt: nil,
+                    playable: true))
         case .openLink(let raw):
             open(link: raw)
         case .copy(let text):
