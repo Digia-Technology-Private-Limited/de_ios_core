@@ -13,6 +13,13 @@ struct DigiaInlineBannerView: View {
         config.actions.filter { !$0.resolved(with: variables).hasEmptyPayload }
     }
 
+    /// Grey while the image is loading or has failed; a loaded image is transparent.
+    @State private var imageLoaded = false
+
+    private var imageURL: URL? {
+        URL(string: interpolate(config.image.url, context: variables))
+    }
+
     var body: some View {
         Group {
             if actions.isEmpty {
@@ -46,16 +53,21 @@ struct DigiaInlineBannerView: View {
 
     private var image: some View {
         ZStack {
-            Color(red: 241 / 255, green: 241 / 255, blue: 245 / 255)
-            if let url = URL(string: interpolate(config.image.url, context: variables)) {
+            if !imageLoaded {
+                Color(red: 241 / 255, green: 241 / 255, blue: 245 / 255)
+            }
+            if let url = imageURL {
                 fitted(DigiaCachedImageView(
                     url: url,
-                    placeholder: AnyView(BlurHashPlaceholderView(placeholder: config.image.placeholder, fit: config.image.boxFit.rawValue))
+                    placeholder: AnyView(BlurHashPlaceholderView(placeholder: config.image.placeholder, fit: config.image.boxFit.rawValue)),
+                    onSuccess: { _ in imageLoaded = true },
+                    onFailure: { imageLoaded = false }
                 ))
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: config.image.cornerRadius))
+        .onChange(of: imageURL) { _ in imageLoaded = false }
     }
 
     @ViewBuilder
