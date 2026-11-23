@@ -803,6 +803,8 @@ struct GamePlayed: EngageAnalyticsEvent, Equatable, Sendable {
     let currency: String?
     let fallback: Bool
     let playNumber: Int
+    /// Where the window opened, as on `GameEvent`; left off the wire when nil.
+    var entry: String? = nil
 
     var isReplay: Bool { playNumber > 1 }
 
@@ -819,6 +821,7 @@ struct GamePlayed: EngageAnalyticsEvent, Equatable, Sendable {
             ("fallback", fallback),
             ("play_number", playNumber),
             ("is_replay", isReplay),
+            ("entry", entry),
         ])
     }
 }

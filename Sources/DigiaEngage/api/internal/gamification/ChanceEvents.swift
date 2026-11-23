@@ -41,8 +41,11 @@ func grantEventsOf(
 /// plus `Chance Granted` (source `extraPlay`) when it carries an `extraChance`.
 /// `request` is the skin's `/play` body (its `chanceId`); `envelope` is
 /// `{isSuccess, data: {response}}`. `playNumber` is this play's 1-based number in
-/// the window. The caller gates test invocations. Mirrors Android's `playEventsOf`.
-func playEventsOf(request: [String: Any]?, envelope: Any?, playNumber: Int) -> [ChanceEvent] {
+/// the window; `entry` is where the window opened, carried on `Game Played`. The
+/// caller gates test invocations. Mirrors Android's `playEventsOf`.
+func playEventsOf(
+    request: [String: Any]?, envelope: Any?, playNumber: Int, entry: String? = nil
+) -> [ChanceEvent] {
     guard let data = (envelope as? [String: Any])?["data"] as? [String: Any],
           let answer = data["response"] as? [String: Any],
           isTrue(answer["isNew"])
@@ -59,7 +62,8 @@ func playEventsOf(request: [String: Any]?, envelope: Any?, playNumber: Int) -> [
             valueMinor: ChanceNumber(value?["amountMinor"]),
             currency: value.flatMap { text($0, "currency") },
             fallback: isTrue(answer["fallback"]),
-            playNumber: playNumber)),
+            playNumber: playNumber,
+            entry: entry)),
     ]
     if let extra = answer["extraChance"] as? [String: Any],
        let chanceId = text(extra, "chanceId")

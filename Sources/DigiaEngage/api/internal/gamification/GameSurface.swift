@@ -432,12 +432,6 @@ final class GameSurface {
         // What this window did, for `Dismissed`: one per open, so play again
         // and play next keep counting into the same window.
         let stats = GameWindowStats(chanceId: chanceId)
-        let dismissed: (String) -> GameEvent.Dismissed = { reason in
-            GameEvent.Dismissed(
-                reason: reason, dwellMs: stats.dwellMs(), chanceId: stats.chanceId,
-                skinId: config.skinId, skinVersion: config.skinVersion,
-                plays: stats.plays, playRefused: stats.playRefused)
-        }
         // The live-test invocation the trigger carried, if any: the grant was asked
         // with it, and both the skin's `state` call and the close-time `state` call
         // need it back so a draft campaign answers. Derived here — never stored —
@@ -451,6 +445,12 @@ final class GameSurface {
         case .rewards:
             openTestInvocationId = nil
             entryValue = "rewards"
+        }
+        let dismissed: (String) -> GameEvent.Dismissed = { reason in
+            GameEvent.Dismissed(
+                reason: reason, dwellMs: stats.dwellMs(), chanceId: stats.chanceId,
+                skinId: config.skinId, skinVersion: config.skinVersion,
+                plays: stats.plays, playRefused: stats.playRefused, entry: entryValue)
         }
         let openedFromEntry: Bool
         if case .presentation(_, let entry) = settle, entry == .inlineTeaser || entry == .floating {
@@ -524,7 +524,8 @@ final class GameSurface {
             onCta: { [weak self] op, actionUrl in
                 guard let self else { return }
                 self.sdk.events.toDigia(
-                    GameEvent.Clicked(elementId: op, chanceId: stats.chanceId, actionUrl: actionUrl),
+                    GameEvent.Clicked(
+                        elementId: op, chanceId: stats.chanceId, actionUrl: actionUrl, entry: entryValue),
                     payload: Self.payload(settle: settle, campaign: campaign))
             },
             onShown: { [weak self] in
@@ -537,7 +538,7 @@ final class GameSurface {
                 let viewed = GameEvent.Viewed(
                     chanceId: stats.chanceId, skinId: config.skinId, skinVersion: config.skinVersion,
                     warm: timing.warm ?? GamePrewarmer.warmKind(campaignKey: campaignKey),
-                    tier: GamePrewarmer.deviceTier(), msToReady: timing.msElapsed)
+                    tier: GamePrewarmer.deviceTier(), msToReady: timing.msElapsed, entry: entryValue)
                 self?.shown(settle: settle, campaign: campaign, viewed: viewed)
             },
             onHttpAnswer: { [weak self] path, request, response in
@@ -555,7 +556,7 @@ final class GameSurface {
                 if !openedFromEntry || playNumber > 1 {
                     let elementId = playNumber == 1 ? Self.clickPlay : Self.clickPlayAgain
                     self.sdk.events.toDigia(
-                        GameEvent.Clicked(elementId: elementId, chanceId: stats.chanceId),
+                        GameEvent.Clicked(elementId: elementId, chanceId: stats.chanceId, entry: entryValue),
                         payload: payload)
                     if openedDirect {
                         self.sdk.events.clicked(payload: payload, elementId: elementId)
@@ -565,7 +566,8 @@ final class GameSurface {
                 // facts, to Digia only, never for a test invocation.
                 if openTestInvocationId == nil {
                     self.sdk.events.forwardChanceEvents(
-                        playEventsOf(request: request, envelope: response, playNumber: playNumber),
+                        playEventsOf(
+                            request: request, envelope: response, playNumber: playNumber, entry: entryValue),
                         payload: payload)
                 }
             },

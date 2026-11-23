@@ -36,9 +36,11 @@ struct GameChanceEventsAndCepTests {
         events.filter { $0["event_name"] as? String == name }
     }
 
-    /// A game's open request, as `GameSurface.open` builds it.
+    /// A game's open request, as `GameSurface.open` builds it; `settle` defaults
+    /// to a presentation open from `entry`.
     private func directOpenRequest(
-        _ sdk: SDKInstance, recorder: PresentationRecorder, entry: GamificationEntryKind = .direct
+        _ sdk: SDKInstance, recorder: PresentationRecorder, entry: GamificationEntryKind = .direct,
+        settle: GameSettle? = nil
     ) throws -> GameOpenRequest {
         let config = try #require(GamificationConfig.fromJson([
             "skinId": "wheel", "skinVersion": 2,
@@ -51,7 +53,7 @@ struct GameChanceEventsAndCepTests {
         return sdk.gameSurface.makeGameOpenRequest(
             file: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("index.html"),
             chanceId: "ch-1", config: config, campaign: campaign, payload: recorder.payload,
-            userId: "u_123", settle: .presentation(payload: recorder.payload, entry: entry))
+            userId: "u_123", settle: settle ?? .presentation(payload: recorder.payload, entry: entry))
     }
 
     private static func envelope(_ response: [String: Any]) -> [String: Any] {
@@ -226,6 +228,38 @@ struct GameChanceEventsAndCepTests {
         #expect(recorder.dismissReason == nil)
         let dismissed = named("Digia Experience Dismissed", in: try await digiaEvents(sdk))
         #expect(dismissed.count == 2)
+    }
+
+    // Fails if a funnel event stops saying where its window opened: the
+    // `entryValue` derivation in `makeGameOpenRequest`, the `entry: entryValue`
+    // arguments on Viewed, both Clicked, Dismissed and `playEventsOf`, or the
+    // `properties["entry"]` / `("entry", entry)` lines in their `properties`. The
+    // rewards open keeps its synthetic `rewards:<chanceId>` payload; `entry` rides beside it.
+    @Test("funnel events carry the open origin: direct and rewards")
+    func funnelEventsCarryTheOpenOrigin_directAndRewards() async throws {
+        for (rewards, origin) in [(false, "direct"), (true, "rewards")] {
+            let (sdk, recorder) = try await rig()
+            let request = try directOpenRequest(
+                sdk, recorder: recorder, settle: rewards ? .rewards(chanceId: "ch-1") : nil)
+
+            request.onShown?()
+            request.onHttpAnswer?(
+                "play", ["chanceId": "ch-1"], Self.envelope(["outcomeKey": "slot-1", "isNew": true]))
+            request.onCta?("copy", nil)
+            request.onClose?("skin")
+
+            let funnelNames = [
+                "Digia Experience Viewed", "Digia Experience Clicked",
+                "Digia Game Played", "Digia Experience Dismissed",
+            ]
+            let funnel = try await digiaEvents(sdk).filter {
+                funnelNames.contains($0["event_name"] as? String ?? "")
+            }
+            #expect(Set(funnel.compactMap { $0["event_name"] as? String }) == Set(funnelNames), "\(origin)")
+            for event in funnel {
+                #expect(Self.props(event)["entry"] as? String == origin, "\(origin) \(event["event_name"] ?? "")")
+            }
+        }
     }
 
     // Fails if an entry's close stops asking `state` about the chance the game
