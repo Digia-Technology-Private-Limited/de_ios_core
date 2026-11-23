@@ -2,6 +2,25 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
+## [4.5.0] - 2026-11-23
+
+### New Features
+
+- Added `DigiaHostViewController`, `DigiaHostView` and `DigiaSlotView` so UIKit apps can show campaigns and inline slots without SwiftUI.
+- Added `Digia.attach(to:)` to add Digia's layer to your window's root, which must be a plain view controller.
+
+### Improvements
+
+- Breaking: nudges and surveys that arrive while your app presents its own modal now drop as the new `DropReason.hostModalOpen`; add it to exhaustive switches.
+- Campaigns that cannot show because no Digia host is on screen are now reported to your messaging platform as not mounted instead of timed out.
+- An open story now turns new nudges and surveys away instead of drawing them hidden behind it.
+
+### Bug Fixes
+
+- Campaigns on screen when your app replaces its root now end as cancelled, and a system teardown is no longer reported as the user closing them.
+- A story that cannot be presented is no longer treated as open, which blocked other campaigns and sent a Story Opened event.
+- A cancelled guide now has its next showing recorded as displayed.
+
 ## [4.4.0] - 2026-11-17
 
 ### New Features
