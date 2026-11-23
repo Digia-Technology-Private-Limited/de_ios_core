@@ -260,7 +260,12 @@ final class GameSurface {
             if entry != .inlineTeaser, entry != .floating, reason != GamePresentation.cancelledReason {
                 sdk.events.toCep(.dismissed(reason: Self.dismissReason(closeReason: reason)), payload: payload)
             }
-            sdk.gamification.refreshRewardsIfLoaded()
+            // A live test wins nothing real, so there is nothing to refresh — and the
+            // refresh's failure event rides `rewards:refresh`, which is not a live-test
+            // id and would escape live-test suppression. Matches Android.
+            if testInvocationIdOf(payload.cepCampaignId) == nil {
+                sdk.gamification.refreshRewardsIfLoaded()
+            }
             switch entry {
             case .inlineTeaser:
                 refreshInlineEntryAfterClose(
@@ -509,11 +514,15 @@ final class GameSurface {
                     case .direct, .unknown:
                         self.settleDirectFailure(payload: payload, reason: failure.wireValue)
                     case .inlineTeaser:
-                        self.sdk.gamification.refreshRewardsIfLoaded()
+                        if openTestInvocationId == nil {
+                            self.sdk.gamification.refreshRewardsIfLoaded()
+                        }
                         self.refreshInlineEntryAfterClose(
                             campaignKey: campaignKey, payload: payload, chanceId: stats.chanceId)
                     case .floating:
-                        self.sdk.gamification.refreshRewardsIfLoaded()
+                        if openTestInvocationId == nil {
+                            self.sdk.gamification.refreshRewardsIfLoaded()
+                        }
                         self.refreshFloatingEntryAfterClose(
                             campaignKey: campaignKey, payload: payload, chanceId: stats.chanceId)
                     }
@@ -577,7 +586,10 @@ final class GameSurface {
             // hung path; plus `game_open_failed(http_timeout)` when the game
             // was already showing — the stuck window counts as an open
             // failure, unlike any other shown failure. Before shown, the
-            // presentation fails instead and that path reports it once.
+            // presentation fails instead and that path reports it once. The pair
+            // is one frozen window in two streams (health and funnel): count a
+            // shown hang once, do not sum `game_open_failed` with
+            // `Dismissed(http_timeout)`.
             onHttpTimeout: { [weak self] path, durationMs in
                 guard let self else { return }
                 let health = GameHealthContext(

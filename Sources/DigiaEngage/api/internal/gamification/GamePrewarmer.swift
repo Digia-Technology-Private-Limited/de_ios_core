@@ -25,13 +25,27 @@ enum GamePrewarmer {
     /// A warm engine: the blank web view and the message proxy its
     /// configuration registered. The adopting coordinator points the proxy at
     /// itself, so the skin's `digia` messages reach it.
-    final class Engine {
+    ///
+    /// The engine is its web view's navigation delegate until adopted (the
+    /// coordinator then takes over), so a warm engine whose web content process
+    /// was killed while idle is freed instead of handed to a game, which would
+    /// otherwise sit on a dead page until its load timeout.
+    final class Engine: NSObject, WKNavigationDelegate {
         let webView: WKWebView
         let proxy: WeakScriptMessageProxy
 
         init(webView: WKWebView, proxy: WeakScriptMessageProxy) {
             self.webView = webView
             self.proxy = proxy
+            super.init()
+            webView.navigationDelegate = self
+        }
+
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            Task { @MainActor [weak self] in
+                guard let self, GamePrewarmer.engine === self else { return }
+                GamePrewarmer.freeEngine(reason: "process_killed")
+            }
         }
     }
 
@@ -76,6 +90,7 @@ enum GamePrewarmer {
     static func freeEngine(reason: String) {
         guard let warm = engine else { return }
         engine = nil
+        warm.webView.navigationDelegate = nil
         warm.webView.stopLoading()
         warm.webView.configuration.userContentController.removeScriptMessageHandler(forName: "digia")
         log.d("prewarm engine freed reason=\(reason)")
