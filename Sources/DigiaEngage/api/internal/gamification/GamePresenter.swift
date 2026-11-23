@@ -84,6 +84,9 @@ final class GamePresentation: Identifiable, ObservableObject {
     /// read by `didClose` for the funnel's Dismissed reason.
     private var closeReason = "user"
 
+    /// Every in-flight skin `http` call, by skin request id; cancelled at
+    /// close so a call the user closed on stops instead of running on (row 21).
+    private var httpTasks: [String: Task<Void, Never>] = [:]
     /// One armed http watchdog per watched in-flight call, by skin request id.
     private var httpWatchdogs: [String: Task<Void, Never>] = [:]
     /// When each watched call started, for the `game_rewards_failed` duration.
@@ -528,10 +531,11 @@ final class GamePresentation: Identifiable, ObservableObject {
             return
         }
         if Self.httpWatchdogPaths.contains(validated) { armHttpWatchdog(id: id, path: validated) }
-        Task { @MainActor [weak self] in
+        httpTasks[id] = Task { @MainActor [weak self] in
             guard let self else { return }
             let result = await self.httpSend(method, validated, payloadData)
-            guard self.bridge.state != .closed else { return }
+            guard !Task.isCancelled, !self.didFinish, self.bridge.state != .closed else { return }
+            self.httpTasks.removeValue(forKey: id)
             self.cancelHttpWatchdog(id: id)
             // A late answer after the watchdog fired: the game already closed
             // on the timeout. Never reply, never record: the window settles once.
@@ -921,6 +925,8 @@ final class GamePresentation: Identifiable, ObservableObject {
         guard !didFinish else { return }
         didFinish = true
         cancelAllHttpWatchdogs()
+        for task in httpTasks.values { task.cancel() }
+        httpTasks.removeAll()
         if GamePresenter.loading === self { GamePresenter.loading = nil }
         motion.stopAll()
         removeObservers()
