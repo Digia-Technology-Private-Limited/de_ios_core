@@ -587,7 +587,7 @@ final class GameSurface {
             // presentation fails instead and that path reports it once. The pair
             // is one frozen window in two streams (health and funnel): count a
             // shown hang once, do not sum `game_open_failed` with
-            // `Dismissed(failure)`.
+            // `Dismissed(http_timeout)`.
             onHttpTimeout: { [weak self] path, durationMs in
                 guard let self else { return }
                 let health = GameHealthContext(
