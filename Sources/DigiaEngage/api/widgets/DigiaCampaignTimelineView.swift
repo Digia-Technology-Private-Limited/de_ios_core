@@ -1,5 +1,4 @@
 import SwiftUI
-import UIKit
 
 /// "I set up my campaign and used the app — what happened?"
 ///
@@ -23,40 +22,71 @@ import UIKit
 /// platform note: Dart's twin is `DigiaCampaignTimelineScreen`.
 @MainActor
 struct DigiaCampaignTimelineView: View {
+    @Environment(\.dismiss) private var dismiss
     @ObservedObject private var timeline = ScreenSink.shared
 
     var body: some View {
         // `revision` is read so the view depends on it explicitly — the sink
         // bumps it on the next main-queue turn after a record lands, never
         // inline, so nothing here can be asked to rebuild mid-frame.
+        //
+        // The header below is in-content (a fixed 56pt row with its own back
+        // affordance), never the host navigation bar, so this screen looks
+        // identical no matter which host presents it. The host bar is hidden
+        // for this screen only — no global appearance is touched.
         let entries = TimelineEntry.group(timeline.snapshot(), revision: timeline.revision)
-        return Group {
-            if entries.isEmpty {
-                emptyState
-            } else {
-                // A List would wrap every row in the host's inset grouped
-                // cells — dividers and all — while Flutter and Android render
-                // full-width plain rows with explicit cards, so this is a
-                // plain stack with the same rhythm (4pt between rows, 8pt at
-                // the ends).
-                ScrollView {
-                    LazyVStack(spacing: 4) {
-                        ForEach(entries) { entry in
-                            if entry.isDelivery {
-                                deliveryCard(entry.records)
-                            } else if let record = entry.records.first {
-                                flatRow(record)
+        return VStack(spacing: 0) {
+            header
+            Group {
+                if entries.isEmpty {
+                    emptyState
+                } else {
+                    // A plain stack of full-width rows with explicit cards,
+                    // like both other stacks: no list cells, no dividers.
+                    ScrollView {
+                        LazyVStack(spacing: 4) {
+                            ForEach(entries) { entry in
+                                if entry.isDelivery {
+                                    deliveryCard(entry.records)
+                                } else if let record = entry.records.first {
+                                    flatRow(record)
+                                }
                             }
                         }
+                        .padding(.vertical, 8)
                     }
-                    .padding(.vertical, 8)
                 }
-                .background(Color(.systemGroupedBackground))
             }
         }
-        .navigationTitle("Campaign timeline")
-        .navigationBarTitleDisplayMode(.inline)
-        .background(TimelineNavBarStyle())
+        .background(Color(hex: "FFFFFF") ?? .white)
+        .navigationBarHidden(true)
+    }
+
+    /// The screen's own header: 56pt, white, hairline divider, back arrow and
+    /// title as content. Identical on every stack (see the PR body for the spec).
+    private var header: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Button(action: { dismiss() }) {
+                    Text("←")
+                        .font(digiaFont(size: 24))
+                        .foregroundColor(Color(hex: "212121") ?? .primary)
+                        .frame(width: 48, height: 48)
+                }
+                .accessibilityLabel("Back")
+                Text("Campaign timeline")
+                    .font(digiaFont(size: 20, weight: 600))
+                    .foregroundColor(Color(hex: "212121") ?? .primary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .frame(height: 56)
+            .padding(.leading, 4)
+            .padding(.trailing, 16)
+            (Color(hex: "E0E0E0") ?? .gray)
+                .frame(height: 1)
+        }
+        .background(Color(hex: "FFFFFF") ?? .white)
     }
 
     private var emptyState: some View {
@@ -66,41 +96,45 @@ struct DigiaCampaignTimelineView: View {
                 "Nothing recorded yet.\n\nUse the app as a user would. Anything Digia does "
                     + "with a campaign shows up here."
             )
+            .font(digiaFont(size: 14))
             .multilineTextAlignment(.center)
-            .foregroundColor(.secondary)
+            .foregroundColor(Color(hex: "757575") ?? .secondary)
             .padding(32)
             Spacer()
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     /// One showing of one campaign, its beats in the order they happened.
     ///
-    /// An explicit card — full width minus the 12pt margin both stacks use —
-    /// rather than the host list's cells, whose shape iOS picks per context.
+    /// An explicit flat card — full width minus the 12pt margin both stacks
+    /// use — with pinned colours, so it matches both other stacks exactly.
     private func deliveryCard(_ records: [TimelineRecord]) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(records.first?.campaignKey ?? "Campaign")
-                    .font(digiaFont(size: 15, weight: 600))
+                    .font(digiaFont(size: 14, weight: 600))
+                    .foregroundColor(Color(hex: "212121") ?? .primary)
                     .lineLimit(1)
                 Spacer()
                 Text(Self.clock(records.first?.timestamp ?? Date()))
                     .font(digiaFont(size: 12))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(Color(hex: "757575") ?? .secondary)
             }
             ForEach(Array(records.enumerated()), id: \.offset) { _, record in
                 HStack(alignment: .top, spacing: 10) {
                     dot(record.severity)
                     Text(Self.sentence(record))
-                        .font(digiaFont(size: 13))
+                        .font(digiaFont(size: 14))
+                        .foregroundColor(Color(hex: "212121") ?? .primary)
                     Spacer(minLength: 0)
                 }
                 .padding(.vertical, 2)
             }
         }
         .padding(EdgeInsets(top: 10, leading: 12, bottom: 12, trailing: 12))
-        .background(Color(.systemBackground))
-        .cornerRadius(12)
+        .background(Color(hex: "F5F5F5") ?? .white)
+        .cornerRadius(8)
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
     }
@@ -112,11 +146,12 @@ struct DigiaCampaignTimelineView: View {
         HStack(alignment: .top, spacing: 10) {
             dot(record.severity)
             Text(Self.sentence(record))
-                .font(digiaFont(size: 13))
+                .font(digiaFont(size: 14))
+                .foregroundColor(Color(hex: "212121") ?? .primary)
             Spacer(minLength: 0)
             Text(Self.clock(record.timestamp))
                 .font(digiaFont(size: 12))
-                .foregroundColor(.secondary)
+                .foregroundColor(Color(hex: "757575") ?? .secondary)
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 6)
@@ -127,15 +162,15 @@ struct DigiaCampaignTimelineView: View {
         Circle()
             .fill(Self.color(severity))
             .frame(width: 8, height: 8)
-            .padding(.top, 5)
+            .padding(.top, 6)
     }
 
     private static func color(_ severity: DigiaLogSeverity) -> Color {
         switch severity {
-        case .error: return Color(red: 0.827, green: 0.184, blue: 0.184)
-        case .warn: return Color(red: 0.976, green: 0.659, blue: 0.145)
-        case .info: return Color(red: 0.098, green: 0.463, blue: 0.824)
-        case .debug: return Color(red: 0.620, green: 0.620, blue: 0.620)
+        case .error: return Color(hex: "D32F2F") ?? .red
+        case .warn: return Color(hex: "F9A825") ?? .orange
+        case .info: return Color(hex: "1976D2") ?? .blue
+        case .debug: return Color(hex: "9E9E9E") ?? .gray
         }
     }
 
@@ -250,60 +285,6 @@ struct DigiaCampaignTimelineView: View {
         "cancelled": "Cancelled",
         "plugin_detached": "Your messaging platform was disconnected",
     ]
-}
-
-/// Pins the nav bar to an opaque adaptive background with an adaptive title
-/// while the timeline is on screen, then hands the host's bar back.
-///
-/// The harness presents this screen in a bare `NavigationView` and production
-/// hosts bring their own bar style; either can leave the default transparent
-/// bar with an unreadable title, so the title borrows nothing from the host.
-/// Scoped to the enclosing navigation controller — no global appearance
-/// proxy — and restored when the screen leaves.
-private struct TimelineNavBarStyle: UIViewRepresentable {
-    func makeUIView(context: Context) -> StyleView { StyleView() }
-    func updateUIView(_ uiView: StyleView, context: Context) {}
-
-    final class StyleView: UIView {
-        private weak var bar: UINavigationBar?
-        private var previous: (standard: UINavigationBarAppearance,
-                               scrollEdge: UINavigationBarAppearance?,
-                               compact: UINavigationBarAppearance?)?
-
-        override func didMoveToWindow() {
-            super.didMoveToWindow()
-            guard window != nil, bar == nil, let bar = Self.navBar(of: self) else { return }
-            previous = (bar.standardAppearance, bar.scrollEdgeAppearance, bar.compactAppearance)
-            let appearance = UINavigationBarAppearance()
-            appearance.configureWithOpaqueBackground()
-            appearance.backgroundColor = .systemBackground
-            bar.standardAppearance = appearance
-            bar.scrollEdgeAppearance = appearance
-            bar.compactAppearance = appearance
-            self.bar = bar
-        }
-
-        override func willMove(toWindow newWindow: UIWindow?) {
-            super.willMove(toWindow: newWindow)
-            guard newWindow == nil, let bar, let previous else { return }
-            bar.standardAppearance = previous.standard
-            bar.scrollEdgeAppearance = previous.scrollEdge
-            bar.compactAppearance = previous.compact
-            self.bar = nil
-            self.previous = nil
-        }
-
-        private static func navBar(of view: UIView) -> UINavigationBar? {
-            var responder: UIResponder? = view.next
-            while let current = responder {
-                if let controller = current as? UIViewController {
-                    return controller.navigationController?.navigationBar
-                }
-                responder = current.next
-            }
-            return nil
-        }
-    }
 }
 
 /// One row of the timeline list: a delivery card, or a single flat record.
