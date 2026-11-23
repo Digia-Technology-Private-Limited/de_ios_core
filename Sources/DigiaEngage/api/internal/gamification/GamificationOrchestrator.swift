@@ -163,6 +163,9 @@ final class GamificationOrchestrator: ObservableObject {
     /// refresh, which also gives the SDK the campaign designs it needs to open
     /// games from the page.
     func openRewards() {
+        // A game still loading (or on screen) would otherwise end up behind
+        // the page and block the games opened from it, so it closes first.
+        GamePresenter.dismiss(reason: "superseded")
         RewardsPageViewController.present { [weak self] in
             guard let self else { return RewardsPageURL.resolve(pageUrl: nil, environment: .production) }
             return await self.rewardsPageURL()
