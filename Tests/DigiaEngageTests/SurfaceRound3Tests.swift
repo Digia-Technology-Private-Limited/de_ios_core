@@ -13,9 +13,9 @@ extension DigiaEngageTests {
     struct SurfaceRound3Tests {
         private func makeSdk(_ campaigns: [[String: Any]]) async throws -> SDKInstance {
             let suite = { UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")! }
-            let sdk = SDKInstance(
+            let sdk = { let instance = SDKInstance(
                 defaults: suite(), legacyDefaults: suite(), makeNetworkClient: { _ in MockNetworkClient() }
-            )
+            ); instance.onHostMounted(SDKInstance.testHostId); return instance }()
             try await sdk.initialize(DigiaConfig(apiKey: "test_key"))
             sdk.setCampaignsForTesting(try campaigns.map { try #require(try CampaignModel.fromJson($0)) })
             return sdk

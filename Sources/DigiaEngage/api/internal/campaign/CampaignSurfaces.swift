@@ -48,17 +48,21 @@ final class NudgeCampaignSurface: CampaignSurface {
         return [sdk.occupant(.nudge, nudge.payload)]
     }
 
-    func supersede(_ occupant: SurfaceOccupant) {
+    func supersede(_ occupant: SurfaceOccupant) { end(occupant, reason: .superseded) }
+
+    /// Takes the nudge `occupant` names off the screen as `reason`: one it displayed ends like a close,
+    /// with Digia's Dismissed; one not yet drawn tells only the CEP.
+    func end(_ occupant: SurfaceOccupant, reason: DismissReason) {
         guard occupant.kind == .nudge else { return }
         guard let nudge = sdk.controller.activeNudge,
             nudge.payload.cepCampaignId == occupant.cepCampaignId
         else { return }
         if sdk.dwellTracker.elapsedMs(occupant.cepCampaignId) != nil {
-            sdk.nudgeOrchestrator.markNudgeDismissed(reason: .superseded)
+            sdk.nudgeOrchestrator.markNudgeDismissed(reason: reason)
         } else {
             sdk.controller.dismissNudge()
             _ = sdk.dwellTracker.consumeDwellMs(occupant.cepCampaignId)
-            sdk.events.toCep(.dismissed(reason: .superseded), payload: nudge.payload)
+            sdk.events.toCep(.dismissed(reason: reason), payload: nudge.payload)
         }
     }
 
@@ -92,7 +96,10 @@ final class SurveySurface: CampaignSurface {
         return [sdk.occupant(.survey, survey.payload)]
     }
 
-    func supersede(_ occupant: SurfaceOccupant) {
+    func supersede(_ occupant: SurfaceOccupant) { end(occupant, reason: .superseded) }
+
+    /// Takes the survey `occupant` names off the screen as `reason`, as `NudgeCampaignSurface.end` does.
+    func end(_ occupant: SurfaceOccupant, reason: DismissReason) {
         guard occupant.kind == .survey else { return }
         guard let state = sdk.surveyOrchestrator.state,
             state.payload.cepCampaignId == occupant.cepCampaignId
@@ -103,13 +110,13 @@ final class SurveySurface: CampaignSurface {
             sdk.surveyReporter.markSurveyDismissed(
                 abandonedAtItem: progress?.abandonedAtItem,
                 answeredCount: progress?.answeredCount,
-                reason: .superseded
+                reason: reason
             )
         } else {
             sdk.surveyOrchestrator.dismiss()
             _ = sdk.dwellTracker.consumeDwellMs(occupant.cepCampaignId)
             sdk.surveyReporter.clearQuestionViewedAt(token: state.token)
-            sdk.events.toCep(.dismissed(reason: .superseded), payload: state.payload)
+            sdk.events.toCep(.dismissed(reason: reason), payload: state.payload)
         }
     }
 
@@ -178,7 +185,10 @@ final class GuideSurface: CampaignSurface {
         return result
     }
 
-    func supersede(_ occupant: SurfaceOccupant) {
+    func supersede(_ occupant: SurfaceOccupant) { end(occupant, reason: .superseded) }
+
+    /// Takes the guide `occupant` names off the screen as `reason`, as `NudgeCampaignSurface.end` does.
+    func end(_ occupant: SurfaceOccupant, reason: DismissReason) {
         guard occupant.kind == .guide else { return }
         if let state = sdk.guideOrchestrator.state,
             state.payload.cepCampaignId == occupant.cepCampaignId
@@ -186,19 +196,19 @@ final class GuideSurface: CampaignSurface {
             if sdk.dwellTracker.elapsedMs(occupant.cepCampaignId) != nil {
                 // No `completed:` override, so a completion the CTA already
                 // fired wins (R3-02, R4-D2): CEP `completed`, no Digia dismiss.
-                sdk.guideOrchestrator.dismissGuide(reason: .superseded)
+                sdk.guideOrchestrator.dismissGuide(reason: reason)
             } else {
                 sdk.guideOrchestrator.dismiss()
                 _ = sdk.dwellTracker.consumeDwellMs(occupant.cepCampaignId)
                 sdk.guideOrchestrator.guideCompletionFired = false
                 sdk.guideOrchestrator.pendingGuideDismissReason = nil
-                sdk.events.toCep(.dismissed(reason: .superseded), payload: state.payload)
+                sdk.events.toCep(.dismissed(reason: reason), payload: state.payload)
             }
         } else if let external = sdk.activeExternalGuide,
             external.payload.cepCampaignId == occupant.cepCampaignId
         {
             sdk.activeExternalGuide = nil
-            sdk.events.toCep(.dismissed(reason: .superseded), payload: external.payload)
+            sdk.events.toCep(.dismissed(reason: reason), payload: external.payload)
         }
     }
 
@@ -208,6 +218,9 @@ final class GuideSurface: CampaignSurface {
         }
         if surfaceOwns(sdk.guideOrchestrator.state?.payload, payload: payload) {
             sdk.guideOrchestrator.dismissIfActive(payloadId: payload.cepCampaignId)
+            // A cancel never reaches the dwell report, so end the timer here; left running, the
+            // next showing of this campaign is never recorded as displayed.
+            _ = sdk.dwellTracker.consumeDwellMs(payload.cepCampaignId)
         }
     }
 }

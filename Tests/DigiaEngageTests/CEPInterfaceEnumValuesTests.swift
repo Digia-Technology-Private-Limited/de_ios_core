@@ -34,13 +34,14 @@ struct CEPInterfaceEnumValuesTests {
         #expect(DropReason.superseded.value == "superseded")
         #expect(DropReason.hostSuppressed.value == "host_suppressed")
         #expect(DropReason.hostNotMounted.value == "host_not_mounted")
+        #expect(DropReason.hostModalOpen.value == "host_modal_open")
         #expect(DropReason.timeout.value == "timeout")
         #expect(DropReason.cancelled.value == "cancelled")
         #expect(DropReason.pluginDetached.value == "plugin_detached")
         #expect(DropReason.pendingExpired.value == "pending_expired")
         #expect(DropReason.digiaManaged.value == "digia_managed")
         #expect(DropReason.error.value == "error")
-        #expect(DropReason.allCases.count == 18)
+        #expect(DropReason.allCases.count == 19)
     }
 
     @Test("DismissReason values")

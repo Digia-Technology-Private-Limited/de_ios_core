@@ -2,7 +2,7 @@ private let log = DigiaLogger()
 
 /// Decides whether one campaign may start, then starts it.
 ///
-/// The gates run in a fixed order — Template, Suppression, Screen, Config,
+/// The gates run in a fixed order — Template, Suppression, Host, Screen, Config,
 /// Frequency, Surface — and the first to drop wins, so a campaign that is wrong for this
 /// screen never spends a frequency check and one the cap refuses never
 /// displaces what is on screen. Where the drivers differ, ``SourcePolicy`` says
@@ -28,10 +28,12 @@ struct CampaignRouter {
     var reportMissing: (CampaignRequest) -> Void = { _ in }
     /// Config checks only this platform has, run last in the config gate.
     var configCheck: (CampaignRequest) -> RoutingVerdict? = { _ in nil }
+    /// Why the host cannot draw this overlay right now, nil if it can.
+    var hostUnavailable: (CampaignRequest) -> (reason: DropReason, detail: String)? = { _ in nil }
 
     func route(_ request: CampaignRequest) -> RoutingVerdict {
         let gates: [(CampaignRequest) -> RoutingVerdict?] = [
-            templateGate, suppressionGate, screenGate, configGate, frequencyGate, surfaceGate,
+            templateGate, suppressionGate, hostGate, screenGate, configGate, frequencyGate, surfaceGate,
         ]
         for gate in gates {
             if let dropped = gate(request) { return dropped }
@@ -60,6 +62,18 @@ struct CampaignRouter {
         log.d("Dropped — \(detail)", campaign: request.campaign.campaignKey)
         request.driver.policy.onDropped(DropReason.hostSuppressed, detail)
         return .dropped(reason: .hostSuppressed, detail: detail)
+    }
+
+    // Before the cap and surface checks, so a campaign the host cannot draw never spends a cap or
+    // displaces what is on screen. Inline is exempt: it draws in the app's own slot, not the host.
+    // A missing host is not dropped here: the campaign waits out the acceptance window.
+    private func hostGate(_ request: CampaignRequest) -> RoutingVerdict? {
+        guard !request.campaign.isInline, request.campaign.surfaceArrival != nil,
+            let unavailable = hostUnavailable(request)
+        else { return nil }
+        log.w("Dropped — \(unavailable.detail)", campaign: request.campaign.campaignKey)
+        request.driver.policy.onDropped(unavailable.reason, unavailable.detail)
+        return .dropped(reason: unavailable.reason, detail: unavailable.detail)
     }
 
     // Inline is exempt: its slot decides where it shows, so `targetScreenNames` means nothing for it.

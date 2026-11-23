@@ -77,7 +77,15 @@ struct NudgeOverlayView: View {
                 return nudge
             },
             set: { newValue in
-                if newValue == nil { SDKInstance.shared.nudgeOrchestrator.markNudgeDismissed() }
+                guard newValue == nil, let nudge = SDKInstance.shared.controller.activeNudge else { return }
+                // SwiftUI clears this only when the system tears the cover down (the app replaced its root, or
+                // dismissed everything): the user's own closes call `markNudgeDismissed` directly, and the
+                // cover can't be swiped away. So it is never a user close. On the next turn, unless the nudge
+                // already ended (e.g. by the host teardown).
+                DispatchQueue.main.async {
+                    guard SDKInstance.shared.controller.activeNudge?.id == nudge.id else { return }
+                    SDKInstance.shared.nudgeOrchestrator.markNudgeDismissed(reason: .cancelled)
+                }
             }
         )
     }
@@ -104,18 +112,22 @@ private struct NudgeCoverPresenter: View {
                 // `.id(nudge.id)`: a direct swap between two active nudges (no
                 // nil in between) must still create a fresh presentation view.
                 if #available(iOS 16.4, *) {
-                    content(nudge)
+                    NudgeCoverContent(nudge: nudge)
                         .presentationBackground(.clear)
                         .id(nudge.id)
                 } else {
-                    content(nudge).id(nudge.id)
+                    NudgeCoverContent(nudge: nudge).id(nudge.id)
                 }
             }
             .transaction { $0.disablesAnimations = true }
     }
+}
 
-    @ViewBuilder
-    private func content(_ nudge: DigiaNudgePresentation) -> some View {
+/// The bottom-sheet or full-screen nudge the cover presents.
+private struct NudgeCoverContent: View {
+    let nudge: DigiaNudgePresentation
+
+    var body: some View {
         if nudge.config.surface.isFullScreen {
             NudgeFullScreenView(presentation: nudge)
                 .interactiveDismissDisabled()
