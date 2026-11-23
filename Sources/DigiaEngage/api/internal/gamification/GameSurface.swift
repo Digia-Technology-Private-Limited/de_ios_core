@@ -252,11 +252,13 @@ final class GameSurface {
         switch settle {
         case .presentation(let payload, let entry):
             sdk.events.toDigia(dismissed, payload: payload)
-            // The coordinator settles once, so the CEP hears one Dismissed. A
-            // cancel comes from the coordinator, which already settled and
-            // reported the presentation to the CEP.
+            // Through the emitter, so a live test relays "dismissed" to the
+            // dashboard too; for a real campaign the coordinator settles once,
+            // so the CEP hears one Dismissed. A cancel comes from the
+            // coordinator, which already settled and reported the presentation
+            // to the CEP. Matches Android.
             if entry != .inlineTeaser, entry != .floating, reason != GamePresentation.cancelledReason {
-                sdk.coordinator.handle(.dismissed(reason: Self.dismissReason(closeReason: reason)), payload: payload)
+                sdk.events.toCep(.dismissed(reason: Self.dismissReason(closeReason: reason)), payload: payload)
             }
             sdk.gamification.refreshRewardsIfLoaded()
             switch entry {
@@ -282,7 +284,10 @@ final class GameSurface {
     /// change is an open failure (`closed_before_ready`), which also drops a
     /// direct presentation. A cancel was settled by the coordinator, so it
     /// reports nothing; a superseded direct game only settles its
-    /// presentation as superseded, since nothing else does. Matches Android.
+    /// presentation as superseded, since nothing else does. That goes to the
+    /// coordinator, not the emitter: a superseded test send was already failed
+    /// `superseded` by the router (SR46) and must not relay "dismissed".
+    /// Matches Android.
     private func closedBeforeShown(
         settle: GameSettle, campaign: CampaignModel, config: GamificationConfig,
         reason: String, chanceId: String, timing: GameOpenTiming
