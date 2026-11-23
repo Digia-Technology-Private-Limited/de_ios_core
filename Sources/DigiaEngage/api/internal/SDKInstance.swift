@@ -104,15 +104,19 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
 
     /// The single writer of presentation state. Every live presentation in the
     /// SDK is opened, indexed and settled here — see ``PresentationCoordinator``.
-    lazy var coordinator = PresentationCoordinator(
-        // Read through, not captured: the coordinator is built lazily on first
-        // delivery, and a test that sets `idGenerator` afterwards would
-        // otherwise be silently ignored.
-        idGenerator: { [weak self] in self?.idGenerator() ?? UUID().uuidString },
-        onCancelSurface: { [weak self] payload in
-            self?.dismissSurfaces(for: payload)
-        }
-    )
+    lazy var coordinator: PresentationCoordinator = {
+        let coordinator = PresentationCoordinator(
+            // Read through, not captured: the coordinator is built lazily on first
+            // delivery, and a test that sets `idGenerator` afterwards would
+            // otherwise be silently ignored.
+            idGenerator: { [weak self] in self?.idGenerator() ?? UUID().uuidString },
+            onCancelSurface: { [weak self] payload in
+                self?.dismissSurfaces(for: payload)
+            }
+        )
+        coordinator.noHostAtTimeout = { [weak self] in self?.noHostOnScreen() ?? false }
+        return coordinator
+    }()
     private let hostActionExecutor = HostActionExecutor()
     private lazy var actionExecutor = EngageActionExecutor(
         hostActionExecutor: hostActionExecutor
@@ -1412,6 +1416,16 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// them showing to nobody, as Flutter does on a host teardown: floaters as `host_teardown`, nudges,
     /// surveys and guides cancelled. Inline slots live in the app's own screens and are not affected.
     func endCampaignsForHostTeardown() {
+        endOverlayCampaigns(because: "the app replaced its root view controller, which removed Digia's layer")
+    }
+
+    /// The React Native JS bundle reloaded: the new JS session knows nothing of what the last one left on
+    /// screen, so those campaigns end exactly as on a host teardown.
+    func endCampaignsForJsReload() {
+        endOverlayCampaigns(because: "the React Native JS bundle reloaded")
+    }
+
+    private func endOverlayCampaigns(because cause: String) {
         // An open story went with the old root too; left set, it would keep every touch.
         if controller.activeStoryOverlay != nil { controller.dismissStoryOverlay() }
         let ended = surfaceOccupants().filter {
@@ -1421,7 +1435,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         guard !ended.isEmpty else { return }
         for occupant in ended {
             log.w(
-                "Ended — the app replaced its root view controller, which removed Digia's layer",
+                "Ended — \(cause)",
                 campaign: occupant.campaignKey,
                 stage: .render,
                 reason: TimelineReason.hostTeardown,
@@ -1571,25 +1585,23 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         return router.route(CampaignRequest(driver: driver, campaign: campaign, payload: payload))
     }
 
-    /// Why no Digia host can draw this overlay now, dropped at once rather than left to time out. No host
-    /// at all is `host_not_mounted`; a modal of the app's own in front of a nudge or survey is
-    /// `host_modal_open`. A modal of Digia's own is left to the surface rule.
+    /// Whether no Digia host is on screen to draw an overlay. Not checked on arrival: a campaign
+    /// waits out the acceptance window like any delivery (a host may mount meanwhile, as at cold
+    /// start), and the watchdog reads this to settle `host_not_mounted` instead of `timeout`.
+    private func noHostOnScreen() -> Bool {
+        if DigiaHostAttachment.isInUse {
+            return !DigiaHostAttachment.hasHost && HostRegistry.shared.isEmpty
+        }
+        // The app's own full-screen modal also makes `DigiaHost` disappear: that is not "no host".
+        return HostRegistry.shared.isEmpty
+            && DigiaHostAttachment.appPresentation(in: ViewControllerUtil.keyWindow()) == nil
+    }
+
+    /// Why the host cannot draw this nudge or survey now, dropped at once: a modal of the app's own
+    /// in front of it is `host_modal_open`. A modal of Digia's own is left to the surface rule. A
+    /// missing host is not decided here (see ``noHostOnScreen()``).
     private func hostUnavailable(_ request: CampaignRequest) -> (reason: DropReason, detail: String)? {
         let attached = DigiaHostAttachment.isInUse
-        if attached {
-            guard DigiaHostAttachment.hasHost || !HostRegistry.shared.isEmpty else {
-                return (.hostNotMounted, "no Digia host on screen: Digia.attach(to:) found no root it can use")
-            }
-        } else {
-            // A classic guide is drawn by the React Native renderer, not by a host.
-            if let guide = request.campaign.guideConfig, isClassicRNGuide(guide) { return nil }
-            // The app's own full-screen modal also makes `DigiaHost` disappear: that is not "no host".
-            if HostRegistry.shared.isEmpty,
-                DigiaHostAttachment.appPresentation(in: ViewControllerUtil.keyWindow()) == nil
-            {
-                return (.hostNotMounted, "no Digia host on screen: no DigiaHost is mounted")
-            }
-        }
         switch request.campaign.config {
         case .nudge, .survey: break
         default: return nil

@@ -297,20 +297,36 @@ struct NudgeCampaignBehaviourTests {
 
     // MARK: - Dropped or ended by the plugin and the watchdog
 
-    // Fails if the router's host gate stops answering `host_not_mounted` when no `DigiaHost` is mounted:
-    // the nudge would wait out the 15 s acceptance watchdog and drop as `timeout` instead.
-    @Test("host_not_mounted: with no DigiaHost mounted a nudge is dropped at once, never shown")
-    func noHostMountedDropsAtOnce() async throws {
+    // Fails if a missing host is dropped on arrival again: a cold-start trigger that beats the first
+    // `DigiaHost` must wait out the acceptance window (R5), as on main, not be thrown away.
+    @Test("no DigiaHost mounted yet: the nudge is not dropped on arrival, it waits for a host")
+    func noHostMountedWaits() async throws {
         let campaign = fixture("nudge_dialog")
         let sdk = try await SdkHarness.startWithoutHost(campaign)
         defer { sdk.tearDown() }
+        // Let the harness's own unmount teardown (deferred one main-loop turn) run first: a cold start has none.
+        try await sdk.settle(0.3)
         let d = try sdk.deliverChain("test_nudge_dialog")
-        try await sdk.waitUntil("the drop") { d.outcome != nil }
+        try await sdk.settle(1)
 
-        #expect(!sdk.isShowing("Dialog Test Nudge"))
-        expectDroppedWire(
-            try await sdk.sentToScriptedNetwork("test_nudge_dialog"), d, .hostNotMounted, campaign, screen: nil,
-            detail: "no Digia host on screen: no DigiaHost is mounted")
+        #expect(d.outcome == nil, "still waiting for a host, not dropped")
+        #expect(SDKInstance.shared.coordinator.liveCount == 1)
+    }
+
+    // Fails if the JS-reload cleanup stops ending a nudge: `case .nudge: nudgeSurface.end(...)` in
+    // SDKInstance.endOverlayCampaigns.
+    @Test("a React Native JS reload ends the nudge on screen as cancelled")
+    func jsReloadEndsNudge() async throws {
+        let campaign = fixture("nudge_dialog")
+        let sdk = try await start([campaign])
+        defer { sdk.tearDown() }
+        let d = try sdk.deliverChain("test_nudge_dialog")
+        try await show(sdk, "Dialog Test Nudge")
+
+        Digia.dismissActiveCampaigns()
+        try await sdk.waitUntil("the nudge has gone") { !sdk.isShowing("Dialog Test Nudge") }
+
+        #expect(d.outcome == .dismissed(reason: .cancelled, completed: false))
     }
 
     // As coded: the CEP's outcome is `dismissed(plugin_detached)`; Digia is told nothing and the nudge stays up

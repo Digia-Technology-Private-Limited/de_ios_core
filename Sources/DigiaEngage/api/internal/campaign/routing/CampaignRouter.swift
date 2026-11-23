@@ -66,6 +66,7 @@ struct CampaignRouter {
 
     // Before the cap and surface checks, so a campaign the host cannot draw never spends a cap or
     // displaces what is on screen. Inline is exempt: it draws in the app's own slot, not the host.
+    // A missing host is not dropped here: the campaign waits out the acceptance window.
     private func hostGate(_ request: CampaignRequest) -> RoutingVerdict? {
         guard !request.campaign.isInline, request.campaign.surfaceArrival != nil,
             let unavailable = hostUnavailable(request)

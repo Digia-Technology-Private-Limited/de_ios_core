@@ -129,7 +129,13 @@ public enum Digia {
     /// `UISplitViewController` or `UIPageViewController` root is not supported, because it would treat
     /// Digia's layer as one of its own screens; then nothing is drawn and a warning is logged. SwiftUI apps
     /// use `DigiaHost` instead.
+    ///
+    /// No-ops below iOS 17 (see `initialize`): no campaign can show there, so no layer is added.
     public static func attach(to window: UIWindow) {
+        guard #available(iOS 17, *) else {
+            log.w("attach(to:) ignored — Digia Engage requires iOS 17 or later")
+            return
+        }
         DigiaHostAttachment.attach(to: window)
     }
 
@@ -210,6 +216,15 @@ public enum Digia {
     /// session doesn't remain stuck on screen.
     public static func dismissActiveNudge() {
         SDKInstance.shared.controller.forceNudgeDismiss()
+    }
+
+    /// Ends every overlay campaign on screen or waiting to show (nudge, survey, guide, floater, story) as
+    /// `cancelled`. Inline content stays.
+    ///
+    /// For Digia's own React Native module, which calls it after a JS reload so nothing from the previous
+    /// JS session stays on screen. Not part of the supported integration surface.
+    public static func dismissActiveCampaigns() {
+        SDKInstance.shared.endCampaignsForJsReload()
     }
 
     /// True when any overlay (toast, dialog, bottom sheet, anchored tooltip/spotlight)

@@ -189,6 +189,32 @@ struct PresentationCoordinatorTests {
         #expect(coordinator.liveCount == 0)
     }
 
+    @Test("G7 — a window that ends with no host on screen settles dropped(host_not_mounted)")
+    func acceptanceWatchdogWithNoHost() async throws {
+        let coordinator = makeCoordinator(acceptance: 0.02)
+        coordinator.noHostAtTimeout = { true }
+        let controller = coordinator.open(payload("a"), owner: "clevertap")
+        coordinator.accept(controller, kind: .modal)
+
+        try await waitUntil { controller.isSettled && coordinator.liveCount == 0 }
+
+        #expect(controller.presentation.outcome.settledValue == .dropped(reason: .hostNotMounted, detail: "no Digia host was on screen within the acceptance window"))
+        #expect(controller.isHoldReleased)
+    }
+
+    @Test("G7 — with the app in the background a hostless window stays a timeout")
+    func acceptanceWatchdogBackgroundedStaysTimeout() async throws {
+        let coordinator = makeCoordinator(acceptance: 0.02)
+        coordinator.noHostAtTimeout = { true }
+        coordinator.noteAppLeftForeground()
+        let controller = coordinator.open(payload("a"), owner: "clevertap")
+        coordinator.accept(controller, kind: .modal)
+
+        try await waitUntil { controller.isSettled }
+
+        #expect(controller.presentation.outcome.settledValue?.reasonValue == "timeout")
+    }
+
     @Test("SR60 — the acceptance watchdog settles first, then clears that delivery's surface")
     func acceptanceWatchdogClearsSurface() async throws {
         var cancelled: [CEPTriggerPayload] = []
