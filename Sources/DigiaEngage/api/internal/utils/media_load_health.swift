@@ -71,6 +71,23 @@ func loadLottieSource(_ url: URL) async -> (source: LottieAnimationSource?, fail
     return (nil, mediaFailureCause(httpStatus: session.statusCode))
 }
 
+/// Lottie keeps parsed animations in memory only, so without a disk cache every file downloads again
+/// after the app restarts. This session's own `URLCache` keeps them on disk under the normal HTTP
+/// rules (`Cache-Control`, `Expires`, ETag revalidation), the same rules Android applies to images.
+/// It is separate from `URLCache.shared`, which belongs to the host app and is too small for most
+/// animations (a response is only stored when it is under about 5% of the disk capacity).
+private let lottieDownloadSession: URLSession = {
+    let configuration = URLSessionConfiguration.default
+    let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+        .appendingPathComponent("DigiaEngageLottie", isDirectory: true)
+    configuration.urlCache = URLCache(
+        memoryCapacity: 0,
+        diskCapacity: 100 * 1024 * 1024,
+        directory: directory
+    )
+    return URLSession(configuration: configuration)
+}()
+
 /// Records the HTTP status of the one download Lottie makes through it.
 private final class StatusRecordingLottieSession: LottieURLSession, @unchecked Sendable {
     private let lock = NSLock()
@@ -82,7 +99,7 @@ private final class StatusRecordingLottieSession: LottieURLSession, @unchecked S
         with url: URL,
         completionHandler: @escaping @Sendable (Data?, URLResponse?, Error?) -> Void
     ) -> URLSessionDataTask? {
-        URLSession.shared.dataTask(with: url) { data, response, error in
+        lottieDownloadSession.dataTask(with: url) { data, response, error in
             self.lock.withLock { self.recorded = (response as? HTTPURLResponse)?.statusCode }
             completionHandler(data, response, error)
         }
