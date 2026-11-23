@@ -32,7 +32,6 @@ struct GameOutcomeSourceTests {
             userId: "u_123",
             userHash: nil,
             triggerId: "cep-1",
-            showNow: true,
             testInvocationId: liveTest ? "inv-1" : nil,
             deviceId: liveTest ? "device-1" : nil
         )

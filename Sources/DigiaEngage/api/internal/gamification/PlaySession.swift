@@ -57,7 +57,6 @@ final class PlaySession {
             userId: identity.userId,
             userHash: identity.userHash,
             triggerId: request.triggerId,
-            showNow: true,
             testInvocationId: request.testInvocationId,
             deviceId: request.testInvocationId != nil ? identity.deviceId : nil
         )

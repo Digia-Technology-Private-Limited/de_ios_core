@@ -157,7 +157,6 @@ struct PlaySessionTests {
 
         #expect(decision == .open(chance))
         #expect(source.lastRequest?.triggerId == "msg-9")
-        #expect(source.lastRequest?.showNow == true)
         #expect(source.lastRequest?.testInvocationId == "inv-1")
     }
 
