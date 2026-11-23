@@ -146,11 +146,18 @@ final class GameWebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
     /// Stops the load, detaches the message handler, and closes the bridge.
     /// SwiftUI calls this when the container goes away; closing an already
     /// closed bridge is a no-op, never a second callback.
+    ///
+    /// Media is paused and the page swapped for a blank one: a skin's audio,
+    /// timers and rAF loop otherwise keep running until WebKit frees the view,
+    /// which a host retaining the view hierarchy can delay indefinitely. The
+    /// web view is never reused after this (a prewarm engine is taken once).
     func teardown() {
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "digia")
         webView.navigationDelegate = nil
         webView.uiDelegate = nil
         webView.stopLoading()
+        webView.pauseAllMediaPlayback(completionHandler: nil)
+        webView.loadHTMLString("", baseURL: nil)
         Task { @MainActor [weak game] in game?.bridge.close() }
     }
 
@@ -207,6 +214,19 @@ final class GameWebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         // Our own policy cancels land here; only a real load failure closes.
         guard code != NSURLErrorCancelled else { return }
         log.w("Game bundle failed to load", error: error.localizedDescription)
+        Task { @MainActor [weak game] in game?.failLoading() }
+    }
+
+    /// A main-frame failure after commit (the page committed, then its load
+    /// broke). Without this the game sat on the 5 s ready timer, or on a held
+    /// game nothing at all; `failLoading` acts only while still loading.
+    func webView(
+        _ webView: WKWebView,
+        didFail navigation: WKNavigation!,
+        withError error: Error
+    ) {
+        guard (error as NSError).code != NSURLErrorCancelled else { return }
+        log.w("Game page failed after commit", error: error.localizedDescription)
         Task { @MainActor [weak game] in game?.failLoading() }
     }
 
