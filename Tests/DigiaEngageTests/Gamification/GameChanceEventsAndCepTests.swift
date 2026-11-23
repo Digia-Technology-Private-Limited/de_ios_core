@@ -312,4 +312,96 @@ struct GameChanceEventsAndCepTests {
             #expect(recorder.clickedElementIds.isEmpty, "\(entry)")
         }
     }
+
+    // Fails if a live-test close or failure refreshes rewards: the
+    // `testInvocationIdOf(payload.cepCampaignId) == nil` gate on the close-path
+    // `refreshRewardsIfLoaded` in `closed`, or the `openTestInvocationId == nil`
+    // gate on either shown-failure `refreshRewardsIfLoaded` (the `.inlineTeaser`
+    // and `.floating` cases in `onFailure`). A live test wins nothing real, and the refresh's failure event rides
+    // `rewards:refresh`, which is not a live-test id and would escape
+    // live-test suppression. Mirrors Android's
+    // `liveTestCloseAndFailureSkipRewardsRefresh_realOnesRefresh`.
+    @Test("a live-test close and failure skip the rewards refresh real ones perform")
+    func liveTestCloseAndFailureSkipRewardsRefresh() async throws {
+        let (sdk, _) = try await rig()
+        let client = try #require(sdk.networkClient as? MockNetworkClient)
+        client.enqueueResponse(
+            url: DigiaEndpoints.gamificationGetRewards, statusCode: 200,
+            body: #"{"isSuccess":true,"data":{"response":{"page":{"url":"https://rewards.example"}}}}"#)
+        client.enqueueResponse(
+            url: DigiaEndpoints.gamificationState, statusCode: 200,
+            body: #"{"isSuccess":true,"data":{"response":{"state":"none"}}}"#)
+        sdk.setUserId("u_123")
+        sdk.gamification.refreshRewards()
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        try #require(sdk.rewardsResponse != nil)
+        func getRewardsCalls() -> Int {
+            client.recordedRequests.filter {
+                $0.url.absoluteString == DigiaEndpoints.gamificationGetRewards
+            }.count
+        }
+        #expect(getRewardsCalls() == 1)
+
+        let config = try #require(GamificationConfig.fromJson([
+            "skinId": "wheel", "skinVersion": 2,
+            "bundleUrl": "https://cdn.example.com/skins/wheel/2/index.html",
+            "templateType": "spinWheel", "config": [String: Any](),
+        ]))
+        let campaign = CampaignModel(
+            id: "camp-uid-1", campaignKey: "bill_pay_spin", campaignType: "gamification",
+            config: .gamification(config), targetScreenNames: [])
+        func openRequest(
+            payload: CEPTriggerPayload, entry: GamificationEntryKind = .floating
+        ) -> GameOpenRequest {
+            let controller = sdk.coordinator.open(payload, owner: "test")
+            sdk.coordinator.accept(controller, kind: entry == .inlineTeaser ? .inline : .floating)
+            sdk.gamificationSurface.chances[GamificationSurface.entryKey(payload)] =
+                GrantedChance(chanceId: "ch-test", expiresAt: nil, show: true)
+            return sdk.gameSurface.makeGameOpenRequest(
+                file: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("index.html"),
+                chanceId: "ch-test", config: config, campaign: campaign,
+                payload: payload, userId: "u_123",
+                settle: .presentation(payload: payload, entry: entry))
+        }
+
+        let testPayload = CEPTriggerPayload(
+            cepCampaignId: liveTestCepId("inv-1"), campaignKey: "bill_pay_spin", cepMetadata: [:])
+        let liveClose = openRequest(payload: testPayload)
+        liveClose.onShown?()
+        liveClose.onClose?("skin")
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        #expect(getRewardsCalls() == 1)
+
+        let liveFailed = openRequest(payload: testPayload)
+        liveFailed.onShown?()
+        liveFailed.onFailure?(.renderError)
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        #expect(getRewardsCalls() == 1)
+
+        let liveInlineFailed = openRequest(payload: testPayload, entry: .inlineTeaser)
+        liveInlineFailed.onShown?()
+        liveInlineFailed.onFailure?(.renderError)
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        #expect(getRewardsCalls() == 1)
+
+        let realPayload = CEPTriggerPayload(
+            cepCampaignId: "msg-10", campaignKey: "bill_pay_spin", cepMetadata: [:])
+        let realClose = openRequest(payload: realPayload)
+        realClose.onShown?()
+        realClose.onClose?("skin")
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        #expect(getRewardsCalls() == 2)
+
+        let realFailed = openRequest(payload: realPayload)
+        realFailed.onShown?()
+        realFailed.onFailure?(.renderError)
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        #expect(getRewardsCalls() == 3)
+
+        let realInlineFailed = openRequest(payload: realPayload, entry: .inlineTeaser)
+        realInlineFailed.onShown?()
+        realInlineFailed.onFailure?(.renderError)
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        #expect(getRewardsCalls() == 4)
+    }
 }
