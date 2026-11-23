@@ -61,16 +61,18 @@ struct FloaterStoryWindowConfig: Equatable {
     let exitAnimation: FloaterExitAnimation
 
     static func fromJson(
-        _ json: [String: Any]?, designTokens: DesignTokenCatalog = .empty
+        _ json: [String: Any]?, designTokens: DesignTokenCatalog = .empty,
+        maxWidthFraction: CGFloat = 0.9
     ) -> FloaterStoryWindowConfig {
         let j = json ?? [:]
         let border = j.object("border")
         let ratio = CGFloat(j.double("aspectRatio", default: 0.72))
         return FloaterStoryWindowConfig(
             // Clamped, not trusted: a window wider than the screen cannot be dragged
-            // back into it, and one under ~30dp cannot be reliably tapped.
+            // back into it, and one under ~30dp cannot be reliably tapped. Only a story-less
+            // floating entry may span the full width.
             widthFraction: CGFloat(j.double("widthFraction", default: 0.32))
-                .clampedToFloaterStoryRange(0.08, 1.0),
+                .clampedToFloaterStoryRange(0.08, maxWidthFraction),
             aspectRatio: ratio > 0 ? ratio : 0.72,
             position: FloaterCorner.from(j.nonBlankString("position")),
             margin: FloaterMargin.fromJson(j.object("marginDp")),
@@ -210,7 +212,8 @@ struct FloaterStoryConfig: Equatable {
             story: story,
             designWidth: designWidth > 0 ? designWidth : 360,
             window: FloaterStoryWindowConfig.fromJson(
-                templateConfig.object("collapsed"), designTokens: designTokens
+                templateConfig.object("collapsed"), designTokens: designTokens,
+                maxWidthFraction: requiresStory ? 0.9 : 1.0
             ),
             controls: FloaterStoryControlsConfig.fromJson(templateConfig.object("controls")),
             behavior: FloaterStoryBehaviorConfig.fromJson(templateConfig.object("behavior")),
