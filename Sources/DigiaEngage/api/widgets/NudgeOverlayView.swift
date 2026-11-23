@@ -635,26 +635,20 @@ struct NudgeDialogContainer: View {
 
 @MainActor private var activeWindowSize: CGSize {
     if let override = activeFloaterWindowGeometryOverride { return override.bounds.size }
-    return UIApplication.shared.connectedScenes
-        .compactMap { $0 as? UIWindowScene }
-        .first(where: { $0.activationState == .foregroundActive })?
-        .windows.first(where: \.isKeyWindow)?
-        .bounds.size ?? UIScreen.main.bounds.size
+    return ViewControllerUtil.keyWindow()?.bounds.size ?? UIScreen.main.bounds.size
 }
 
 /// Honours `activeFloaterWindowGeometryOverride`, the test seam for the window lookup; `nil` in
-/// production, where the key window of the active scene is read as before.
+/// production, where the host's window is read. React Native hosts often have no key window
+/// while a game opens, so the strict key-window lookup read zero insets and put the close
+/// button under the status bar; `ViewControllerUtil.keyWindow()` falls back to a visible window.
 @MainActor var activeWindowSafeAreaInsets: UIEdgeInsets {
     if let override = activeFloaterWindowGeometryOverride {
         return UIEdgeInsets(
             top: override.safeArea.top, left: override.safeArea.leading,
             bottom: override.safeArea.bottom, right: override.safeArea.trailing)
     }
-    return UIApplication.shared.connectedScenes
-        .compactMap { $0 as? UIWindowScene }
-        .first(where: { $0.activationState == .foregroundActive })?
-        .windows.first(where: \.isKeyWindow)?
-        .safeAreaInsets ?? .zero
+    return ViewControllerUtil.keyWindow()?.safeAreaInsets ?? .zero
 }
 
 private struct DialogHeightKey: PreferenceKey {
