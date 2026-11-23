@@ -137,7 +137,7 @@ struct RewardsPageTests {
         #expect(!Page.shouldGoBack(canGoBack: true, state: .loading))
         #expect(!Page.shouldGoBack(canGoBack: true, state: .offline))
         #expect(RewardsBridge.script(for: RewardsBridge.backMessage)
-            == "window.DigiaBridge.__receive(\"{\\\"payload\\\":{},\\\"type\\\":\\\"back\\\"}\")")
+            == RewardsBridge.deliveryScriptPrefix + "\"{\\\"payload\\\":{},\\\"type\\\":\\\"back\\\"}\")")
     }
 
     @Test("malformed, incomplete and unknown page messages are dropped")
@@ -187,10 +187,10 @@ struct RewardsPageTests {
     @Test("init and refresh go out as DigiaBridge.__receive scripts")
     func scripts() throws {
         let initScript = try #require(RewardsBridge.script(for: RewardsBridge.initMessage(context)))
-        #expect(initScript.hasPrefix("window.DigiaBridge.__receive(\""))
+        #expect(initScript.hasPrefix(RewardsBridge.deliveryScriptPrefix + "\""))
         #expect(initScript.contains("apiBase"))
         let refresh = try #require(RewardsBridge.script(for: RewardsBridge.refreshMessage))
-        #expect(refresh == "window.DigiaBridge.__receive(\"{\\\"payload\\\":{},\\\"type\\\":\\\"refresh\\\"}\")")
+        #expect(refresh == RewardsBridge.deliveryScriptPrefix + "\"{\\\"payload\\\":{},\\\"type\\\":\\\"refresh\\\"}\")")
     }
 
     @Test("insets go out as their own message")
