@@ -206,7 +206,7 @@ struct DigiaCampaignTimelineView: View {
         "campaign_not_live": "Not shown — the campaign is not live",
         "budget_exhausted": "Not shown — the campaign's budget is used up",
         "chance_expired": "Not shown — the chance expired",
-        "holdout": "Not shown — this user is in the holdout group",
+        "user_held_out": "Not shown — this user is in the holdout group",
         // render
         "displayed": "Displayed",
         "invalid_config": "Not shown — the campaign's setup couldn't be read",

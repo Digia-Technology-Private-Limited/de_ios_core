@@ -44,7 +44,7 @@ struct CEPInterfaceEnumValuesTests {
         #expect(DropReason.notInAudience.value == "not_in_audience")
         #expect(DropReason.budgetExhausted.value == "budget_exhausted")
         #expect(DropReason.chanceExpired.value == "chance_expired")
-        #expect(DropReason.notEligible.value == "holdout")
+        #expect(DropReason.notEligible.value == "user_held_out")
         #expect(DropReason.error.value == "error")
         #expect(DropReason.allCases.count == 24)
     }
