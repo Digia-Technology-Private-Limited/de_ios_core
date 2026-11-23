@@ -23,6 +23,14 @@ enum GameAvailability {
     }
 }
 
+/// Sends one validated skin `http` call: the method and path the intake
+/// accepted and the encoded body (nil for `GET`). Production sends through
+/// `GameHttpBridge` with the shared client; see `GamePresentation.httpSend`.
+/// Main-actor bound so tests can hand a non-`Sendable` answer back.
+typealias GameHttpSend = @MainActor (_ method: String, _ path: String, _ body: Data?) async -> Result<
+    GameHttpBridge.Success, GameHttpBridge.Failure
+>
+
 /// The live game session the overlay controller holds. Owns the bridge, the
 /// cached entry the web view loads, and the exactly-once close/failure
 /// callbacks. Answers every bridge request: generic `http`, `event`,
@@ -75,6 +83,26 @@ final class GamePresentation: Identifiable, ObservableObject {
     /// Why the game is closing (`user`, `skin` or `cta`): set by `dismiss`,
     /// read by `didClose` for the funnel's Dismissed reason.
     private var closeReason = "user"
+
+    /// One armed http watchdog per watched in-flight call, by skin request id.
+    private var httpWatchdogs: [String: Task<Void, Never>] = [:]
+    /// When each watched call started, for the `game_rewards_failed` duration.
+    private var httpWatchdogStarted: [String: Date] = [:]
+    /// Skin request ids whose watchdog already fired: late answers are dropped.
+    private var httpTimedOutIds = Set<String>()
+    /// How long one watched `http` call may hang before the game closes.
+    /// Tests shorten it so the watchdog fires without waiting out the delay.
+    var httpWatchdogSeconds: TimeInterval = GameBridge.httpWatchdogSeconds
+    /// Sends one validated skin `http` call. Production sends through
+    /// `GameHttpBridge` with the shared client; tests inject a hang or a
+    /// canned answer so the watchdog is drivable without a socket.
+    var httpSend: GameHttpSend = { method, path, body in
+        await GameHttpBridge.send(
+            client: SDKInstance.shared.networkClient,
+            baseUrl: DigiaEndpoints.baseUrl,
+            headers: SDKInstance.shared.requestHeaders,
+            method: method, path: path, body: body)
+    }
 
     init?(request: GameOpenRequest) {
         var isDirectory: ObjCBool = false
@@ -156,6 +184,29 @@ final class GamePresentation: Identifiable, ObservableObject {
         }
         if !didCommitPage { request.timing.stage = GameOpenTiming.stageCommit }
         coordinator.start()
+        if !held { armOpenWatchdog() }
+    }
+
+    /// The overall deadline for an open that is not a direct campaign: the
+    /// presentation coordinator's acceptance window (15 s, the same watchdog
+    /// that takes a stuck nudge off), counted in wall clock from the open to
+    /// `ready` across every phase and across background time. A direct game
+    /// is already watched by the coordinator, whose timeout closes it through
+    /// `GamificationSurface.dismiss`, so it arms nothing here. Entry and
+    /// rewards opens have no coordinator presentation, so this is theirs. A
+    /// game that is ready, finished or held is left alone.
+    private func armOpenWatchdog() {
+        guard request.entry != GamificationEntryKind.direct.rawValue else { return }
+        let seconds = PresentationCoordinator.defaultAcceptanceTimeout
+        DispatchQueue.main.asyncAfter(wallDeadline: .now() + seconds) { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self, !self.didFinish, !self.isReady, !self.isHeld else { return }
+                log.w("Game not shown within \(Int(seconds)) s — cancelled",
+                      campaign: self.request.campaignKey)
+                self.finish(report: { [request = self.request] in request.onFailure?(.openTimeout) })
+                self.bridge.close()
+            }
+        }
     }
 
     /// True once the page committed: the load timer is done and the ready
@@ -222,6 +273,7 @@ final class GamePresentation: Identifiable, ObservableObject {
         initMessage = Self.initMessage(for: request)
         lastDevicePush = GameDeviceInfo.current(sdkVersion: sdkVersion).pushPayload
         isHeld = false
+        armOpenWatchdog()
         if pageFinished { sendInit() }
         armLoadTimer()
         // A skin that booted while held already sent its one `ready`.
@@ -446,14 +498,15 @@ final class GamePresentation: Identifiable, ObservableObject {
             reject(code: .badRequest)
             return
         }
+        if Self.httpWatchdogPaths.contains(validated) { armHttpWatchdog(id: id, path: validated) }
         Task { @MainActor [weak self] in
             guard let self else { return }
-            let result = await GameHttpBridge.send(
-                client: SDKInstance.shared.networkClient,
-                baseUrl: DigiaEndpoints.baseUrl,
-                headers: SDKInstance.shared.requestHeaders,
-                method: method, path: validated, body: payloadData)
+            let result = await self.httpSend(method, validated, payloadData)
             guard self.bridge.state != .closed else { return }
+            self.cancelHttpWatchdog(id: id)
+            // A late answer after the watchdog fired: the game already closed
+            // on the timeout. Never reply, never record: the window settles once.
+            guard !self.httpTimedOutIds.contains(id) else { return }
             switch result {
             case .success(let response):
                 self.bridge.answer(id: id, payload: [
@@ -487,6 +540,55 @@ final class GamePresentation: Identifiable, ObservableObject {
 
     private func httpErrorMessage(_ code: GameBridgeErrorCode) -> String {
         code == .timeout ? "request timed out" : "request failed"
+    }
+
+    /// The `http` paths a stuck game would wait on: a call here with no answer
+    /// within `httpWatchdogSeconds` closes the game. Every other path relies
+    /// on `http`'s own 20 s `error timeout`.
+    private static let httpWatchdogPaths: Set<String> = ["state", "play", "getRewards"]
+
+    /// Arms the watchdog for one watched skin `http` call: still pending when
+    /// the delay elapses means the native stack hung, so the fire closes the
+    /// game. Re-arming replaces the earlier task, so a reused id fires once.
+    private func armHttpWatchdog(id: String, path: String) {
+        cancelHttpWatchdog(id: id)
+        let delay = httpWatchdogSeconds
+        httpWatchdogs[id] = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            self?.httpWatchdogFired(id: id, path: path)
+        }
+        httpWatchdogStarted[id] = Date()
+    }
+
+    private func cancelHttpWatchdog(id: String) {
+        httpWatchdogs.removeValue(forKey: id)?.cancel()
+        httpWatchdogStarted.removeValue(forKey: id)
+    }
+
+    private func cancelAllHttpWatchdogs() {
+        for task in httpWatchdogs.values { task.cancel() }
+        httpWatchdogs.removeAll()
+        httpWatchdogStarted.removeAll()
+    }
+
+    /// Fires once per window: marks the call timed out so its late answer is
+    /// dropped, reports `game_rewards_failed`, then closes the game through
+    /// the normal path — `dismiss` when showing (so the entry stays and the
+    /// rewards page refreshes, the existing retry affordances), `didFail`
+    /// before `ready` (which reports the single `game_open_failed`).
+    private func httpWatchdogFired(id: String, path: String) {
+        httpWatchdogs.removeValue(forKey: id)
+        guard !didFinish, !isClosing, bridge.state != .closed else { return }
+        guard httpTimedOutIds.insert(id).inserted else { return }
+        let durationMs = Int(Date().timeIntervalSince(httpWatchdogStarted.removeValue(forKey: id) ?? Date()) * 1000)
+        request.onHttpTimeout?(path, durationMs)
+        if isReady {
+            log.w("Game http call timed out with no answer — closing", campaign: request.campaignKey)
+            dismiss(reason: GameFailure.httpTimeout.wireValue)
+        } else {
+            didFail(.httpTimeout)
+        }
     }
 
     private func emitSkinLog(level: String, message: String) {
@@ -786,6 +888,7 @@ final class GamePresentation: Identifiable, ObservableObject {
     private func finish(report: @MainActor () -> Void) {
         guard !didFinish else { return }
         didFinish = true
+        cancelAllHttpWatchdogs()
         if GamePresenter.loading === self { GamePresenter.loading = nil }
         motion.stopAll()
         removeObservers()

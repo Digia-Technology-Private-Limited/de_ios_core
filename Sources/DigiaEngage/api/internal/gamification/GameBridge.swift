@@ -61,6 +61,14 @@ final class GameBridge {
     /// quietly. Its own budget, so a slow engine start on a cheap phone does
     /// not eat the skin's 5 s.
     nonisolated static let loadTimeoutSeconds = 15.0
+    /// Bound for one skin `http` call the game waits on (`state`, `play`,
+    /// `getRewards`): `http` already answers `error timeout` at 20 s
+    /// (`timeoutSeconds`), so a call still pending here means the native stack
+    /// hung and will never answer. 30 s = the 20 s http timeout plus headroom
+    /// for timer slop on low-end devices and a full skin busy-retry cycle, so
+    /// a healthy-but-slow call is always answered first. Same value on Android
+    /// (`GAME_HTTP_WATCHDOG_MS`); the stuck game closes instead of freezing.
+    nonisolated static let httpWatchdogSeconds: TimeInterval = 30.0
     /// Skin messages above this many UTF-8 bytes are dropped, never parsed. Fits a
     /// full 16 KB `storage` value or `http` body plus its envelope.
     nonisolated static let maxMessageBytes = 64 * 1024
