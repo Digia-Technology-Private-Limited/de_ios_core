@@ -300,6 +300,26 @@ private struct FloaterSessionView: View {
                     }
                 }
                 .frame(width: width, height: height)
+                // The window's own background, always opaque: the collapsed
+                // window shows it behind (or before) the video exactly like
+                // Flutter's `BoxDecoration color` and Android's `.background`
+                // do — a transparent collapsed window lets the host app show
+                // through the video area. Same rule as both: the expanded
+                // background color, else black. Ahead of `clipShape` so the
+                // rounded corners clip it.
+                .background(
+                    (config.expanded.backgroundColor.map {
+                        canvasTheme.color($0, isDark: isDark)
+                    } ?? .black)
+                    // The collapsed window must not claim touches: drags and
+                    // media taps belong to the interaction shield mounted
+                    // underneath it, and the chrome pills above it take their
+                    // own. The old transparent backing was untouchable by
+                    // rendering nothing; an opaque one hit-tests, so say so
+                    // explicitly. Expanded, the shield is gone and this must
+                    // keep blocking touches to the host app, as before.
+                    .allowsHitTesting(expanded)
+                )
                 .clipShape(ClampedRoundedRectangle(cornerRadius: cornerRadius))
                 // Flutter's `BoxShadow(color: Color(0x73000000), blurRadius: 24, offset:
                 // Offset(0, 8))`. Unlike Compose (no directly-offset drop-shadow modifier),
@@ -333,11 +353,6 @@ private struct FloaterSessionView: View {
                             lineWidth: (!expanded && config.collapsed.borderWidthDp > 0)
                                 ? config.collapsed.borderWidthDp : 0
                         )
-                )
-                .background(
-                    (config.expanded.backgroundColor.map { canvasTheme.color($0, isDark: isDark) }
-                        ?? .black)
-                        .opacity(expanded ? 1 : 0)
                 )
                 // Image/GIF/Lottie surfaces can be backed by library-owned render layers.
                 // Apply chrome as the final window overlay, with an explicit z-order, so the
