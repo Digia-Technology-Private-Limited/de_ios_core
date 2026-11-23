@@ -6,7 +6,10 @@ import Foundation
 /// only, never a CEP click), and one Dismissed when the window closes after
 /// showing (`user`, `skin`, `cta` or `failure`). Same event names as every other
 /// type, so the backend funnels read games without a new case. `chance_id` is
-/// always the chance the window opened with. Mirrors Android's `GameEvent`.
+/// always the chance the window opened with. `entry` is where the window opened:
+/// `direct`, `inlineTeaser`, `floating` or `rewards`, the value the health events
+/// send; left off the wire when nil. A rewards open still rides its synthetic
+/// `rewards:<chanceId>` payload; `entry` sits beside it. Mirrors Android's `GameEvent`.
 enum GameEvent {
     static let displayStyle = "game"
 
@@ -20,6 +23,7 @@ enum GameEvent {
         var tier: String? = nil
         /// Milliseconds from the intent (trigger or tap) to `ready`.
         var msToReady: Int64? = nil
+        var entry: String? = nil
 
         var eventName: String { "Digia Experience Viewed" }
 
@@ -33,6 +37,7 @@ enum GameEvent {
             if let warm { properties["warm"] = warm }
             if let tier { properties["tier"] = tier }
             if let msToReady { properties["ms_to_ready"] = msToReady }
+            if let entry { properties["entry"] = entry }
             return properties
         }
     }
@@ -42,6 +47,7 @@ enum GameEvent {
         let chanceId: String
         /// The link a skin `openLink` CTA opened; left off the wire otherwise.
         var actionUrl: String? = nil
+        var entry: String? = nil
 
         var eventName: String { "Digia Experience Clicked" }
 
@@ -52,6 +58,7 @@ enum GameEvent {
                 "chance_id": chanceId,
             ]
             if let actionUrl { properties["action_url"] = actionUrl }
+            if let entry { properties["entry"] = entry }
             return properties
         }
     }
@@ -66,6 +73,7 @@ enum GameEvent {
         let skinVersion: Int
         let plays: Int
         let playRefused: String
+        var entry: String? = nil
 
         var eventName: String { "Digia Experience Dismissed" }
 
@@ -80,6 +88,7 @@ enum GameEvent {
                 "plays": plays,
             ]
             if !playRefused.isEmpty { out["play_refused"] = playRefused }
+            if let entry { out["entry"] = entry }
             return out
         }
     }
