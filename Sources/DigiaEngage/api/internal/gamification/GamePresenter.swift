@@ -118,7 +118,13 @@ final class GamePresentation: Identifiable, ObservableObject {
             namespace: GameSkinStorage.namespace(
                 projectId: request.projectId, skinId: request.skinId, identity: request.userId))
         self.initMessage = Self.initMessage(for: request)
-        bridge.onReady = { [weak self] version in self?.didBecomeReady(version: version) }
+        bridge.onReady = { [weak self] version in
+            // Every `ready` gets `init`, the first included (Android parity): a
+            // skin whose listener was not attached at didFinish would otherwise
+            // never get it and sit visible but dead.
+            self?.sendInit()
+            self?.didBecomeReady(version: version)
+        }
         bridge.onRepeatedReady = { [weak self] _ in
             self?.sendInit()
             // A skin re-announcing itself on an open game gets the current
@@ -212,18 +218,37 @@ final class GamePresentation: Identifiable, ObservableObject {
     /// True once the page committed: the load timer is done and the ready
     /// timer owns the wait for `ready`.
     private var didCommitPage = false
+    /// Foreground seconds left in the current phase's budget; nil until the
+    /// phase first arms.
+    private var phaseRemaining: TimeInterval?
+    /// Uptime when the running timer was armed; nil while none runs.
+    private var phaseArmedAt: TimeInterval?
+
+    /// Charges the running timer's foreground time to the phase budget.
+    private func spendPhaseBudget() {
+        guard let armedAt = phaseArmedAt, let remaining = phaseRemaining else { return }
+        phaseRemaining = max(0, remaining - (ProcessInfo.processInfo.systemUptime - armedAt))
+        phaseArmedAt = nil
+    }
 
     /// Arms the timer for the phase the load is in: 15 s to the page commit,
-    /// then 5 s to `ready`. Each arm carries a fresh bridge generation, so
-    /// re-arming (or `cancelReadyTimer`) makes any earlier timer a stale no-op.
-    /// Runs only while loading and in the foreground.
+    /// then 5 s to `ready`. The budgets count foreground time only, like
+    /// Android: a re-arm after the app returns gets what is left, never a full
+    /// budget, so repeated backgrounding cannot keep a load (and the busy slot)
+    /// alive forever. Each arm carries a fresh bridge generation, so re-arming
+    /// (or `cancelReadyTimer`) makes any earlier timer a stale no-op. Runs only
+    /// while loading and in the foreground.
     func armLoadTimer() {
         guard !didFinish, !isHeld, bridge.state == .loading,
               UIApplication.shared.applicationState == .active
         else { return }
-        let generation = bridge.beginLoading()
+        spendPhaseBudget()
         let committed = didCommitPage
-        let seconds = committed ? GameBridge.readyTimeoutSeconds : GameBridge.loadTimeoutSeconds
+        let seconds = phaseRemaining
+            ?? (committed ? GameBridge.readyTimeoutSeconds : GameBridge.loadTimeoutSeconds)
+        phaseRemaining = seconds
+        phaseArmedAt = ProcessInfo.processInfo.systemUptime
+        let generation = bridge.beginLoading()
         DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
             Task { @MainActor [weak self] in
                 if committed {
@@ -240,11 +265,14 @@ final class GamePresentation: Identifiable, ObservableObject {
         guard !didCommitPage else { return }
         didCommitPage = true
         request.timing.stage = GameOpenTiming.stageReady
+        // The ready phase starts with its own full budget.
+        phaseRemaining = nil
+        phaseArmedAt = nil
         armLoadTimer()
     }
 
-    /// Sends the session's `init`: once after the page loads, and again on a
-    /// repeated `ready`. Each `init` fully resets the skin.
+    /// Sends the session's `init`: once after the page loads, and again on
+    /// every `ready`. Each `init` fully resets the skin.
     func sendInit() {
         pageFinished = true
         guard !isHeld else { return }
@@ -274,7 +302,8 @@ final class GamePresentation: Identifiable, ObservableObject {
         lastDevicePush = GameDeviceInfo.current(sdkVersion: sdkVersion).pushPayload
         isHeld = false
         armOpenWatchdog()
-        if pageFinished { sendInit() }
+        // A held `ready` is replayed below and answered with `init` there.
+        if pageFinished, heldReady == nil { sendInit() }
         armLoadTimer()
         // A skin that booted while held already sent its one `ready`.
         if let ready = heldReady {
@@ -799,7 +828,10 @@ final class GamePresentation: Identifiable, ObservableObject {
     private func appDidResignActive() {
         guard !didFinish, !isHeld else { return }
         request.onForeground?(false)
-        if bridge.state == .loading { bridge.cancelReadyTimer() }
+        if bridge.state == .loading {
+            spendPhaseBudget()
+            bridge.cancelReadyTimer()
+        }
         pushLifecycle("paused")
         motion.suspend()
     }
@@ -897,6 +929,7 @@ final class GamePresentation: Identifiable, ObservableObject {
             webCoordinator?.teardown()
         }
         SDKInstance.shared.controller.dismissGame()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { RewardsPageViewController.sweepOrphanGameHost() }
         report()
         // A test send that superseded this game opens now that it is gone.
         if !GamePresenter.isBusy, let next = GamePresenter.pendingTestOpen {

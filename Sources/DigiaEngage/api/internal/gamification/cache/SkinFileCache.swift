@@ -159,11 +159,17 @@ struct SkinFileCache: Sendable {
 
     // MARK: - Fetch
 
+    /// Every working skin defines `window.DigiaBridge`; see `download`.
+    static let bridgeMarker = Data("DigiaBridge".utf8)
+
     /// Downloads `bundleUrl` (the skin's single self-contained `index.html`)
     /// and stores it under `skinId`/`version`. Throws on an unusable URL (not
     /// https, nor http from the API base origin — see `GameURLPolicy.allowsBundle`), a
-    /// transport failure, a non-2xx status, or an empty or over-budget body.
-    /// Already-cached entries are not re-downloaded.
+    /// transport failure, a non-2xx status, an empty or over-budget body, or a
+    /// body without `DigiaBridge` (a captive portal or proxy page served as 200:
+    /// native replies only through `window.DigiaBridge`, so such a file can
+    /// never run, and caching it would pin the broken game until the version
+    /// changes). Already-cached entries are not re-downloaded.
     func download(bundleUrl: String, skinId: String, version: Int) async throws -> URL {
         if let cached = cachedFile(skinId: skinId, version: version) { return cached }
         guard let url = URL(string: bundleUrl), GameURLPolicy.allowsBundle(url)
@@ -174,7 +180,8 @@ struct SkinFileCache: Sendable {
             throw SkinFileCacheError.badResponse
         }
         guard let data = response.body, !data.isEmpty,
-              data.count <= Self.singleFileMaxBytes
+              data.count <= Self.singleFileMaxBytes,
+              data.range(of: Self.bridgeMarker) != nil
         else {
             throw SkinFileCacheError.invalidFile
         }

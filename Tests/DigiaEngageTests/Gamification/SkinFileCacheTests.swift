@@ -49,7 +49,7 @@ struct SkinFileCacheTests {
     func downloadCaches() async throws {
         let (cache, client, _) = makeCache()
         let url = "https://cdn.example.com/s/wheel/3/index.html"
-        client.enqueueResponse(url: url, statusCode: 200, body: "<html>v3</html>")
+        client.enqueueResponse(url: url, statusCode: 200, body: "<html>v3 DigiaBridge</html>")
 
         let first = try await cache.download(bundleUrl: url, skinId: "wheel", version: 3)
         let second = try await cache.download(bundleUrl: url, skinId: "wheel", version: 3)
@@ -58,7 +58,7 @@ struct SkinFileCacheTests {
         // The stored copy carries the CSP meta tag.
         #expect(
             try String(data: Data(contentsOf: first), encoding: .utf8)
-                == String(data: SkinFileCache.withCspMetaTag(Data("<html>v3</html>".utf8)), encoding: .utf8))
+                == String(data: SkinFileCache.withCspMetaTag(Data("<html>v3 DigiaBridge</html>".utf8)), encoding: .utf8))
         // Guards the cached-first check in download.
         #expect(client.requestCount == 1)
     }
@@ -79,6 +79,14 @@ struct SkinFileCacheTests {
             try await cache.download(bundleUrl: url, skinId: "wheel", version: 2)
         }
         #expect(cache.cachedFile(skinId: "wheel", version: 2) == nil)
+
+        // Guards the bridge-marker check: a captive portal answering 200 with
+        // its own page must not be cached as the skin.
+        client.enqueueResponse(url: url, statusCode: 200, body: "<html>Sign in to Wi-Fi</html>")
+        await #expect(throws: SkinFileCacheError.self) {
+            try await cache.download(bundleUrl: url, skinId: "wheel", version: 4)
+        }
+        #expect(cache.cachedFile(skinId: "wheel", version: 4) == nil)
     }
 
     @Test("prefetch skips cached entries and drops failures")
@@ -86,7 +94,7 @@ struct SkinFileCacheTests {
         let (cache, client, _) = makeCache()
         client.enqueueResponse(
             url: "https://cdn.example.com/s/wheel/3/index.html",
-            statusCode: 200, body: "<html></html>")
+            statusCode: 200, body: "<html>DigiaBridge</html>")
 
         await cache.prefetch([
             (bundleUrl: "https://cdn.example.com/s/wheel/3/index.html", skinId: "wheel", version: 3),
