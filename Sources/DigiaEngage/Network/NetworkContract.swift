@@ -12,6 +12,8 @@ struct NetworkRequest: Sendable {
     let body: Data?
     let connectTimeout: TimeInterval?
     let readTimeout: TimeInterval?
+    /// false answers a 3xx as the final response instead of following it.
+    let followRedirects: Bool
 
     init(
         url: URL,
@@ -19,7 +21,8 @@ struct NetworkRequest: Sendable {
         headers: [String: String] = [:],
         body: Data? = nil,
         connectTimeout: TimeInterval? = nil,
-        readTimeout: TimeInterval? = nil
+        readTimeout: TimeInterval? = nil,
+        followRedirects: Bool = true
     ) {
         self.url = url
         self.method = method
@@ -27,6 +30,7 @@ struct NetworkRequest: Sendable {
         self.body = body
         self.connectTimeout = connectTimeout
         self.readTimeout = readTimeout
+        self.followRedirects = followRedirects
     }
 
     init(
@@ -42,6 +46,7 @@ struct NetworkRequest: Sendable {
         self.body = body
         self.connectTimeout = timeoutInterval
         self.readTimeout = timeoutInterval
+        self.followRedirects = true
     }
 
     var timeoutInterval: TimeInterval? {

@@ -84,6 +84,9 @@ final class GamePresentation: Identifiable, ObservableObject {
     /// read by `didClose` for the funnel's Dismissed reason.
     private var closeReason = "user"
 
+    /// Every in-flight skin `http` call, by skin request id; cancelled at
+    /// close so a call the user closed on stops instead of running on (row 21).
+    private var httpTasks: [String: Task<Void, Never>] = [:]
     /// One armed http watchdog per watched in-flight call, by skin request id.
     private var httpWatchdogs: [String: Task<Void, Never>] = [:]
     /// When each watched call started, for the `game_rewards_failed` duration.
@@ -498,6 +501,12 @@ final class GamePresentation: Identifiable, ObservableObject {
             reject(code: .badRequest)
             return
         }
+        // A looping skin must not hammer the backend (row 20): a reused id or
+        // a call past the in-flight cap answers `bad_request`, like Android.
+        guard httpTasks[id] == nil, httpTasks.count < Self.maxHttpInFlight else {
+            reject(code: .badRequest)
+            return
+        }
         guard let validated = GameHttpBridge.validatedPath(path) else {
             reject(code: .badRequest)
             return
@@ -528,10 +537,11 @@ final class GamePresentation: Identifiable, ObservableObject {
             return
         }
         if Self.httpWatchdogPaths.contains(validated) { armHttpWatchdog(id: id, path: validated) }
-        Task { @MainActor [weak self] in
+        httpTasks[id] = Task { @MainActor [weak self] in
             guard let self else { return }
             let result = await self.httpSend(method, validated, payloadData)
-            guard self.bridge.state != .closed else { return }
+            guard !Task.isCancelled, !self.didFinish, self.bridge.state != .closed else { return }
+            self.httpTasks.removeValue(forKey: id)
             self.cancelHttpWatchdog(id: id)
             // A late answer after the watchdog fired: the game already closed
             // on the timeout. Never reply, never record: the window settles once.
@@ -575,6 +585,8 @@ final class GamePresentation: Identifiable, ObservableObject {
     /// within `httpWatchdogSeconds` closes the game. Every other path relies
     /// on `http`'s own 20 s `error timeout`.
     private static let httpWatchdogPaths: Set<String> = ["state", "play", "getRewards"]
+    /// Most skin `http` calls one game may have in flight at once (row 20).
+    private static let maxHttpInFlight = 8
 
     /// Arms the watchdog for one watched skin `http` call: still pending when
     /// the delay elapses means the native stack hung, so the fire closes the
@@ -921,6 +933,8 @@ final class GamePresentation: Identifiable, ObservableObject {
         guard !didFinish else { return }
         didFinish = true
         cancelAllHttpWatchdogs()
+        for task in httpTasks.values { task.cancel() }
+        httpTasks.removeAll()
         if GamePresenter.loading === self { GamePresenter.loading = nil }
         motion.stopAll()
         removeObservers()

@@ -117,11 +117,22 @@ enum RewardsBridge {
     static var backMessage: [String: Any] { ["type": "back", "payload": [String: Any]()] }
 
     /// The script that delivers `message` to `window.DigiaBridge.__receive`,
-    /// the same double-encoding the games bridge uses.
+    /// the same double-encoding the games bridge uses. The page defines the
+    /// bridge in a module script, which can still be pending when the load
+    /// finishes, so a message that arrives first waits in a page-side queue
+    /// and goes out in order at DOMContentLoaded / load.
     @MainActor
     static func script(for message: [String: Any]) -> String? {
-        GameBridge.receiveScript(for: message)
+        GameBridge.stringLiteral(for: message).map { deliveryScriptPrefix + $0 + ")" }
     }
+
+    /// Kept byte-identical with Android's `RewardsWebPage`.
+    static let deliveryScriptPrefix =
+        "(function(m){var w=window,q=w.__digiaRewardsQueue=w.__digiaRewardsQueue||[];q.push(m);"
+        + "function f(){var b=w.DigiaBridge;if(!b||typeof b.__receive!=='function')return;"
+        + "while(q.length)b.__receive(q.shift())}f();"
+        + "if(q.length&&!w.__digiaRewardsWait){w.__digiaRewardsWait=1;"
+        + "document.addEventListener('DOMContentLoaded',f);w.addEventListener('load',f)}})("
 
     /// A BCP-47 tag such as `en-US`, from the user's first preferred language.
     static func bcp47Locale(preferred: [String] = Locale.preferredLanguages) -> String {

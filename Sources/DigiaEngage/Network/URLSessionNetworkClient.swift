@@ -80,7 +80,9 @@ final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
             }
         }
 
-        let (data, response) = try await session.data(for: urlRequest)
+        let (data, response) = request.followRedirects
+            ? try await session.data(for: urlRequest)
+            : try await session.data(for: urlRequest, delegate: RefuseRedirectDelegate.shared)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw URLError(.badServerResponse)
         }
@@ -479,3 +481,18 @@ struct SSEFrameParser {
     }
 }
 
+/// Answers a redirect with the 3xx itself, so a captive portal's login page is
+/// never mistaken for the API's answer.
+private final class RefuseRedirectDelegate: NSObject, URLSessionTaskDelegate, Sendable {
+    static let shared = RefuseRedirectDelegate()
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
+    }
+}

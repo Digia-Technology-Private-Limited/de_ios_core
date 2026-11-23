@@ -269,6 +269,11 @@ final class GameBridge {
     /// JSON-encoded twice — once as the message, once as the string literal
     /// argument — so text values can never break out of the script.
     static func receiveScript(for message: [String: Any]) -> String? {
+        stringLiteral(for: message).map { "window.DigiaBridge.__receive(\($0))" }
+    }
+
+    /// `message` as JSON, then as a JS string literal holding that JSON.
+    static func stringLiteral(for message: [String: Any]) -> String? {
         guard JSONSerialization.isValidJSONObject(message),
               let data = try? JSONSerialization.data(
                   withJSONObject: message, options: [.sortedKeys]),
@@ -276,7 +281,7 @@ final class GameBridge {
               let literalData = try? JSONEncoder().encode(json),
               let literal = String(data: literalData, encoding: .utf8)
         else { return nil }
-        return "window.DigiaBridge.__receive(\(literal))"
+        return literal
     }
 
     private func send(_ message: [String: Any]) {
