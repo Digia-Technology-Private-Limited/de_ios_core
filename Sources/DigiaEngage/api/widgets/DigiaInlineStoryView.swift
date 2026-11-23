@@ -71,7 +71,7 @@ private struct SingleImageStoryPreview: View {
 
     var body: some View {
         let media = Color.black
-            .overlay(StoryRemoteImage(urlString: image.url, fit: image.boxFit))
+            .overlay(StoryRemoteImage(urlString: image.url, fit: image.boxFit, blurHash: image.placeholder?.stillBlurHash))
             .clipShape(RoundedRectangle(cornerRadius: CGFloat(image.cornerRadius), style: .continuous))
         Group {
             if image.aspectRatio > 0 {
@@ -953,6 +953,8 @@ struct StoryRemoteImage: View {
     /// failure fill, every other story surface none (its own ground shows). Once the picture has
     /// drawn, a letterbox shows what is behind the card, as it always did.
     var ground: Color? = nil
+    /// The authored blurred preview, drawn while the picture loads and after a failure.
+    var blurHash: String? = nil
     @State private var loaded = false
 
     var body: some View {
@@ -963,6 +965,7 @@ struct StoryRemoteImage: View {
             MediaImage(
                 url: urlString,
                 fit: .fill,
+                blurHash: blurHash,
                 onSuccess: { loaded = true }
             )
         }
