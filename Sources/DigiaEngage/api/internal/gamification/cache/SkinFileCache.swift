@@ -187,10 +187,17 @@ struct SkinFileCache: Sendable {
         }
         // The write plus the eviction enumeration run on a background thread
         // instead of the caller's actor (usually main); the lock keeps
-        // concurrent misses from interleaving.
-        return try await Task.detached {
-            try self.store(skinId: skinId, version: version, data: data)
-        }.value
+        // concurrent misses from interleaving. A file-system failure there is
+        // `storeFailed`, so a prefetch reports it as `store_failed`, like Android.
+        do {
+            return try await Task.detached {
+                try self.store(skinId: skinId, version: version, data: data)
+            }.value
+        } catch let error as SkinFileCacheError {
+            throw error
+        } catch {
+            throw SkinFileCacheError.storeFailed(error)
+        }
     }
 
     /// Prefetches skins fire-and-forget: already-cached entries are skipped,
@@ -226,7 +233,7 @@ struct SkinFileCache: Sendable {
         switch error as? SkinFileCacheError {
         case .badURL: return nil
         case .invalidFile: return "invalid_file"
-        case .noCachesDirectory: return "store_failed"
+        case .noCachesDirectory, .storeFailed: return "store_failed"
         case .badResponse, nil: return "download_failed"
         }
     }
@@ -327,6 +334,8 @@ enum SkinFileCacheError: Error {
     case badURL
     case badResponse
     case invalidFile
+    /// Writing the downloaded file to the cache failed.
+    case storeFailed(Error)
 }
 
 /// The serial guard around every skin-cache file read, write, touch and
