@@ -54,7 +54,6 @@ final class GamePresentation: Identifiable, ObservableObject {
     /// True from the first close request until the exit animation ends and the
     /// session settles; the container animates out on it.
     @Published private(set) var isClosing = false
-    /// The native mute button's state: off for each new game, in memory only.
     /// Muted sends `device.soundAllowed = false`, so the skin goes quiet.
     @Published private(set) var isMuted = false
 
@@ -87,7 +86,6 @@ final class GamePresentation: Identifiable, ObservableObject {
     /// Every in-flight skin `http` call, by skin request id; cancelled at
     /// close so a call the user closed on stops instead of running on (row 21).
     private var httpTasks: [String: Task<Void, Never>] = [:]
-    /// One armed http watchdog per watched in-flight call, by skin request id.
     private var httpWatchdogs: [String: Task<Void, Never>] = [:]
     /// When each watched call started, for the `game_rewards_failed` duration.
     private var httpWatchdogStarted: [String: Date] = [:]
