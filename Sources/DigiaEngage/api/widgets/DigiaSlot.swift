@@ -42,7 +42,7 @@ public struct DigiaSlot<Placeholder: View>: View {
         // Empty, the slot emits nothing (an EmptyView placeholder is no stack child), so it
         // adds no spacing to the host's layout. `slot_visible` is not sent for an empty slot.
         let live = inlineController.getCampaign(placementKey)
-        let liveCanvas = live != nil && inlineController.getCanvasConfig(placementKey) != nil
+        let liveCanvas = live != nil && isGamificationCanvas(placementKey)
         // Once a canvas teaser is dismissed, its last content stays for the exit animation.
         let ghost = live == nil ? lastCanvas : nil
         let animated = liveCanvas || ghost != nil
@@ -52,15 +52,17 @@ public struct DigiaSlot<Placeholder: View>: View {
                 content(ghost: ghost)
             }
             .background(SlotAppearanceReader(placementKey: placementKey))
-            .background(
-                GeometryReader { proxy in
-                    Color.clear
-                        .onAppear { if ghost == nil { canvasHeight = proxy.size.height } }
-                        .onChange(of: proxy.size.height) { if ghost == nil { canvasHeight = $0 } }
+            .background {
+                if animated {
+                    GeometryReader { proxy in
+                        Color.clear
+                            .onAppear { if ghost == nil { canvasHeight = proxy.size.height } }
+                            .onChange(of: proxy.size.height) { if ghost == nil { canvasHeight = $0 } }
+                    }
                 }
-            )
+            }
             .frame(height: ghost != nil && collapsed ? 0 : nil, alignment: .top)
-            .clipped()
+            .clippedIf(animated)
             .opacity(animated ? ((collapsed || !appeared) ? 0 : 1) : 1)
             .scaleEffect(animated && !reduced && !collapsed && !appeared ? Self.startScale : 1)
             .onAppear {
@@ -84,8 +86,17 @@ public struct DigiaSlot<Placeholder: View>: View {
         }
     }
 
+    /// Only a gamification entry teaser animates; every other inline canvas appears as-is.
+    private func isGamificationCanvas(_ placementKey: String) -> Bool {
+        guard inlineController.getCanvasConfig(placementKey) != nil,
+            let payload = inlineController.getCampaign(placementKey)
+        else { return false }
+        return SDKInstance.shared.gamificationSurface.entryCampaign(payload)?.gamificationConfig != nil
+    }
+
     private func recordCanvas() {
-        guard let config = inlineController.getCanvasConfig(placementKey),
+        guard isGamificationCanvas(placementKey),
+            let config = inlineController.getCanvasConfig(placementKey),
             let payload = inlineController.getCampaign(placementKey)
         else { return }
         lastCanvas = LastCanvas(config: config, payload: payload)
@@ -260,5 +271,12 @@ struct SlotVisibilityReader: UIViewRepresentable {
             // SwiftUI state must not change during a view update.
             DispatchQueue.main.async { [onChange] in onChange?(shown) }
         }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func clippedIf(_ clip: Bool) -> some View {
+        if clip { clipped() } else { self }
     }
 }
