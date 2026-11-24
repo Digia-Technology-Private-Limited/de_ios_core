@@ -95,8 +95,9 @@ final class GamificationSurface: CampaignSurface {
         let key = campaign.campaignKey
         let isLiveTest = request.driver.kind == .liveTest
         // The SDK never invents a trigger id: without one the server cannot
-        // dedup repeats, so the trigger is dropped, not guessed.
-        let triggerId = PlaySession.triggerId(of: payload)
+        // dedup repeats, so the trigger is dropped, not guessed. The explicit
+        // id wins over the stamped payload id, as on Android.
+        let triggerId = PlaySession.triggerId(of: payload, presentationId: request.presentationId)
         guard !triggerId.isEmpty else {
             return request.invalidConfig(
                 "gamification skipped — no trigger id", cause: Self.causeMissingConfig)
@@ -122,7 +123,7 @@ final class GamificationSurface: CampaignSurface {
         sdk.logVerbose("routeByCampaignKey GAMIFICATION key='\(key)' triggerId='\(triggerId)'")
         sdk.gamification.requestGameChance(
             campaign: campaign, config: config, payload: payload,
-            direct: true, driver: request.driver)
+            direct: true, driver: request.driver, presentationId: request.presentationId)
         return .accepted(payload: payload, kind: .modal)
     }
 
@@ -153,10 +154,10 @@ final class GamificationSurface: CampaignSurface {
         }
         sdk.logVerbose(
             "routeByCampaignKey GAMIFICATION key='\(key)' "
-                + "triggerId='\(PlaySession.triggerId(of: request.payload))'")
+                + "triggerId='\(PlaySession.triggerId(of: request.payload, presentationId: request.presentationId))'")
         sdk.gamification.requestGameChance(
             campaign: campaign, config: config, payload: request.payload,
-            direct: false, driver: request.driver)
+            direct: false, driver: request.driver, presentationId: request.presentationId)
         return .accepted(
             payload: request.payload,
             kind: config.entryKind == .floating ? .floating : .inline)

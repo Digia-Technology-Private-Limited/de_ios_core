@@ -503,7 +503,12 @@ final class GamePresentation: Identifiable, ObservableObject {
         }
         // A looping skin must not hammer the backend (row 20): a reused id or
         // a call past the in-flight cap answers `bad_request`, like Android.
-        guard httpTasks[id] == nil, httpTasks.count < Self.maxHttpInFlight else {
+        // The leg itself lives on `GameHttpBridge` so the case-table harness
+        // pins the same mapping.
+        guard GameHttpBridge.inFlightRejection(
+            id: id, method: method, path: path,
+            inFlightIds: Set(httpTasks.keys)) == nil
+        else {
             reject(code: .badRequest)
             return
         }
@@ -585,8 +590,6 @@ final class GamePresentation: Identifiable, ObservableObject {
     /// within `httpWatchdogSeconds` closes the game. Every other path relies
     /// on `http`'s own 20 s `error timeout`.
     private static let httpWatchdogPaths: Set<String> = ["state", "play", "getRewards"]
-    /// Most skin `http` calls one game may have in flight at once (row 20).
-    private static let maxHttpInFlight = 8
 
     /// Arms the watchdog for one watched skin `http` call: still pending when
     /// the delay elapses means the native stack hung, so the fire closes the

@@ -121,4 +121,106 @@ struct GameRewardsTests {
         #expect(gameRewardsEndsIn(now.addingTimeInterval(12 * 60 + 5), now: now) == "Ends in 12m")
         #expect(gameRewardsEndsIn(now.addingTimeInterval(-1), now: now) == nil)
     }
+
+    private func rewardsEnvelope(_ response: String) -> String {
+        #"{"isSuccess":true,"data":{"response":\#(response)}} "#
+            .trimmingCharacters(in: .whitespaces)
+    }
+
+    // Fails if `getRewards` stops hitting the gamification path or stops
+    // reading the `{isSuccess, data:{response}}` envelope. Mirrors Android
+    // `RewardsRepositoryTest:33`: the user rides the SDK identity (headers),
+    // the body stays the empty object, and chances/campaigns/page parse.
+    @Test("getRewards posts the path and parses the envelope")
+    @MainActor
+    func fetchPostsPathAndParsesEnvelope() async throws {
+        let client = MockNetworkClient()
+        let source = HttpGameOutcomeSource(networkClient: client)
+        client.enqueueResponse(
+            statusCode: 200,
+            body: rewardsEnvelope(
+                #"{"chances":[],"campaigns":[],"page":{"url":"https://rewards.digia.tech"}}"#))
+
+        let result = await source.getRewards()
+
+        guard case .success(let response) = result else {
+            Issue.record("expected success, got \(result)")
+            return
+        }
+        #expect(response.chances.isEmpty)
+        #expect(response.pageUrl == "https://rewards.digia.tech")
+        let sent = try #require(client.lastRequest)
+        #expect(sent.url.absoluteString.hasSuffix("/api/v1/engage/sdk/gamification/getRewards"))
+        let body = try #require(sent.body.flatMap {
+            try? JSONSerialization.jsonObject(with: $0) as? [String: Any]
+        })
+        // Identity travels in the headers, as on every call; the body stays
+        // the empty object (Android posts the userId, iOS never does).
+        #expect(body.isEmpty)
+    }
+
+    // Fails if a fetch without a user still calls: `refreshRewards` must drop
+    // the stale response and return without a call. Mirrors Android
+    // `RewardsRepositoryTest:51` (null/blank user → null with zero calls).
+    @Test("refresh without a user makes no call and keeps no rewards")
+    @MainActor
+    func noUserMakesNoCall() async throws {
+        let suite = { UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")! }
+        let sdk = SDKInstance(
+            defaults: suite(), legacyDefaults: suite(), makeNetworkClient: { _ in MockNetworkClient() })
+        try await sdk.initialize(DigiaConfig(apiKey: "test_key"))
+        let client = try #require(sdk.networkClient as? MockNetworkClient)
+        client.reset()
+        // No user set: identity is empty, so there is nothing to fetch for.
+        sdk.setUserId("")
+        sdk.gamification.refreshRewards()
+        try? await Task.sleep(nanoseconds: 200_000_000)
+
+        // Guards the user-id check in refreshRewards: no call, no stale.
+        #expect(client.requestCount == 0)
+        #expect(sdk.gamification.rewardsResponse == nil)
+    }
+
+    // Fails if transport, status or envelope faults stop mapping to the
+    // classified failure. Mirrors Android `RewardsRepositoryTest:59`.
+    @Test("getRewards maps failures to a classified failure")
+    func fetchMapsFailures() async {
+        let client = MockNetworkClient()
+        let source = HttpGameOutcomeSource(networkClient: client)
+
+        client.enqueueResponse(statusCode: 500, body: "{}")
+        guard case .failure(let status) = await source.getRewards() else {
+            Issue.record("expected a status failure")
+            return
+        }
+        #expect(status.rewardsCode == "status")
+        #expect(status.rewardsStatus == 500)
+
+        client.reset()
+        client.enqueueResponse(statusCode: 200, body: #"{"isSuccess":false,"data":{}}"#)
+        guard case .failure(let invalid) = await source.getRewards() else {
+            Issue.record("expected an invalid_response failure")
+            return
+        }
+        #expect(invalid.rewardsCode == "invalid_response")
+        #expect(invalid.rewardsStatus == nil)
+
+        client.reset()
+        client.simulateTransportError(URLError(.notConnectedToInternet))
+        guard case .failure(let transport) = await source.getRewards() else {
+            Issue.record("expected a transport failure")
+            return
+        }
+        #expect(transport.rewardsCode == "network")
+        #expect(transport.rewardsStatus == nil)
+
+        client.reset()
+        client.simulateTransportError(URLError(.timedOut))
+        guard case .failure(let timeout) = await source.getRewards() else {
+            Issue.record("expected a timeout failure")
+            return
+        }
+        // Guards the timedOut flag: a timeout stays a timeout, never network.
+        #expect(timeout.rewardsCode == "timeout")
+    }
 }

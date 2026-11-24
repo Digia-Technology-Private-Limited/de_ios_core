@@ -194,6 +194,25 @@ struct GameBridgeTests {
         #expect(requests.isEmpty)
     }
 
+    @Test("motion subscribe with an unknown sensor replies bad_request and starts nothing")
+    func motionSubscribeUnknownSensorBadRequest() throws {
+        let bridge = makeBridge()
+        var scripts: [String] = []
+        var requests: [GameBridgeRequest] = []
+        bridge.onSend = { scripts.append($0) }
+        bridge.onRequest = { requests.append($0) }
+
+        bridge.receive(msg("motion", id: "8", payload: ["op": "subscribe", "sensors": ["gyroscope", "magnet"]]))
+
+        // Guards the sensor-name check in handleMotion's subscribe case: a
+        // mixed list answers bad_request and no subscribe reaches the host.
+        #expect(scripts.count == 1)
+        let reply = try received(scripts[0])
+        let payload = try #require(reply["payload"] as? [String: Any])
+        #expect(payload["code"] as? String == "bad_request")
+        #expect(requests.isEmpty)
+    }
+
     @Test("unknown type without an id drops with the health event")
     func unknownTypeWithoutIdDrops() throws {
         let bridge = makeBridge()
@@ -312,6 +331,30 @@ struct GameBridgeTests {
         }
     }
 
+    @Test("action passthrough excludes canvas-only actions")
+    func actionPassthroughExcludesCanvasOnly() throws {
+        let bridge = makeBridge()
+        var requests: [GameBridgeRequest] = []
+        var scripts: [String] = []
+        bridge.onRequest = { requests.append($0) }
+        bridge.onSend = { scripts.append($0) }
+
+        // A skin cannot dismiss or page its host's stage: every canvas-only
+        // op answers unsupported and nothing reaches the host.
+        let ops = ["dismiss", "Action.dismiss", "next", "previous", "Action.openGame", "Action.showStory"]
+        for (index, op) in ops.enumerated() {
+            bridge.receive(msg("action", id: "x\(index)", payload: ["op": op]))
+        }
+
+        // Guards the exclusion list in passthroughAction.
+        #expect(requests.isEmpty)
+        #expect(scripts.count == ops.count)
+        for script in scripts {
+            let payload = try #require(try received(script)["payload"] as? [String: Any])
+            #expect(payload["code"] as? String == "unsupported")
+        }
+    }
+
     @Test("an action without an id runs and gets no reply")
     func actionWithoutIdRunsSilently() {
         let bridge = makeBridge()
@@ -411,6 +454,37 @@ struct GameBridgeTests {
             codes.append(try #require(payload["code"] as? String))
         }
         #expect(codes == ["unsupported", "bad_request", "unsupported"])
+    }
+
+    @Test("a duplicate http id and a ninth in-flight call reply bad_request with health")
+    func duplicateHttpIdAndNinthInFlightReject() throws {
+        // The cap is pinned as a literal so widening it fails this test.
+        #expect(GameHttpBridge.maxHttpInFlight == 8)
+
+        // A reused id rejects without running.
+        let duplicate = try #require(GameHttpBridge.inFlightRejection(
+            id: "h0", method: "POST", path: "play",
+            inFlightIds: ["h0"]))
+        // A ninth call rejects without running.
+        let full = Set((0..<8).map { "h\($0)" })
+        let ninth = try #require(GameHttpBridge.inFlightRejection(
+            id: "h8", method: "POST", path: "play",
+            inFlightIds: full))
+        // A fresh id under the cap runs.
+        let seventh = Set((0..<7).map { "h\($0)" })
+        #expect(GameHttpBridge.inFlightRejection(
+            id: "h7", method: "POST", path: "play",
+            inFlightIds: seventh) == nil)
+
+        // Guards the inFlightRejection leg: both rejects answer bad_request
+        // and report game_http_failed with no status, through the same
+        // rejectedCall mapping production uses.
+        #expect(duplicate == ninth)
+        for failed in [duplicate, ninth] {
+            #expect(failed.code == .badRequest)
+            #expect(failed.status == nil)
+            #expect(failed == GameHttpBridge.rejectedCall(method: "POST", path: "play", code: .badRequest))
+        }
     }
 
     @Test("answer and fail shape the result and error replies")

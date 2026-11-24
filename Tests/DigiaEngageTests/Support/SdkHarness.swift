@@ -539,6 +539,16 @@ private final class HeldBundleNetwork: NetworkClient, @unchecked Sendable {
         return try await mock.execute(request: request)
     }
 
+    func executeCapped(request: NetworkRequest, maxBytes: Int) async throws -> NetworkResponse {
+        let response = try await execute(request: request)
+        guard let body = response.body, body.count > maxBytes else { return response }
+        return NetworkResponse(
+            statusCode: response.statusCode,
+            headers: response.headers,
+            body: Data(body.prefix(maxBytes + 1)),
+            isSuccessful: response.isSuccessful)
+    }
+
     func executeMultipart(request: MultipartUploadRequest) async throws -> NetworkResponse {
         try await mock.executeMultipart(request: request)
     }

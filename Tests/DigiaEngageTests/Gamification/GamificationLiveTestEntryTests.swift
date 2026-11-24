@@ -177,4 +177,58 @@ struct GamificationLiveTestEntryTests {
             id: "floater-test", campaignKey: key, campaignType: "floater",
             config: .floaterStory(config), targetScreenNames: [])
     }
+
+    // Fails if a denied live-test grant stops reporting the decision's own
+    // reason to the test row: the `reportFailed(dropReason, ...)` line in the
+    // play-decision drop path. Mirrors Android
+    // `GamificationLiveTestEntryTest:123` (frequency_capped, not generic error).
+    @Test("a denied live-test grant reports frequency_capped to the test row")
+    func deniedLiveTestReportsFrequencyCapped() async throws {
+        let sdk = try await sdk()
+        let client = try #require(sdk.networkClient as? MockNetworkClient)
+        sdk.setUserId("u1")
+        // A grant that denies with the cap reason, like Android's DeniedSource.
+        sdk.gamification.playSession = PlaySession(
+            source: DeniedCapSource(),
+            identity: { PlayIdentity(userId: "u1", userHash: nil, deviceId: "d1") })
+        let payload = CEPTriggerPayload(
+            cepCampaignId: Self.testCep, campaignKey: Self.key, cepMetadata: [:])
+        sdk.liveTestService.ackReporter.configure(config: DigiaConfig(apiKey: "test_key"))
+        let context = LiveTestContext(
+            testInvocationId: "inv-1",
+            reporter: sdk.liveTestService.ackReporter,
+            onTerminal: {})
+        sdk.liveTestContexts[payload.cepCampaignId] = context
+
+        let config = try Self.config()
+        sdk.gamification.requestGameChance(
+            campaign: Self.campaign(id: "test", config),
+            config: config, payload: payload, direct: true, driver: nil)
+        try? await Task.sleep(nanoseconds: 300_000_000)
+
+        let ack = try #require(client.recordedRequests.last {
+            $0.url.absoluteString == DigiaEndpoints.liveTestAck
+        })
+        let body = try #require(JSONSerialization.jsonObject(
+            with: ack.body ?? Data()) as? [String: Any])
+        #expect(body["status"] as? String == "failed")
+        let reason = try #require(body["reason"] as? [String: Any])
+        #expect(reason["code"] as? String == DropReason.frequencyCapped.value)
+    }
+
+    private final class DeniedCapSource: GameOutcomeSource, @unchecked Sendable {
+        func grantChance(_ request: GrantChanceRequest) async -> GrantChanceResult {
+            .denied(reason: "capReached")
+        }
+
+        func state(
+            campaignKey: String, testInvocationId: String?, chanceId: String?
+        ) async -> ChanceStateResult {
+            .none
+        }
+
+        func getRewards() async -> Result<GameRewardsResponse, GameOutcomeError> {
+            .failure(.transport("unused"))
+        }
+    }
 }

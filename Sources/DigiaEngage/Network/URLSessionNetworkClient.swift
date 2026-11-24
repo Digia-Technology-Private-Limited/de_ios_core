@@ -62,23 +62,7 @@ final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
 
     func execute(request: NetworkRequest) async throws -> NetworkResponse {
         if let override = overrideForTesting { return try await override.execute(request: request) }
-        var urlRequest = URLRequest(url: request.url)
-        urlRequest.httpMethod = request.method.rawValue
-        if let timeout = request.timeoutInterval {
-            urlRequest.timeoutInterval = timeout
-        }
-
-        let assembledHeaders = assembleHeaders(for: request.headers)
-        for (key, value) in assembledHeaders {
-            urlRequest.setValue(value, forHTTPHeaderField: key)
-        }
-
-        if let body = request.body {
-            urlRequest.httpBody = body
-            if urlRequest.value(forHTTPHeaderField: "Content-Type") == nil {
-                urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            }
-        }
+        let urlRequest = makeURLRequest(request)
 
         let (data, response) = request.followRedirects
             ? try await session.data(for: urlRequest)
@@ -91,6 +75,51 @@ final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
         for (key, value) in httpResponse.allHeaderFields {
             if let k = key as? String, let v = value as? String {
                 responseHeaders[k] = v
+            }
+        }
+
+        return NetworkResponse(
+            statusCode: httpResponse.statusCode,
+            headers: responseHeaders,
+            body: data,
+            isSuccessful: (200...299).contains(httpResponse.statusCode)
+        )
+    }
+
+    /// Streams the body and stops the moment `maxBytes + 1` bytes arrive, so
+    /// an oversized skin bundle is rejected without ever holding it — like
+    /// Android aborting mid-stream. The caller enforces the cap (a body of
+    /// `maxBytes + 1` means over); transport errors propagate unchanged.
+    func executeCapped(request: NetworkRequest, maxBytes: Int) async throws -> NetworkResponse {
+        let urlRequest = makeURLRequest(request)
+
+        let (bytes, response): (URLSession.AsyncBytes, URLResponse)
+        if request.followRedirects {
+            (bytes, response) = try await session.bytes(for: urlRequest)
+        } else {
+            (bytes, response) = try await session.bytes(for: urlRequest, delegate: RefuseRedirectDelegate.shared)
+        }
+        guard let httpResponse = response as? HTTPURLResponse else {
+            bytes.task.cancel()
+            throw URLError(.badServerResponse)
+        }
+
+        var responseHeaders: [String: String] = [:]
+        for (key, value) in httpResponse.allHeaderFields {
+            if let k = key as? String, let v = value as? String {
+                responseHeaders[k] = v
+            }
+        }
+
+        // Bounded accumulation: aborts the read the moment cap + 1 bytes
+        // arrive, so the buffer never grows past the cap.
+        var data = Data()
+        data.reserveCapacity(min(maxBytes + 1, 64 * 1024))
+        for try await byte in bytes {
+            data.append(byte)
+            if data.count > maxBytes {
+                bytes.task.cancel()
+                break
             }
         }
 
@@ -257,8 +286,31 @@ final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
 
     private static let sseConnectTimeoutNs: UInt64 = 10_000_000_000
 
-    // MARK: - Header Assembler
+    /// Builds the `URLRequest` `execute` and `executeCapped` share: method,
+    /// timeout, assembled headers, and the JSON body with its default
+    /// `Content-Type`.
+    private func makeURLRequest(_ request: NetworkRequest) -> URLRequest {
+        var urlRequest = URLRequest(url: request.url)
+        urlRequest.httpMethod = request.method.rawValue
+        if let timeout = request.timeoutInterval {
+            urlRequest.timeoutInterval = timeout
+        }
 
+        let assembledHeaders = assembleHeaders(for: request.headers)
+        for (key, value) in assembledHeaders {
+            urlRequest.setValue(value, forHTTPHeaderField: key)
+        }
+
+        if let body = request.body {
+            urlRequest.httpBody = body
+            if urlRequest.value(forHTTPHeaderField: "Content-Type") == nil {
+                urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            }
+        }
+        return urlRequest
+    }
+
+    // MARK: - Header Assembler
     /// One entry per header name, compared case-insensitively (HTTP names are).
     /// Later layers win: defaults, then `headerProvider`, the
     /// request's own headers, and last the per-request session ID (D8). The

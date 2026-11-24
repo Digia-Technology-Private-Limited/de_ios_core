@@ -15,11 +15,14 @@ enum RewardsLinkRoute: Equatable {
 /// other allowed scheme goes to the app's deep-link handler.
 enum RewardsLinkRouter {
     private static let refusedSchemes: Set<String> = [
-        "javascript", "data", "file", "blob", "vbscript", "intent",
+        "javascript", "data", "file", "blob", "vbscript", "intent", "content",
     ]
 
     static func route(_ raw: String) -> RewardsLinkRoute {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Browsers drop tabs and newlines inside a scheme ("java\nscript:"); so do we:
+        // strip ISO controls (U+0000–U+001F, U+007F), then trim, then parse.
+        let stripped = String(raw.unicodeScalars.filter { !($0.value <= 0x1F || $0.value == 0x7F) })
+        let trimmed = stripped.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: trimmed), let scheme = url.scheme?.lowercased(),
               !refusedSchemes.contains(scheme)
         else { return .refused }
