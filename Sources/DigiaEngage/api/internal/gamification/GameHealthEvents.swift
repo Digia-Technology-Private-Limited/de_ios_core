@@ -63,6 +63,35 @@ struct GameRewardsFailedEvent: EngageAnalyticsEvent {
     }
 }
 
+/// The chance-grant call failed, so there was nothing to open. `code` is
+/// `network` or `invalid_response`.
+struct GameGrantFailedEvent: EngageAnalyticsEvent {
+    let health: GameHealthContext
+    let code: String
+
+    var eventName: String { "game_grant_failed" }
+
+    var properties: [String: Any] {
+        var merged = health.properties
+        merged["code"] = code
+        return merged
+    }
+}
+
+/// A skin prefetch was dropped. `reason` is `download_failed`, `invalid_file`
+/// or `store_failed`. Standalone: a prefetch has no campaign context.
+struct GameSkinPrefetchFailedEvent: EngageAnalyticsEvent {
+    let skinId: String
+    let skinVersion: Int
+    let reason: String
+
+    var eventName: String { "game_skin_prefetch_failed" }
+
+    var properties: [String: Any] {
+        ["skinId": skinId, "skinVersion": skinVersion, "reason": reason]
+    }
+}
+
 /// The skin logged at `error` level. At most 5 per open; `message` is
 /// truncated to 500 characters.
 struct GameSkinErrorEvent: EngageAnalyticsEvent {

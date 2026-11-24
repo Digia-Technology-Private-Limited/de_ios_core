@@ -194,9 +194,14 @@ struct SkinFileCache: Sendable {
     }
 
     /// Prefetches skins fire-and-forget: already-cached entries are skipped,
-    /// failures are logged and dropped, and the next trigger retries.
-    /// Cooperative with cancellation: a torn-down SDK stops between skins.
-    func prefetch(_ skins: [(bundleUrl: String, skinId: String, version: Int)]) async {
+    /// failures are logged, reported to `onDropped` with a reason, and dropped,
+    /// and the next trigger retries. An unusable `bundleUrl` is skipped silently,
+    /// like Android. Cooperative with cancellation: a torn-down SDK stops
+    /// between skins and reports nothing.
+    func prefetch(
+        _ skins: [(bundleUrl: String, skinId: String, version: Int)],
+        onDropped: @Sendable (_ skinId: String, _ version: Int, _ reason: String) -> Void = { _, _, _ in }
+    ) async {
         for skin in skins {
             if Task.isCancelled { return }
             if cachedFile(skinId: skin.skinId, version: skin.version) != nil { continue }
@@ -207,7 +212,22 @@ struct SkinFileCache: Sendable {
                 log.w(
                     "Skin prefetch failed (skinId=\(skin.skinId), version=\(skin.version))",
                     error: "\(error)")
+                if Task.isCancelled { return }
+                if let reason = Self.prefetchDropReason(error) {
+                    onDropped(skin.skinId, skin.version, reason)
+                }
             }
+        }
+    }
+
+    /// The analytics reason for a dropped prefetch, matching Android's
+    /// `SkinPrefetcher`; nil for an unusable URL, which Android also skips.
+    private static func prefetchDropReason(_ error: Error) -> String? {
+        switch error as? SkinFileCacheError {
+        case .badURL: return nil
+        case .invalidFile: return "invalid_file"
+        case .noCachesDirectory: return "store_failed"
+        case .badResponse, nil: return "download_failed"
         }
     }
 

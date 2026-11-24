@@ -376,9 +376,20 @@ final class GamificationOrchestrator: ObservableObject {
             }
             log.d("Gamification chance not granted (reason=\(reason))", campaign: campaignKey)
             sdk.liveTestContexts[cepCampaignId]?.reportFailed(dropReason, message: detail)
-            // Only a client failure is an open failure: denied, not-shown
-            // and busy are expected drops, recorded on the delivery outcome.
-            if dropReason == .error {
+            // A failed grant call offered nothing to open, so it reports
+            // `game_grant_failed`, not `game_open_failed`.
+            if reason == PlayDropReason.network || reason == PlayDropReason.invalidResponse {
+                sdk.events.toDigia(
+                    GameGrantFailedEvent(
+                        health: GameHealthContext(
+                            campaignId: campaign.id, skinId: config.skinId,
+                            skinVersion: config.skinVersion,
+                            entry: config.entryKind.rawValue),
+                        code: reason),
+                    payload: payload)
+            } else if dropReason == .error {
+                // Only a client failure is an open failure: denied, not-shown
+                // and busy are expected drops, recorded on the delivery outcome.
                 sdk.events.toDigia(
                     GameOpenFailedEvent(
                         reason: reason, chanceId: "", entry: config.entryKind.rawValue,
@@ -412,7 +423,18 @@ final class GamificationOrchestrator: ObservableObject {
     private func launchPrefetch(_ skins: [(bundleUrl: String, skinId: String, version: Int)]) {
         let cache = skinFileCache
         let id = UUID()
-        let task = Task.detached { await cache.prefetch(skins) }
+        let task = Task.detached {
+            await cache.prefetch(skins) { skinId, version, reason in
+                Task { @MainActor in
+                    SDKInstance.shared.events.toDigia(
+                        GameSkinPrefetchFailedEvent(
+                            skinId: skinId, skinVersion: version, reason: reason),
+                        payload: CEPTriggerPayload(
+                            cepCampaignId: "skin:prefetch", campaignKey: "",
+                            cepMetadata: [:], variables: nil))
+                }
+            }
+        }
         prefetchTasks[id] = task
         Task { [weak self] in
             _ = await task.result
