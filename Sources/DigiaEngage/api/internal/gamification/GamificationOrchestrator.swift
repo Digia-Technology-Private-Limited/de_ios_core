@@ -377,8 +377,10 @@ final class GamificationOrchestrator: ObservableObject {
             log.d("Gamification chance not granted (reason=\(reason))", campaign: campaignKey)
             sdk.liveTestContexts[cepCampaignId]?.reportFailed(dropReason, message: detail)
             // A failed grant call offered nothing to open, so it reports
-            // `game_grant_failed`, not `game_open_failed`.
-            if reason == PlayDropReason.network || reason == PlayDropReason.invalidResponse {
+            // `game_grant_failed`, not `game_open_failed`. A timeout reads
+            // `timeout`, like the close-time `state` leg and Android.
+            if reason == PlayDropReason.network || reason == PlayDropReason.timeout
+                || reason == PlayDropReason.invalidResponse {
                 sdk.events.toDigia(
                     GameGrantFailedEvent(
                         health: GameHealthContext(

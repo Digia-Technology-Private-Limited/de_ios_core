@@ -60,7 +60,7 @@ struct PlaySessionTests {
         GrantedChance(chanceId: "ch-1", expiresAt: nil, show: show)
     }
 
-    // Guards the `isGameBusy` early return: a game on screen blocks a direct trigger.
+    // Guards the admission gate (`admit`): a game on screen blocks a direct trigger.
     @Test("a game already showing fails busy without calling")
     func busyGame() async {
         let source = FakeSource(.granted(granted(show: true)))
@@ -102,7 +102,7 @@ struct PlaySessionTests {
         }
     }
 
-    // Guards the `directInFlight` check: two direct triggers for different
+    // Guards the admission gate (`admit`): two direct triggers for different
     // campaigns must not both ask while the first grant is in flight, and the
     // guard is released afterwards (its reset in `defer`).
     @Test("a second direct trigger fails busy while the first grant is in flight")
@@ -189,6 +189,8 @@ struct PlaySessionTests {
              .drop(reason: PlayDropReason.denied, denyReason: "capReached")),
             (.failure(.transport("offline")),
              .drop(reason: PlayDropReason.network, denyReason: nil)),
+            (.failure(.transport("timed out", timedOut: true)),
+             .drop(reason: PlayDropReason.timeout, denyReason: nil)),
             (.failure(.httpStatus(500)),
              .drop(reason: PlayDropReason.network, denyReason: nil)),
             (.failure(.invalidResponse("bad")),
@@ -211,6 +213,18 @@ struct PlaySessionTests {
 
         #expect(source.lastRequest?.userId == "u-123")
         #expect(source.lastRequest?.userHash == "h-1")
+    }
+
+    // Guards `admit` itself: only a direct trigger finds a visible game busy —
+    // an entry trigger still asks. `request` funnels through this gate.
+    @Test("admission blocks only a direct trigger while a game shows")
+    func admitDirectOnly() {
+        #expect(
+            session(FakeSource(.granted(granted(show: true)))).admit(
+                playRequest(direct: true, isGameBusy: { true })) == PlayDropReason.busy)
+        #expect(
+            session(FakeSource(.granted(granted(show: true)))).admit(
+                playRequest(direct: false, isGameBusy: { true })) == nil)
     }
 
     // Fails if a played chance keeps the floater (the `.played` case in

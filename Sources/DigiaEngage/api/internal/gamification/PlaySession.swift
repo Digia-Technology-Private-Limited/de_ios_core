@@ -27,24 +27,40 @@ final class PlaySession {
         self.identity = identity
     }
 
-    func request(_ request: PlayRequest) async -> PlayDecision {
-        // A game on screen only blocks a direct trigger. An inline or
-        // floating trigger only renders a teaser, so it still asks.
+    /// The one admission gate before the grant. A game on screen blocks only
+    /// a direct trigger — an inline or floating trigger only renders a
+    /// teaser, so it still asks. Only one direct grant runs at a time across
+    /// campaigns: two direct triggers would otherwise both spend a chance.
+    /// One request runs at a time per campaign: a second trigger for a
+    /// campaign whose grant is still in flight drops `busy` at once. Admitting
+    /// reserves the campaign (and direct) slots; `request` releases them when
+    /// the grant settles. Returns the busy drop reason when the request must
+    /// not ask, else nil. Matches Android's `PlaySession` admission.
+    func admit(_ request: PlayRequest) -> String? {
         if request.direct, request.isGameBusy() {
-            return .drop(reason: PlayDropReason.busy, denyReason: nil)
+            return PlayDropReason.busy
         }
         if request.direct, directInFlight {
-            return .drop(reason: PlayDropReason.busy, denyReason: nil)
+            return PlayDropReason.busy
         }
         guard !inFlightCampaigns.contains(request.campaignKey) else {
-            return .drop(reason: PlayDropReason.busy, denyReason: nil)
+            return PlayDropReason.busy
         }
         inFlightCampaigns.insert(request.campaignKey)
         if request.direct { directInFlight = true }
-        defer {
-            inFlightCampaigns.remove(request.campaignKey)
-            if request.direct { directInFlight = false }
+        return nil
+    }
+
+    private func release(_ request: PlayRequest) {
+        inFlightCampaigns.remove(request.campaignKey)
+        if request.direct { directInFlight = false }
+    }
+
+    func request(_ request: PlayRequest) async -> PlayDecision {
+        if let busy = admit(request) {
+            return .drop(reason: busy, denyReason: nil)
         }
+        defer { release(request) }
         // The identity is read once: the check and the grant below see the same user.
         guard let identity = identity(),
               !identity.userId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -88,7 +104,14 @@ final class PlaySession {
             return .drop(reason: PlayDropReason.denied, denyReason: reason, events: events)
         case .failure(let error):
             switch error {
-            case .transport, .httpStatus:
+            case .transport(_, let timedOut):
+                // A grant timeout reads `timeout`, like the close-time `state`
+                // leg; any other transport failure reads `network`. Matches
+                // Android's `PlaySession` (`FAIL_TIMEOUT`).
+                return .drop(
+                    reason: timedOut ? PlayDropReason.timeout : PlayDropReason.network,
+                    denyReason: nil)
+            case .httpStatus:
                 return .drop(reason: PlayDropReason.network, denyReason: nil)
             case .invalidResponse:
                 return .drop(reason: PlayDropReason.invalidResponse, denyReason: nil)
@@ -219,6 +242,9 @@ enum PlayDropReason {
     static let busy = "busy"
     /// Blank trigger id, or no identity / blank user id.
     static let missingConfig = "missing_config"
+    /// Transport timeout, kept distinct like the close-time `state` leg.
+    /// Matches Android's `PlaySession.FAIL_TIMEOUT`.
+    static let timeout = "timeout"
     /// Transport failure, non-2xx HTTP status, or no network client.
     static let network = "network"
     /// The response did not parse / violated the strict schema.
