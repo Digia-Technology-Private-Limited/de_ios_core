@@ -387,6 +387,12 @@ final class GamePresentation: Identifiable, ObservableObject {
             if let id { bridge.answer(id: id) }
         case .actionCopy(let id, let text):
             runSkinAction(id: id, action: .copyToClipboard(text), op: "copy")
+        case .event(let id, let name, let properties):
+            // A skin-authored event: stamped and Digia-only on the surface,
+            // like a CTA run. Answered with an empty result when it carries
+            // an id; an id-less event still reports and gets no reply.
+            request.onCustomEvent?(name, properties)
+            if let id { bridge.answer(id: id) }
         case .actionOpenLink(let id, let op, let url):
             // The container closes first, then the host opens the link.
             if let id { bridge.answer(id: id, payload: ["ok": true]) }

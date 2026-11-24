@@ -512,6 +512,132 @@ struct GameBridgeTests {
         #expect((errorPayload["message"] as? String)?.isEmpty == false)
     }
 
+    // Fails if a valid skin `event` stops reporting to the caller and answering
+    // `{}`: name plus flat properties through onRequest, one empty result reply.
+    @Test("event with a valid name and properties reports and replies result")
+    func eventValidReportsAndRepliesResult() throws {
+        let bridge = makeBridge()
+        var requests: [GameBridgeRequest] = []
+        var scripts: [String] = []
+        // The presenter answers every validated event with an empty result.
+        bridge.onRequest = {
+            requests.append($0)
+            if case .event(let id, _, _) = $0, let id { bridge.answer(id: id) }
+        }
+        bridge.onSend = { scripts.append($0) }
+
+        bridge.receive(msg("event", id: "40", payload: [
+            "name": "level_up", "properties": ["level": 7, "label": "boss", "won": true],
+        ]))
+
+        // Guards handleEvent: the name and flat record reach the host, and the
+        // id is answered with an empty result.
+        #expect(requests.count == 1)
+        guard case .event(let id, let name, let properties) = requests.first else {
+            Issue.record("request is not event")
+            return
+        }
+        #expect(id == "40")
+        #expect(name == "level_up")
+        #expect((properties["level"] as? NSNumber)?.intValue == 7)
+        #expect(properties["label"] as? String == "boss")
+        #expect((properties["won"] as? NSNumber)?.boolValue == true)
+        #expect(scripts.count == 1)
+        let reply = try received(scripts[0])
+        #expect(reply["id"] as? String == "40")
+        #expect(reply["type"] as? String == "result")
+        let payload = try #require(reply["payload"] as? [String: Any])
+        #expect(payload.isEmpty)
+    }
+
+    // Fails if an `event` without properties or without an id stops reporting:
+    // missing properties are an empty record, and an id-less event still
+    // reports with no reply.
+    @Test("event without properties or id still reports")
+    func eventWithoutPropertiesOrIdStillReports() {
+        let bridge = makeBridge()
+        var requests: [GameBridgeRequest] = []
+        var scripts: [String] = []
+        bridge.onRequest = { requests.append($0) }
+        bridge.onSend = { scripts.append($0) }
+
+        bridge.receive(msg("event", payload: ["name": "shown"]))
+
+        // Guards the missing-properties and id-less legs of handleEvent: the
+        // report still fires, and nothing is answered.
+        #expect(requests.count == 1)
+        guard case .event(let id, let name, let properties) = requests.first else {
+            Issue.record("request is not event")
+            return
+        }
+        #expect(id == nil)
+        #expect(name == "shown")
+        #expect(properties.isEmpty)
+        #expect(scripts.isEmpty)
+    }
+
+    // Fails if an `event` with a bad name or bad properties stops answering
+    // `bad_request` without reporting: the validation guards.
+    @Test("event with an invalid name or properties replies bad_request")
+    func eventInvalidRepliesBadRequest() throws {
+        let bridge = makeBridge()
+        var requests: [GameBridgeRequest] = []
+        var scripts: [String] = []
+        bridge.onRequest = { requests.append($0) }
+        bridge.onSend = { scripts.append($0) }
+
+        bridge.receive(msg("event", id: "41", payload: ["name": "1up"]))
+        bridge.receive(msg("event", id: "42", payload: ["name": "", "properties": [:]]))
+        bridge.receive(msg("event", id: "43", payload: ["name": "moved", "properties": ["at": ["x": 1]]]))
+        var many: [String: Any] = [:]
+        for index in 0...10 { many["k\(index)"] = index }
+        bridge.receive(msg("event", id: "44", payload: ["name": "many", "properties": many]))
+        bridge.receive(msg("event", id: "45", payload: [
+            "name": "big", "properties": ["blob": String(repeating: "x", count: 500)],
+        ]))
+
+        // Guards isValidCustomEventName and validatedCustomEventProperties:
+        // a leading digit, an empty name, a nested object, 11 properties and
+        // a 500-byte-plus record each reject without reporting.
+        #expect(requests.isEmpty)
+        #expect(scripts.count == 5)
+        for script in scripts {
+            let reply = try received(script)
+            let payload = try #require(reply["payload"] as? [String: Any])
+            #expect(payload["code"] as? String == "bad_request")
+        }
+    }
+
+    // Fails if a looping skin stops backing off after 20 custom events: the
+    // 21st answers `bad_request` and never reports, like the skin-error cap.
+    @Test("event past the per-open cap replies bad_request")
+    func eventPastCapRepliesBadRequest() throws {
+        let bridge = makeBridge()
+        var requests: [GameBridgeRequest] = []
+        var scripts: [String] = []
+        // The presenter answers every validated event with an empty result.
+        bridge.onRequest = {
+            requests.append($0)
+            if case .event(let id, _, _) = $0, let id { bridge.answer(id: id) }
+        }
+        bridge.onSend = { scripts.append($0) }
+
+        for index in 1...21 {
+            bridge.receive(msg("event", id: "e\(index)", payload: ["name": "tick"]))
+        }
+
+        // Guards the customEventCount cap in handleEvent.
+        #expect(requests.count == 20)
+        #expect(scripts.count == 21)
+        for script in scripts.prefix(20) {
+            #expect(try received(script)["type"] as? String == "result")
+        }
+        let lastScript = try #require(scripts.last)
+        let last = try received(lastScript)
+        let payload = try #require(last["payload"] as? [String: Any])
+        #expect(payload["code"] as? String == "bad_request")
+    }
+
     @Test("init payload carries the v2 shape through __receive")
     func initMessageShape() throws {
         let bridge = makeBridge()

@@ -184,6 +184,10 @@ struct GameOpenRequest {
     /// and, for `openLink` only, the link it opens. The surface reports it as a
     /// Digia-only Clicked. A skin `close` never fires this.
     var onCta: (@MainActor (String, String?) -> Void)?
+    /// Fires when the skin sends a validated `{type:"event"}` with its name
+    /// and flat properties. The surface reports it as a Digia-only
+    /// `GameEvent.Custom`, stamped with this window's chance; never the CEP.
+    var onCustomEvent: (@MainActor (String, [String: Any]) -> Void)?
     /// Fires once when the skin sends `ready` and the game becomes visible.
     var onShown: (@MainActor () -> Void)?
     /// Fires after each answered skin `http` call with the validated path,

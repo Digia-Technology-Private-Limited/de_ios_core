@@ -27,6 +27,10 @@ enum GameBridgeRequest {
     case storageGet(id: String, key: String)
     case storageSet(id: String, key: String, value: String)
     case storageRemove(id: String?, key: String)
+    /// A skin-authored event (`{type:"event", name, properties?}`): validated
+    /// by the intake, reported to Digia only, answered with an empty result
+    /// when it carries an id.
+    case event(id: String?, name: String, properties: [String: Any])
     case actionCopy(id: String?, text: String)
     case actionOpenLink(id: String?, op: String, url: URL)
     case actionOpenDeeplink(id: String?, url: URL)
@@ -114,7 +118,7 @@ final class GameBridge {
     /// Message types the intake accepts by `type`. Anything else is unknown.
     private static let knownTypes: Set<String> = [
         "ready", "http", "log", "haptics",
-        "motion", "storage", "action",
+        "motion", "storage", "action", "event",
     ]
 
     /// (Re)enters `loading`. Returns a generation token so the one-shot ready
@@ -180,6 +184,10 @@ final class GameBridge {
         }
         if type == "storage" {
             handleStorage(id: id, payload: payload)
+            return
+        }
+        if type == "event" {
+            handleEvent(id: id, payload: payload)
             return
         }
         if type == "ready" {
@@ -392,13 +400,13 @@ final class GameBridge {
         case "openLink", "openUrl":
             guard let raw = payload.nonBlankString("url"),
                   let url = URL(string: raw),
-                  isOpenableLink(url)
+                  GameLinkPolicy.isOpenableLink(url)
             else { return .malformed }
             return .request(.actionOpenLink(id: id, op: op, url: url))
         case "deeplink":
             guard let raw = payload.nonBlankString("url"),
                   let url = URL(string: raw),
-                  isOpenableLink(url)
+                  GameLinkPolicy.isOpenableLink(url)
             else { return .malformed }
             return .request(.actionOpenDeeplink(id: id, url: url))
         case "customKV":
@@ -516,20 +524,76 @@ final class GameBridge {
         }
     }
 
-    private static func isMotionSensor(_ sensor: String) -> Bool {
-        sensor == GameMotionSource.gyroscopeName || sensor == GameMotionSource.accelerometerName
+    /// A skin-authored event: `{type:"event", name, properties?}`. The name
+    /// must match `customEventNamePattern` and the properties must be a flat
+    /// string/number/boolean record (`validatedCustomEventProperties`); a
+    /// missing `properties` is an empty record, and unknown keys (like the
+    /// retired `props`) are ignored. Anything else answers `bad_request`.
+    /// At most `maxCustomEventsPerOpen` per window: further ones answer
+    /// `bad_request`, so a looping skin backs off instead of spamming
+    /// analytics. Without an id the event still reports, like `log`, and
+    /// nothing is answered. An id-less reject drops with the health event.
+    private func handleEvent(id: String?, payload: [String: Any]) {
+        guard let name = payload["name"] as? String,
+              Self.isValidCustomEventName(name),
+              let properties = Self.validatedCustomEventProperties(payload["properties"])
+        else {
+            if let id { fail(id: id, code: .badRequest, message: "malformed event payload") }
+            else { recordDrop(reason: "unknown", type: "event") }
+            return
+        }
+        guard customEventCount < Self.maxCustomEventsPerOpen else {
+            if let id { fail(id: id, code: .badRequest, message: "too many custom events") }
+            else { recordDrop(reason: "unknown", type: "event") }
+            return
+        }
+        customEventCount += 1
+        onRequest?(.event(id: id, name: name, properties: properties))
     }
 
-    /// Schemes that would run code, read local data or bypass the host's link routing.
-    private static let blockedLinkSchemes: Set<String> = [
-        "javascript", "vbscript", "data", "blob", "file", "about",
-    ]
+    /// Skin custom events reported this open; capped, so a looping skin
+    /// cannot spam analytics.
+    private var customEventCount = 0
+    /// Skin custom events reported per open at most.
+    private static let maxCustomEventsPerOpen = 20
 
-    /// Web links need a host; app deep links (`medihub://cart`) only a safe scheme.
-    private static func isOpenableLink(_ url: URL) -> Bool {
-        guard let scheme = url.scheme?.lowercased() else { return false }
-        if scheme == "http" || scheme == "https" { return !(url.host ?? "").isEmpty }
-        return !blockedLinkSchemes.contains(scheme)
+    /// A skin custom-event name: a letter first, then letters, digits,
+    /// spaces, `_` or `-`, at most 49 chars. Mirrors Android's
+    /// `CUSTOM_EVENT_NAME_REGEX`.
+    private static let customEventNamePattern = "^[A-Za-z][A-Za-z0-9 _-]{0,48}$"
+
+    static func isValidCustomEventName(_ name: String) -> Bool {
+        name.range(of: customEventNamePattern, options: .regularExpression) != nil
+    }
+
+    /// A skin custom event may carry at most this many properties.
+    private static let maxCustomEventProps = 10
+    /// A skin custom event's properties may serialize to at most this many bytes.
+    private static let maxCustomEventBytes = 500
+
+    /// The validated properties of a skin `{type:"event"}` payload, or nil.
+    /// Flat only: every value must be a string, number or boolean, at most
+    /// `maxCustomEventProps` entries and `maxCustomEventBytes` bytes
+    /// serialized. A missing record — or an explicit null — is an empty
+    /// record. Never throws. Mirrors Android's
+    /// `validatedCustomEventProperties`.
+    static func validatedCustomEventProperties(_ raw: Any?) -> [String: Any]? {
+        guard let raw, !(raw is NSNull) else { return [:] }
+        guard let dict = raw as? [String: Any], dict.count <= maxCustomEventProps else { return nil }
+        for (_, value) in dict {
+            // JSON numbers and booleans both decode as NSNumber; anything
+            // else that is not a string (objects, arrays, null) rejects the
+            // record.
+            if !(value is NSNumber), !(value is String) { return nil }
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys]),
+              data.count <= maxCustomEventBytes
+        else { return nil }
+        return dict
+    }
+
+    private static func isMotionSensor(_ sensor: String) -> Bool {
+        sensor == GameMotionSource.gyroscopeName || sensor == GameMotionSource.accelerometerName
     }
 
     /// A JSON number as a Double: `hz` may arrive as either. Non-numbers and

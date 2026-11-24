@@ -92,4 +92,36 @@ enum GameEvent {
             return out
         }
     }
+
+    /// A skin-authored event (`{type:"event", name, properties}` on the
+    /// bridge): Digia-only, never the CEP. `customProperties` are the skin's
+    /// validated flat string/number/boolean record; stamped keys
+    /// (`display_style`, `event_name`, `chance_id`, `skin_id`,
+    /// `skin_version`, `entry`) always win over a same-named skin key.
+    /// Mirrors Android's `GameEvent.Custom`.
+    struct Custom: EngageAnalyticsEvent {
+        let name: String
+        let chanceId: String
+        let skinId: String
+        let skinVersion: Int
+        var entry: String? = nil
+        var customProperties: [String: Any] = [:]
+
+        var eventName: String { "Digia Experience Custom" }
+
+        var properties: [String: Any] {
+            var out: [String: Any] = [
+                "display_style": GameEvent.displayStyle,
+                "event_name": name,
+                "chance_id": chanceId,
+                "skin_id": skinId,
+                "skin_version": skinVersion,
+            ]
+            if let entry { out["entry"] = entry }
+            for (key, value) in customProperties where out[key] == nil {
+                out[key] = value
+            }
+            return out
+        }
+    }
 }

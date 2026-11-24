@@ -537,6 +537,18 @@ final class GameSurface {
                         elementId: op, chanceId: stats.chanceId, actionUrl: actionUrl, entry: entryValue),
                     payload: Self.payload(settle: settle, campaign: campaign))
             },
+            // A skin-authored `{type:"event"}`: stamped with this window's
+            // chance (its latest, like Dismissed), skin and entry, and
+            // reported to Digia only, never the CEP. Mirrors Android.
+            onCustomEvent: { [weak self] name, properties in
+                guard let self else { return }
+                self.sdk.events.toDigia(
+                    GameEvent.Custom(
+                        name: name, chanceId: stats.chanceId, skinId: config.skinId,
+                        skinVersion: config.skinVersion, entry: entryValue,
+                        customProperties: properties),
+                    payload: Self.payload(settle: settle, campaign: campaign))
+            },
             onShown: { [weak self] in
                 // A re-sent `ready` counts the impression once.
                 guard !shown else { return }
