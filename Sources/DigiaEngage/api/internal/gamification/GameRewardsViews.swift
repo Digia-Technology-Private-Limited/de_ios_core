@@ -16,17 +16,13 @@ struct GameRewardsWidgetView: View {
             {
             case .hidden:
                 EmptyView()
-            case .chances(let count, let formats, let soonest):
+            case .chances(let count, let soonest):
                 Button(action: { sdk.gamification.handleRewardsWidgetTap() }) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(Self.chancesTitle(count: count))
                             .font(.subheadline)
-                        if !formats.isEmpty {
-                            Text(formats.joined(separator: " · "))
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        if let soonest {
-                            Text("Ends \(Self.expiryString(soonest))")
+                        if let ends = gameRewardsEndsIn(soonest) {
+                            Text(ends)
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }
@@ -35,16 +31,16 @@ struct GameRewardsWidgetView: View {
             case .reward(let reward):
                 Button(action: { sdk.gamification.handleRewardsWidgetTap() }) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(reward.name ?? "Reward").font(.subheadline)
-                        if let code = reward.code {
-                            Text(code).font(.caption.monospaced())
+                        Text(reward.name).font(.subheadline)
+                        if let detail = reward.detail {
+                            Text(detail).font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
             case .empty(let message):
-                Text(message ?? "").font(.caption).foregroundStyle(.secondary)
+                Text(message).font(.caption).foregroundStyle(.secondary)
             }
         }
         .onAppear {
@@ -54,13 +50,5 @@ struct GameRewardsWidgetView: View {
 
     private static func chancesTitle(count: Int) -> String {
         "\(count) chance" + (count == 1 ? "" : "s") + " waiting"
-    }
-
-    private static func expiryString(_ date: Date) -> String {
-        let seconds = Int(date.timeIntervalSince(Date()))
-        guard seconds > 0 else { return "soon" }
-        if seconds >= 86400 { return "in \(seconds / 86400)d" }
-        if seconds >= 3600 { return "in \(seconds / 3600)h" }
-        return "in \(max(1, seconds / 60))m"
     }
 }

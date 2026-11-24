@@ -1,5 +1,7 @@
 import Foundation
 
+private let log = DigiaLogger()
+
 extension DigiaEndpoints {
     static var gamificationGetRewards: String {
         "\(baseUrl)/api/v1/engage/sdk/gamification/getRewards"
@@ -53,30 +55,36 @@ struct GameRewardChance: Equatable, Sendable {
     }
 }
 
-/// The widget's latest reward, from the backend's flat grant shape: the name
-/// and code it shows. An unknown `type` skips the grant; a grant with nothing
-/// to show is dropped at parse time so the widget never renders an empty row.
-struct GameReward: Equatable, Sendable {
-    let name: String?
-    let code: String?
-
-    static func fromJson(_ raw: [String: Any]) -> GameReward? {
-        guard raw.nonBlankString("grantId") != nil,
-              let typeRaw = raw.nonBlankString("type"),
-              GameRewardType(rawValue: typeRaw) != nil,
-              ["name", "code", "description", "howToUse", "headline", "displayText", "imageUrl"]
-                .contains(where: { raw.nonBlankString($0) != nil })
-                || raw.object("cta")?.nonBlankString("deepLink") != nil
+private extension Dictionary where Key == String, Value == Any {
+    /// A string with something visible in it: whitespace-only reads as absent,
+    /// so a blank name or message hides the widget instead of showing a gap.
+    func visibleString(_ key: String) -> String? {
+        guard let value = self[key] as? String,
+              !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else { return nil }
-        return GameReward(name: raw.nonBlankString("name"), code: raw.nonBlankString("code"))
+        return value
     }
 }
 
-/// A grant's reward type. Anything else skips the grant, never a crash.
-enum GameRewardType: String, Equatable, Sendable {
-    case coupon
-    case currency
-    case perk
+/// The widget's latest reward: the two lines it shows from the backend's flat
+/// grant shape. A missing or blank `name` drops the grant, so the widget hides.
+struct GameReward: Equatable, Sendable {
+    let name: String
+    /// Secondary line: `code`, else `displayText`, else `amount unit`. Never
+    /// `referenceKey`.
+    let detail: String?
+
+    static func fromJson(_ raw: [String: Any]) -> GameReward? {
+        guard let name = raw.visibleString("name") else { return nil }
+        let amountUnit: String? = {
+            guard let amount = raw.visibleString("amount"), let unit = raw.visibleString("unit")
+            else { return nil }
+            return "\(amount) \(unit)"
+        }()
+        return GameReward(
+            name: name,
+            detail: raw.visibleString("code") ?? raw.visibleString("displayText") ?? amountUnit)
+    }
 }
 
 /// The `widget` object of `getRewards`: what the `digia_rewards_widget` slot
@@ -84,7 +92,7 @@ enum GameRewardType: String, Equatable, Sendable {
 /// degrades to the same hidden slot as an unknown content kind.
 struct GameRewardsWidget: Equatable, Sendable {
     /// `soonestChance` opens the soonest playable chance, `rewardsPage`
-    /// opens the page. Unknown values open the page.
+    /// opens the page. Missing means `soonestChance`; unknown values open the page.
     let tapAction: String?
     let content: GameRewardsWidgetContentData?
 
@@ -102,7 +110,7 @@ struct GameRewardsWidgetContentData: Equatable, Sendable {
     let kind: Kind
 
     enum Kind: Equatable, Sendable {
-        case chances(count: Int, formats: [String], soonestExpiresAt: Date?)
+        case chances(count: Int, soonestExpiresAt: Date?)
         case reward(grant: GameReward)
         case empty(message: String)
     }
@@ -111,31 +119,38 @@ struct GameRewardsWidgetContentData: Equatable, Sendable {
         switch raw.nonBlankString("kind") {
         case "chances":
             guard let count = raw["count"] as? NSNumber,
-                  CFGetTypeID(count) != CFBooleanGetTypeID()
-            else { return nil }
+                  CFGetTypeID(count) != CFBooleanGetTypeID(),
+                  count.intValue > 0
+            else { return hidden("chances count missing or not positive") }
             return GameRewardsWidgetContentData(kind: .chances(
                 count: count.intValue,
-                formats: raw.stringArray("formats"),
                 soonestExpiresAt: GameRewardChance.expiry(raw["soonestExpiresAt"])
             ))
         case "reward":
-            guard let grant = raw.object("grant").flatMap(GameReward.fromJson) else { return nil }
+            guard let grant = raw.object("grant").flatMap(GameReward.fromJson)
+            else { return hidden("reward grant missing or unnamed") }
             return GameRewardsWidgetContentData(kind: .reward(grant: grant))
         case "empty":
-            guard let message = raw.nonBlankString("message") else { return nil }
+            guard let message = raw.visibleString("message")
+            else { return hidden("empty message blank") }
             return GameRewardsWidgetContentData(kind: .empty(message: message))
         default:
-            return nil
+            return hidden("unknown widget kind")
         }
+    }
+
+    private static func hidden(_ reason: String) -> GameRewardsWidgetContentData? {
+        log.w("Rewards widget hidden — \(reason)")
+        return nil
     }
 }
 
 /// What the rewards widget slot shows, read off the backend's widget content.
 enum GameRewardsWidgetContent: Equatable, Sendable {
     case hidden
-    case chances(count: Int, formats: [String], soonestExpiry: Date?)
+    case chances(count: Int, soonestExpiry: Date?)
     case reward(GameReward)
-    case empty(message: String?)
+    case empty(message: String)
 }
 
 /// What a widget tap does: open one chance the way an entry does, or open the
@@ -172,7 +187,7 @@ struct GameRewardsResponse {
         )
     }
 
-    /// Reads the widget content: chances waiting (count, formats, soonest
+    /// Reads the widget content: chances waiting (count, soonest
     /// expiry), the grant, or the empty message — hidden when the backend
     /// hides it or sends anything unknown.
     static func widgetContent(
@@ -180,8 +195,8 @@ struct GameRewardsResponse {
     ) -> GameRewardsWidgetContent {
         guard let content = widget?.content else { return .hidden }
         switch content.kind {
-        case .chances(let count, let formats, let soonest):
-            return .chances(count: count, formats: formats, soonestExpiry: soonest)
+        case .chances(let count, let soonest):
+            return .chances(count: count, soonestExpiry: soonest)
         case .reward(let grant):
             return .reward(grant)
         case .empty(let message):
@@ -189,17 +204,28 @@ struct GameRewardsResponse {
         }
     }
 
-    /// Follows the widget's tap action: `soonestChance` opens the soonest
-    /// playable waiting chance — or the page, when none waits — and anything
-    /// else opens the page.
+    /// Follows the widget's tap action: a missing one or `soonestChance` opens
+    /// the first playable waiting chance (else the first) — or the page, when
+    /// none waits — and anything else, `rewardsPage` or unknown, opens the page.
     static func widgetTap(
         chances: [GameRewardChance], widget: GameRewardsWidget?
     ) -> GameRewardsTap {
-        if widget?.tapAction == "soonestChance" {
+        if widget?.tapAction == nil || widget?.tapAction == "soonestChance" {
             if let soonest = chances.first(where: \.playable) ?? chances.first {
                 return .openChance(chanceId: soonest.chanceId)
             }
         }
         return .openPage
     }
+}
+
+/// "Ends in 3d" / "Ends in 5h" / "Ends in 12m": the largest whole unit, at
+/// least a minute; nil when the expiry is unknown or already past.
+func gameRewardsEndsIn(_ expiresAt: Date?, now: Date = Date()) -> String? {
+    guard let expiresAt else { return nil }
+    let seconds = Int(expiresAt.timeIntervalSince(now))
+    guard seconds > 0 else { return nil }
+    if seconds >= 86400 { return "Ends in \(seconds / 86400)d" }
+    if seconds >= 3600 { return "Ends in \(seconds / 3600)h" }
+    return "Ends in \(max(1, seconds / 60))m"
 }
