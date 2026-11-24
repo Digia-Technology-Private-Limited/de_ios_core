@@ -11,11 +11,13 @@ import Testing
 struct RewardsPageTests {
     // MARK: - Link router
 
-    @Test("script, data, file, blob, vbscript and intent links are refused")
+    @Test("script, data, file, blob, vbscript, intent and content links are refused")
     func refusedSchemes() {
         for raw in [
             "javascript:alert(1)", "JavaScript:alert(1)", "data:text/html,hi", "file:///etc/passwd",
-            "blob:https://x.com/1", "vbscript:run", "intent://x#Intent;end", "not a url", "",
+            "blob:https://x.com/1", "vbscript:run", "intent://x#Intent;end", "content://com.example/files/1",
+            "Content://com.example/files/1", "java\0script:alert(1)", "java\nscript:alert(1)",
+            "not a url", "",
         ] {
             #expect(RewardsLinkRouter.route(raw) == .refused, "\(raw)")
         }
@@ -43,6 +45,15 @@ struct RewardsPageTests {
                     "mailto:a@b.com", "whatsapp://send?text=hi"] {
             #expect(RewardsLinkRouter.route(raw) == .internal(URL(string: raw)!), "\(raw)")
         }
+    }
+
+    @Test("a link is trimmed and control characters are stripped")
+    func linkTrimmedAndStripped() {
+        // Guards the trim in route: surrounding whitespace and control
+        // characters never change where a link goes.
+        #expect(RewardsLinkRouter.route("  https://example.org\n") == .external(URL(string: "https://example.org")!))
+        #expect(RewardsLinkRouter.route("\tmyapp://x ") == .internal(URL(string: "myapp://x")!))
+        #expect(RewardsLinkRouter.route("\0  https://example.org\u{7F} ") == .external(URL(string: "https://example.org")!))
     }
 
     // MARK: - Game layer ownership

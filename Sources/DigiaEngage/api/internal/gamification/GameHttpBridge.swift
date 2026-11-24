@@ -68,12 +68,30 @@ enum GameHttpBridge {
     /// One failed skin `http` call's `game_http_failed` fields. The mapping
     /// production (`GamePresentation.performHttp`) and the shared case-table
     /// harness both run, so the table pins the production legs: B14 (reject),
-    /// B15–B16 (transport failure). Success carries no health.
+    /// B15–B16 (transport failure), plus the in-flight/dedup reject leg both
+    /// share through `inFlightRejection`. Success carries no health.
     struct FailedCall: Equatable, Sendable {
         let method: String
         let path: String
         let code: GameBridgeError
         let status: Int?
+    }
+
+    /// Most skin `http` calls one game may have in flight at once (row 20).
+    nonisolated static let maxHttpInFlight = 8
+
+    /// The in-flight reject leg, shared by production
+    /// (`GamePresentation.performHttp`) and the case-table harness: a reused
+    /// id or a call past the in-flight cap answers `bad_request` with health
+    /// and no status — the call never runs, like Android's session. Nil when
+    /// the call may run. The cap is derived from the ids alone, so callers
+    /// pass one projection, never ids plus a count.
+    static func inFlightRejection(
+        id: String, method: String, path: String,
+        inFlightIds: Set<String>
+    ) -> FailedCall? {
+        guard inFlightIds.contains(id) || inFlightIds.count >= maxHttpInFlight else { return nil }
+        return rejectedCall(method: method, path: path, code: .badRequest)
     }
 
     /// The reject leg (missing method/path, denied path, bad method): answers

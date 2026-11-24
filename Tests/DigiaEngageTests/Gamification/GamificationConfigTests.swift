@@ -28,6 +28,15 @@ struct GamificationConfigTests {
         #expect(GamificationConfig.fromJson(template(minSdkVersionIos: "soon")) != nil)
     }
 
+    @Test("a whitespace-only skinId skips the campaign")
+    func whitespaceSkinIdSkipped() {
+        // Guards the isNotBlank rule: a blank id is absent, not an id —
+        // Android skips it the same way, so no skin opens with a blank id.
+        var json = template()
+        json["skinId"] = "   "
+        #expect(GamificationConfig.fromJson(json) == nil)
+    }
+
     @Test("semver compares numerically, tolerating short forms")
     func semver() {
         #expect(GamificationConfig.isNewer("4.4", than: "4.3.2") == true)

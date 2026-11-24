@@ -278,4 +278,47 @@ struct GameMotionSourceTests {
         #expect(source.startAll(sensors: ["gyroscope"], hz: 30) { _ in })
         #expect(source.activeSensorNames == ["gyroscope"])
     }
+
+    @Test("subscribe without the hardware starts nothing")
+    func subscribeWithoutHardwareStartsNothing() {
+        // Availability is stubbed: accelerometer present, gyroscope missing.
+        let source = GameMotionSource(isAvailable: { $0 == GameMotionSource.accelerometerName })
+        defer { source.stopAll() }
+        var events: [GameMotionEvent] = []
+        // Guards the availability loop in startAll: gyroscope is missing, so
+        // the accelerometer must never start even though it is listed first
+        // and available — like Android's motion subscribe answering
+        // unsupported with nothing started.
+        #expect(!source.startAll(sensors: ["accelerometer", "gyroscope"], hz: 30) { events.append($0) })
+        #expect(source.activeSensorNames.isEmpty)
+        #expect(events.isEmpty)
+    }
+
+    // Fails if `motion` stops starting and stopping every named sensor: the
+    // loops in `startAll` and `stop`. Mirrors Android
+    // `GameBridgeSessionTest:326` (subscribe drives each sensor at 60 Hz with
+    // an empty result, unsubscribe stops each one).
+    @Test("motion subscribe and unsubscribe drive each named sensor")
+    func motionSubscribeUnsubscribeDriveEachSensor() {
+        let source = GameMotionSource(isAvailable: { _ in true })
+        defer { source.stopAll() }
+        var events: [GameMotionEvent] = []
+        // Android clamps the skin's 120 Hz to 60; the iOS clamp is the same
+        // `clampedHz` line the subscribe path runs through.
+        #expect(GameMotionSource.clampedHz(120) == 60)
+        #expect(source.startAll(
+            sensors: [GameMotionSource.gyroscopeName, GameMotionSource.accelerometerName],
+            hz: 120) { events.append($0) })
+        // Guards the start loop in startAll: every named sensor streams, with
+        // no error result — an empty reply, like Android's empty result.
+        #expect(source.activeSensorNames == [
+            GameMotionSource.gyroscopeName, GameMotionSource.accelerometerName])
+        #expect(events.isEmpty)
+
+        source.stop(sensor: GameMotionSource.gyroscopeName)
+        #expect(source.activeSensorNames == [GameMotionSource.accelerometerName])
+        source.stop(sensor: GameMotionSource.accelerometerName)
+        #expect(source.activeSensorNames.isEmpty)
+        #expect(events.isEmpty)
+    }
 }

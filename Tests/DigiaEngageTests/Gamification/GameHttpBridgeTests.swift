@@ -30,6 +30,22 @@ struct GameHttpBridgeTests {
         #expect(GameHttpBridge.validatedPath("grantChance") == nil)
     }
 
+    // Fails if the `http` path allowlist stops denying `grantChance` or lets
+    // a skin wander off the gamification API: the `path != "grantChance"`
+    // line and the single-segment check in `isSingleSegment`. Mirrors
+    // Android's `GameBridgeProtocolTest.http path allowlist denies
+    // grantChance and off-api paths`.
+    @Test("http path allowlist denies grantChance and off-api paths")
+    func httpPathAllowlistDeniesGrantChanceAndOffApiPaths() {
+        #expect(GameHttpBridge.validatedPath("play") == "play")
+        #expect(GameHttpBridge.validatedPath("getRewards") == "getRewards")
+        #expect(GameHttpBridge.validatedPath(String(repeating: "a", count: 64)) != nil)
+        #expect(GameHttpBridge.validatedPath("grantChance") == nil)
+        for path in ["", "../play", "a/b", "play ", "1abc", "abc?x=1", String(repeating: "a", count: 65)] {
+            #expect(GameHttpBridge.validatedPath(path) == nil, "path=\(path)")
+        }
+    }
+
     @Test("HTTP 200 returns the status and body unchanged, refusals included")
     func rawBodyPassthrough() async {
         let envelope: [String: Any] = ["isSuccess": true, "data": ["response": ["refused": "busy"]]]
@@ -178,6 +194,16 @@ private final class FakeBridgeNetworkClient: NetworkClient, @unchecked Sendable 
         case .failure(let error):
             throw error
         }
+    }
+
+    func executeCapped(request: NetworkRequest, maxBytes: Int) async throws -> NetworkResponse {
+        let response = try await execute(request: request)
+        guard let body = response.body, body.count > maxBytes else { return response }
+        return NetworkResponse(
+            statusCode: response.statusCode,
+            headers: response.headers,
+            body: Data(body.prefix(maxBytes + 1)),
+            isSuccessful: response.isSuccessful)
     }
 
     func executeMultipart(request: MultipartUploadRequest) async throws -> NetworkResponse {

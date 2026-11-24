@@ -10,22 +10,28 @@ enum GameUrlPolicy {
     /// Navigation decision. The entry file always loads. Other file URLs load
     /// only as subresources under the bundle root — a single-file skin never
     /// navigates. Https loads only as subresources (config art, reward
-    /// images), never in the main frame, so a link, redirect, or scripted
-    /// navigation can never leave the bundle. `targetFrame == nil` is a
-    /// `window.open` and is always cancelled.
+    /// images), and only when Android-strict allows the asset: an image, font
+    /// or audio extension, or an `Accept: image/...` request for an
+    /// extensionless image CDN — never in the main frame, so a link, redirect,
+    /// or scripted navigation can never leave the bundle. `targetFrame == nil`
+    /// is a `window.open` and is always cancelled. `accept` is the request's
+    /// `Accept` header when the host has one; it defaults to nil (strict).
     static func allowNavigation(
         url: URL,
         entryURL: URL,
         bundleRoot: URL,
         navigationType: WKNavigationType,
-        isMainFrame: Bool
+        isMainFrame: Bool,
+        accept: String? = nil
     ) -> Bool {
         if url == entryURL { return true }
         if url.isFileURL {
             guard !isMainFrame else { return false }
             return isUnderRoot(url, bundleRoot)
         }
-        if url.scheme == "https", !isMainFrame { return true }
+        if url.scheme?.lowercased() == "https", !isMainFrame {
+            return allowsRemoteAsset(url: url, accept: accept)
+        }
         return false
     }
 
@@ -38,6 +44,35 @@ enum GameUrlPolicy {
         if origin.hasPrefix("https://") { return true }
         guard origin.hasPrefix("http://"), let base = URL(string: apiBaseUrl) else { return false }
         return origin == normalizedOrigin(base)
+    }
+
+    /// Off-folder https subresources a skin may load: images (config values
+    /// and the reward `imageUrl`), web fonts (`init.theme.fonts` URLs) and
+    /// sound cues. Mirrors Android `REMOTE_ASSET_EXTENSIONS`, kept in step
+    /// with the `img-src`, `font-src` and `media-src` directives of the skin
+    /// CSP header.
+    private static let remoteAssetExtensions: Set<String> = [
+        "png", "jpg", "jpeg", "webp", "gif", "svg", "avif", "ico", "bmp",
+        "woff", "woff2", "ttf", "otf",
+        "mp3", "ogg", "wav", "m4a", "aac",
+    ]
+
+    /// Subresource rule (Android-strict): an off-folder https image, font or
+    /// audio extension loads; anything else cancels. An extensionless https
+    /// URL loads only as an image request carrying `Accept: image/...`,
+    /// because image CDNs often serve extensionless URLs (e.g. Cloudinary
+    /// `.../f_auto,q_auto/<publicId>`). A URL with a non-media extension
+    /// (e.g. `.js`) never passes on Accept alone. The web view sends
+    /// `Accept: image/...` only for image loads; `fetch`/XHR default to a
+    /// wildcard. Http never passes, even with an image Accept. Never throws.
+    static func allowsRemoteAsset(url: URL, accept: String? = nil) -> Bool {
+        guard url.scheme?.lowercased() == "https" else { return false }
+        if remoteAssetExtensions.contains(url.pathExtension.lowercased()) { return true }
+        guard url.pathExtension.isEmpty,
+              let accept,
+              accept.drop(while: \.isWhitespace).lowercased().hasPrefix("image/")
+        else { return false }
+        return true
     }
 
     /// `scheme://host[:port]`, lowercased, default port dropped; nil unless http(s) with a host.

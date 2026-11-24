@@ -169,13 +169,18 @@ struct SkinFileCache: Sendable {
     /// body without `DigiaBridge` (a captive portal or proxy page served as 200:
     /// native replies only through `window.DigiaBridge`, so such a file can
     /// never run, and caching it would pin the broken game until the version
-    /// changes). Already-cached entries are not re-downloaded.
+    /// changes). Already-cached entries are not re-downloaded. The read is
+    /// capped: the body never grows past the per-file cap (`executeCapped`
+    /// aborts the stream there, like Android's mid-stream abort), and anything
+    /// past it is `invalidFile`.
     func download(bundleUrl: String, skinId: String, version: Int) async throws -> URL {
         if let cached = cachedFile(skinId: skinId, version: version) { return cached }
         guard let url = URL(string: bundleUrl), GameUrlPolicy.allowsBundle(url)
         else { throw SkinFileCacheError.badURL }
-        let response = try await networkClient.execute(request: NetworkRequest(
-            url: url, method: .get, connectTimeout: 30, readTimeout: 30))
+        let response = try await networkClient.executeCapped(
+            request: NetworkRequest(
+                url: url, method: .get, connectTimeout: 30, readTimeout: 30),
+            maxBytes: Self.singleFileMaxBytes)
         guard response.isSuccessful else {
             throw SkinFileCacheError.badResponse
         }

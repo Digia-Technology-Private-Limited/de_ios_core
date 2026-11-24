@@ -51,6 +51,105 @@ struct GameBridgeCasesTests {
         }
     }
 
+    /// Pins the in-flight/dedup leg the table cannot express in one row: a
+    /// second send of an id the session has not answered yet rejects
+    /// `bad_request` and reports `game_http_failed` with an immediate
+    /// duration, without running — through the same `inFlightRejection`
+    /// mapping production uses.
+    @Test("a reused http id rejects bad_request with health while in flight")
+    func duplicateHttpIdRejects() throws {
+        let harness = Harness(rowId: "dedup")
+        harness.settingUp = false
+        harness.httpOutcome = "hang"
+        let message = json([
+            "id": "dup-1", "type": "http",
+            "payload": ["method": "POST", "path": "play", "body": ["chanceId": "c"]],
+        ])
+
+        harness.bridge.receive(message)
+        harness.handleRequests()
+        // The first call hangs: no reply, no health, one run.
+        #expect(try replies(harness).isEmpty)
+        #expect(harness.healthEvents.isEmpty)
+        #expect(harness.httpCalls.count == 1)
+
+        harness.bridge.receive(message)
+        harness.handleRequests()
+        // The duplicate rejects without running again.
+        let answered = try replies(harness)
+        #expect(answered.count == 1)
+        #expect(answered[0]["type"] as? String == "error")
+        #expect((answered[0]["payload"] as? [String: Any])?["code"] as? String == "bad_request")
+        #expect(harness.httpCalls.count == 1)
+        #expect(harness.healthEvents.count == 1)
+        let health = try #require(harness.healthEvents.first)
+        #expect(health.event == "game_http_failed")
+        #expect(health.method == "POST")
+        #expect(health.path == "play")
+        #expect(health.code == "bad_request")
+        #expect(health.status == nil)
+        // An immediate reject reports ~0ms, like production's performHttp
+        // timing; the bound tolerates scheduling slop under parallel runs.
+        let durationMs = try #require(health.durationMs)
+        #expect(durationMs >= 0 && durationMs < 1000)
+    }
+
+    /// Pins the cap leg the table cannot express in one row: with eight calls
+    /// still in flight, a reused id and a ninth id both reject `bad_request`
+    /// and each reports one `game_http_failed`, without running — through the
+    /// same `inFlightRejection` mapping production uses. Mirrors Android's
+    /// `GameBridgeSessionTest.duplicate http id and ninth in-flight call`.
+    @Test("a duplicate id and a ninth in-flight call reply bad_request with health")
+    func duplicateAndNinthInFlightReject() throws {
+        // The cap is pinned as a literal so widening it fails this test.
+        #expect(GameHttpBridge.maxHttpInFlight == 8)
+        let harness = Harness(rowId: "cap-dedup")
+        harness.settingUp = false
+        harness.httpOutcome = "hang"
+        func http(_ id: String) -> String {
+            json([
+                "id": id, "type": "http",
+                "payload": ["method": "POST", "path": "play", "body": ["chanceId": "c"]],
+            ])
+        }
+        for index in 0..<8 {
+            harness.bridge.receive(http("h\(index)"))
+        }
+        harness.handleRequests()
+        // All eight hang: no replies, no health, eight runs.
+        #expect(try replies(harness).isEmpty)
+        #expect(harness.healthEvents.isEmpty)
+        #expect(harness.httpCalls.count == 8)
+
+        harness.bridge.receive(http("h0"))
+        harness.bridge.receive(http("h8"))
+        harness.handleRequests()
+        // Both reject without running again.
+        let answered = try replies(harness)
+        #expect(answered.count == 2)
+        let byId = Dictionary(uniqueKeysWithValues: answered.compactMap { message -> (String, [String: Any])? in
+            guard let id = message["id"] as? String else { return nil }
+            return (id, message)
+        })
+        #expect(Set(byId.keys) == ["h0", "h8"])
+        for id in ["h0", "h8"] {
+            let message = try #require(byId[id])
+            #expect(message["type"] as? String == "error")
+            #expect((message["payload"] as? [String: Any])?["code"] as? String == "bad_request")
+        }
+        #expect(harness.httpCalls.count == 8)
+        #expect(harness.healthEvents.count == 2)
+        for health in harness.healthEvents {
+            #expect(health.event == "game_http_failed")
+            #expect(health.method == "POST")
+            #expect(health.path == "play")
+            #expect(health.code == "bad_request")
+            #expect(health.status == nil)
+            let durationMs = try #require(health.durationMs)
+            #expect(durationMs >= 0 && durationMs < 1000)
+        }
+    }
+
     /// The shared table, resolved from this file's workspace path: this file
     /// lives at `<workspace>/ios/core/Tests/DigiaEngageTests/Gamification/`,
     /// five levels below the workspace root.
@@ -76,13 +175,15 @@ struct GameBridgeCasesTests {
 
     /// One `game_http_failed` the session mapping reported: the reply code
     /// plus the health fields, through the same
-    /// `GameHttpBridge.rejectedCall` / `failedCall` mapping production uses.
+    /// `GameHttpBridge.rejectedCall` / `failedCall` / `inFlightRejection`
+    /// mapping production uses, with the same `durationMs` production reports.
     private struct HealthEvent: Equatable {
         let event: String
         let method: String
         let path: String
         let code: String
         let status: Int?
+        let durationMs: Int?
         var reason: String? = nil
         var type: String? = nil
     }
@@ -103,6 +204,9 @@ struct GameBridgeCasesTests {
         var logs: [(level: String, message: String)] = []
         var httpCalls: [(method: String, path: String, body: [String: Any]?)] = []
         var httpOutcome = "raw"
+        /// Ids of calls the harness left unanswered (`hang` outcome), so a
+        /// second send of the id exercises the dedup leg.
+        var httpInFlight: Set<String> = []
         var healthEvents: [HealthEvent] = []
         var pushes: [Push] = []
         var lastDevicePush: [String: Any]?
@@ -122,7 +226,7 @@ struct GameBridgeCasesTests {
                 self?.drops.append((reason, type))
                 self?.healthEvents.append(HealthEvent(
                     event: "game_bridge_dropped", method: "", path: "", code: "", status: nil,
-                    reason: reason, type: type))
+                    durationMs: nil, reason: reason, type: type))
             }
             bridge.onReady = { [weak self] in self?.didBecomeReady(version: $0) }
             bridge.onRepeatedReady = { [weak self] _ in self?.didRepeatReady() }
@@ -183,34 +287,59 @@ struct GameBridgeCasesTests {
             // http call. The exact GET/POST gate one layer down is pinned by
             // GameHttpBridgeTests, not by this table. A missing method or path
             // never runs: the harness rejects it through the same
-            // `rejectedCall` mapping the presenter uses, and every transport
-            // failure reports through the same `failedCall` mapping — so
-            // B14–B16 pin the production health legs.
+            // `rejectedCall` mapping the presenter uses; a reused id or a
+            // call past the cap rejects through the same `inFlightRejection`
+            // leg; and every transport failure reports through the same
+            // `failedCall` mapping — so B14–B16 plus the dedup leg pin the
+            // production health legs. `durationMs` rides along like
+            // production (an immediate reject reads ~0).
+            let start = Date()
             func reject(code: GameBridgeError) {
                 fail(id: id, code: code)
                 let failed = GameHttpBridge.rejectedCall(method: method, path: path, code: code)
+                // No in-flight entry to drop: an empty method/path never ran,
+                // and a duplicate leaves the still-pending original in place.
                 healthEvents.append(HealthEvent(
                     event: "game_http_failed", method: failed.method, path: failed.path,
-                    code: failed.code.rawValue, status: failed.status))
+                    code: failed.code.rawValue, status: failed.status,
+                    durationMs: Int(Date().timeIntervalSince(start) * 1000)))
             }
             func failOutcome(_ failure: GameHttpBridge.Failure) {
                 fail(id: id, code: failure.code)
                 let failed = GameHttpBridge.failedCall(method: method, path: path, failure: failure)
+                httpInFlight.remove(id)
                 healthEvents.append(HealthEvent(
                     event: "game_http_failed", method: failed.method, path: failed.path,
-                    code: failed.code.rawValue, status: failed.status))
+                    code: failed.code.rawValue, status: failed.status,
+                    durationMs: Int(Date().timeIntervalSince(start) * 1000)))
             }
             guard !method.isEmpty, !path.isEmpty else {
                 reject(code: .badRequest)
                 return
             }
+            // A looping skin must not hammer the backend: a reused id or a
+            // call past the in-flight cap answers `bad_request` without
+            // running, through the same leg production uses.
+            if GameHttpBridge.inFlightRejection(
+                id: id, method: method, path: path,
+                inFlightIds: httpInFlight) != nil
+            {
+                reject(code: .badRequest)
+                return
+            }
+            httpInFlight.insert(id)
             httpCalls.append((method, path, body))
             switch httpOutcome {
             case "timeout":
                 failOutcome(GameHttpBridge.Failure(code: .timeout, status: nil))
             case "network":
                 failOutcome(GameHttpBridge.Failure(code: .network, status: nil))
+            case "hang":
+                // The call stays in flight with no answer, so a second send
+                // of the id exercises the dedup leg.
+                break
             default:
+                httpInFlight.remove(id)
                 answer(id: id, payload: ["status": 200, "body": ["isSuccess": true]])
             }
         }

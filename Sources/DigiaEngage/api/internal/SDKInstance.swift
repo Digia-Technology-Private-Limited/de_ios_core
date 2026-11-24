@@ -979,8 +979,11 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         recordDelivery(controller, source: Self.deliverySource(driver))
         // Routing must see the stamped payload: it is the instance every render
         // surface stores and hands back, and the only thing that leads an event
-        // back to this presentation.
-        let verdict = routeOrganicTrigger(controller.trigger, driver: driver)
+        // back to this presentation. The controller's id rides along
+        // explicitly too, because the payload stamp lands after routing on
+        // Android — the explicit leg wins in `PlaySession.triggerId`.
+        let verdict = routeOrganicTrigger(
+            controller.trigger, driver: driver, presentationId: controller.id)
         switch verdict {
         case .accepted(let payload, let kind):
             let campaign = findCampaign(payload)
@@ -1529,7 +1532,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// `unknown_campaign_key` and `frequency_capped` are the same "false" to a
     /// caller that can only see accepted/not, and only one of them is a bug.
     @discardableResult
-    func routeOrganicTrigger(_ payload: CEPTriggerPayload, driver: CampaignDriver) -> RoutingVerdict {
+    func routeOrganicTrigger(
+        _ payload: CEPTriggerPayload, driver: CampaignDriver, presentationId: String? = nil
+    ) -> RoutingVerdict {
         logVerbose(
             "deliver cepCampaignId='\(payload.cepCampaignId)' "
                 + "campaignKey='\(payload.campaignKey)'")
@@ -1544,7 +1549,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 detail: "no campaign for key '\(resolvedKey)'"
             )
         }
-        return route(campaign, payload: payload, driver: driver)
+        return route(campaign, payload: payload, driver: driver, presentationId: presentationId)
     }
 
     /// The store key a trigger routes by. Route purely by the campaignKey
@@ -1626,7 +1631,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     private func route(
         _ campaign: CampaignModel,
         payload: CEPTriggerPayload,
-        driver: CampaignDriver
+        driver: CampaignDriver,
+        presentationId: String? = nil
     ) -> RoutingVerdict {
         // `Digia.attach(to:)`: the app may have replaced its root since; put the host back before drawing.
         DigiaHostAttachment.ensure()
@@ -1649,7 +1655,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             hostUnavailable: { [unowned self] in hostUnavailable($0) }
         )
         logVerbose("routeByCampaignKey key='\(campaign.campaignKey)' type='\(campaign.campaignType)'")
-        return router.route(CampaignRequest(driver: driver, campaign: campaign, payload: payload))
+        return router.route(
+            CampaignRequest(driver: driver, campaign: campaign, payload: payload, presentationId: presentationId))
     }
 
     /// Whether no Digia host is on screen to draw an overlay. Not checked on arrival: a campaign

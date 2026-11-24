@@ -68,12 +68,12 @@ struct GamificationConfig: Equatable {
         _ templateConfig: [String: Any], campaignLevel: [String: Any]? = nil,
         designTokens: DesignTokenCatalog = .empty
     ) -> GamificationConfig? {
-        guard let skinId = templateConfig.nonBlankString("skinId"),
+        guard let skinId = nonBlank(templateConfig["skinId"]),
               let skinVersion = positiveInt(templateConfig["skinVersion"])
         else { return nil }
         let bundleUrl =
-            templateConfig.nonBlankString("bundleUrl")
-            ?? campaignLevel?.nonBlankString("bundleUrl")
+            nonBlank(templateConfig["bundleUrl"])
+            ?? campaignLevel.flatMap { nonBlank($0["bundleUrl"]) }
         guard let bundleUrl, URL(string: bundleUrl) != nil else { return nil }
 
         // `entry` is `{ kind }` on the wire; a bare string is accepted too. An
@@ -163,6 +163,16 @@ struct GamificationConfig: Equatable {
             themeFontFamily: Self.themeFontFamily(templateConfig: templateConfig),
             themeFonts: Self.themeFonts(templateConfig: templateConfig),
         )
+    }
+
+    /// Non-blank with whitespace trimmed: a whitespace-only `skinId` or
+    /// `bundleUrl` is absent, not a value. Local to gamification parsing —
+    /// the shared `nonBlankString` stays `isEmpty`-only.
+    private static func nonBlank(_ raw: Any?) -> String? {
+        guard let string = raw as? String,
+              !string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return nil }
+        return string
     }
 
     private static func themeObject(templateConfig: [String: Any]) -> [String: Any]? {

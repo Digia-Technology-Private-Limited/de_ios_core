@@ -128,11 +128,16 @@ final class PlaySession {
     }
 
     /// The trigger id sent with the chance request: the delivering
-    /// presentation's id, so every trigger asks for its own chance. Without one
-    /// (a live test) it falls back to `cepCampaignId`, which is the same for
-    /// every trigger of a campaign. Empty means there is none. Matches
-    /// Android's `PlaySession.triggerIdOrNull`.
-    nonisolated static func triggerId(of payload: CEPTriggerPayload) -> String {
+    /// presentation's id, so every trigger asks for its own chance. The
+    /// explicit id wins — routing passes the delivering presentation's id
+    /// because the payload stamp lands after routing on Android — then the
+    /// stamped payload id. Without one (a live test) it falls back to
+    /// `cepCampaignId`, which is the same for every trigger of a campaign.
+    /// Empty means there is none. Matches Android's
+    /// `PlaySession.triggerIdOrNull`.
+    nonisolated static func triggerId(of payload: CEPTriggerPayload, presentationId: String? = nil) -> String {
+        if let explicit = presentationId?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !explicit.isEmpty { return explicit }
         if let id = payload.presentationId?.trimmingCharacters(in: .whitespacesAndNewlines), !id.isEmpty {
             return id
         }

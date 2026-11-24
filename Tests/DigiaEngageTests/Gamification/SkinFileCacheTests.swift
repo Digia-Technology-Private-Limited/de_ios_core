@@ -89,6 +89,51 @@ struct SkinFileCacheTests {
         #expect(cache.cachedFile(skinId: "wheel", version: 4) == nil)
     }
 
+    @Test("download rejects an over-cap body as invalidFile")
+    func downloadRejectsOversize() async {
+        let (cache, client, _) = makeCache()
+        let url = "https://cdn.example.com/s/wheel/3/index.html"
+        var big = Data("DigiaBridge".utf8)
+        big.append(Data(repeating: 0x61, count: SkinFileCache.singleFileMaxBytes))
+        client.enqueueResponse(url: url, statusCode: 200, data: big)
+
+        // Guards the cap check: a body past singleFileMaxBytes is
+        // invalidFile, like Android's mid-stream abort — and nothing caches.
+        await #expect(throws: SkinFileCacheError.self) {
+            try await cache.download(bundleUrl: url, skinId: "wheel", version: 3)
+        }
+        #expect(cache.cachedFile(skinId: "wheel", version: 3) == nil)
+    }
+
+    @Test("a capped read stops at maxBytes + 1 instead of buffering the body whole")
+    func cappedReadAbortsPastTheCap() async throws {
+        let cap = SkinFileCache.singleFileMaxBytes
+        let chunk = Data(repeating: 0x61, count: 64 * 1024)
+        // Past the cap, delivered in chunks like a real bundle.
+        let chunks = Array(repeating: chunk, count: cap / chunk.count + 2)
+        NetworkLiveTestURLProtocol.serve(.init(chunks: chunks))
+        let client = URLSessionNetworkClient(
+            session: NetworkLiveTestURLProtocol.session(),
+            sessionIdProvider: { nil },
+            headerProvider: { [:] })
+
+        let response = try await client.executeCapped(
+            request: NetworkRequest(url: URL(string: "https://cdn.example.com/s/wheel/3/index.html")!),
+            maxBytes: cap)
+
+        // Fails if: executeCapped buffers the whole body before enforcing the
+        // cap — an oversized skin would peak at its full size instead of the
+        // cap, unlike Android's mid-stream abort.
+        #expect(response.statusCode == 200)
+        #expect(response.body?.count == cap + 1)
+
+        NetworkLiveTestURLProtocol.serve(.init(chunks: [Data("hello".utf8)]))
+        let small = try await client.executeCapped(
+            request: NetworkRequest(url: URL(string: "https://cdn.example.com/s/wheel/3/index.html")!),
+            maxBytes: cap)
+        #expect(small.body == Data("hello".utf8))
+    }
+
     @Test("prefetch skips cached entries and drops failures")
     func prefetchDropsFailures() async {
         let (cache, client, _) = makeCache()
@@ -103,6 +148,51 @@ struct SkinFileCacheTests {
 
         #expect(cache.cachedFile(skinId: "wheel", version: 3) != nil)
         #expect(cache.cachedFile(skinId: "broken", version: 1) == nil)
+    }
+
+    @Test("prefetch downloads one bundle at a time")
+    func downloadsOneBundleAtATime() async {
+        let (cache, client, _) = makeCache()
+        // The serial loop below awaits each download before starting the
+        // next, so the factory never overlaps with itself.
+        var inFlight = 0
+        var maxInFlight = 0
+        client.setResponseFactory { _ in
+            inFlight += 1
+            maxInFlight = max(maxInFlight, inFlight)
+            Thread.sleep(forTimeInterval: 0.02)
+            inFlight -= 1
+            return NetworkResponse(
+                statusCode: 200, headers: [:],
+                body: Data("<html>DigiaBridge</html>".utf8), isSuccessful: true)
+        }
+
+        // Guards the serial loop in prefetch: overlapping downloads would
+        // overlap in the factory, like Android's mutex.
+        await cache.prefetch([
+            (bundleUrl: "https://cdn.example.com/s/a/1/index.html", skinId: "a", version: 1),
+            (bundleUrl: "https://cdn.example.com/s/b/1/index.html", skinId: "b", version: 1),
+        ])
+
+        #expect(cache.cachedFile(skinId: "a", version: 1) != nil)
+        #expect(cache.cachedFile(skinId: "b", version: 1) != nil)
+        #expect(maxInFlight == 1)
+    }
+
+    @Test("a failed download is retried at the next prefetch")
+    func failedDownloadRetriedAtNextPrefetch() async {
+        let (cache, client, _) = makeCache()
+        let url = "https://cdn.example.com/s/wheel/3/index.html"
+        client.enqueueResponse(url: url, statusCode: 500, body: "")
+
+        await cache.prefetch([(bundleUrl: url, skinId: "wheel", version: 3)])
+        // Guards the drop in prefetch: a failed bundle is never cached.
+        #expect(cache.cachedFile(skinId: "wheel", version: 3) == nil)
+
+        // The next trigger retries: the same bundle now lands in the cache.
+        client.enqueueResponse(url: url, statusCode: 200, body: "<html>DigiaBridge</html>")
+        await cache.prefetch([(bundleUrl: url, skinId: "wheel", version: 3)])
+        #expect(cache.cachedFile(skinId: "wheel", version: 3) != nil)
     }
 
     @Test("eviction drops the least-recently-used entry until under the cap")
