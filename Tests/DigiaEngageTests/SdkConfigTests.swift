@@ -135,6 +135,111 @@ struct SdkConfigGamePrewarmTests {
     }
 }
 
+@Suite("SdkConfig game limits")
+struct SdkConfigGameLimitsTests {
+    private func limits(_ json: String) -> GameSkinLimits {
+        SdkConfig.resolve(fetched: object(json)).gameSkinLimits
+    }
+
+    private func storage(_ json: String) -> GameStorageLimits {
+        SdkConfig.resolve(fetched: object(json)).gameStorageLimits
+    }
+
+    @Test("limits and storage default to the burned caps")
+    func shippedDefaults() {
+        #expect(SdkConfig.resolve().gameSkinLimits == .defaults)
+        #expect(SdkConfig.resolve().gameStorageLimits == .defaults)
+        #expect(GameSkinLimits.defaults.skinFileMaxBytes == 3 * 1024 * 1024 + (3 * 1024 * 1024) / 10)
+        #expect(GameSkinLimits.defaults.skinCacheMaxBytes == 16 * 1024 * 1024)
+        #expect(GameSkinLimits.defaults.bridgeMessageMaxBytes == 64 * 1024)
+        #expect(GameStorageLimits.defaults.valueMaxBytes == 16 * 1024)
+        #expect(GameStorageLimits.defaults.namespaceMaxBytes == 64 * 1024)
+    }
+
+    @Test("a full section is read as sent")
+    func fullSectionRead() {
+        let skin = limits(
+            #"{"gamification":{"limits":{"skinFileMaxBytes":2097152,"skinCacheMaxBytes":33554432,"bridgeMessageMaxBytes":32768}}}"#)
+        #expect(skin == GameSkinLimits(
+            skinFileMaxBytes: 2 * 1024 * 1024, skinCacheMaxBytes: 32 * 1024 * 1024,
+            bridgeMessageMaxBytes: 32 * 1024))
+        let quotas = storage(
+            #"{"gamification":{"storage":{"valueMaxBytes":8192,"namespaceMaxBytes":32768}}}"#)
+        #expect(quotas == GameStorageLimits(valueMaxBytes: 8 * 1024, namespaceMaxBytes: 32 * 1024))
+    }
+
+    @Test("absent keys take their defaults")
+    func absentKeysDefault() {
+        let skin = limits(#"{"gamification":{"limits":{"skinFileMaxBytes":2097152}}}"#)
+        #expect(skin.skinFileMaxBytes == 2 * 1024 * 1024)
+        #expect(skin.skinCacheMaxBytes == GameSkinLimits.defaults.skinCacheMaxBytes)
+        #expect(skin.bridgeMessageMaxBytes == GameSkinLimits.defaults.bridgeMessageMaxBytes)
+    }
+
+    @Test("out-of-range values clamp into their native range")
+    func outOfRangeClamps() {
+        let skin = limits(
+            #"{"gamification":{"limits":{"skinFileMaxBytes":1,"skinCacheMaxBytes":1000000000,"bridgeMessageMaxBytes":100}}}"#)
+        #expect(skin.skinFileMaxBytes == GameSkinLimits.minSkinFileBytes)
+        #expect(skin.skinCacheMaxBytes == GameSkinLimits.maxSkinCacheBytes)
+        #expect(skin.bridgeMessageMaxBytes == GameSkinLimits.minBridgeMessageBytes)
+        let quotas = storage(
+            #"{"gamification":{"storage":{"valueMaxBytes":1,"namespaceMaxBytes":1000000000}}}"#)
+        #expect(quotas.valueMaxBytes == GameStorageLimits.minValueBytes)
+        #expect(quotas.namespaceMaxBytes == GameStorageLimits.maxNamespaceBytes)
+        // A value past Int range still clamps instead of trapping: the range
+        // check runs on the double before converting.
+        let huge = limits(#"{"gamification":{"limits":{"skinFileMaxBytes":1e30}}}"#)
+        #expect(huge.skinFileMaxBytes == GameSkinLimits.maxSkinFileBytes)
+    }
+
+    @Test("a non-numeric value falls the whole section back to the defaults")
+    func nonNumericFallsWholeSectionBack() {
+        for section in [
+            #"{"gamification":{"limits":{"skinFileMaxBytes":"big","skinCacheMaxBytes":33554432,"bridgeMessageMaxBytes":32768}}}"#,
+            #"{"gamification":{"limits":{"skinFileMaxBytes":true}}}"#,
+            #"{"gamification":{"limits":{"skinFileMaxBytes":2097152.5}}}"#,
+            #"{"gamification":{"limits":{"bridgeMessageMaxBytes":[1]}}}"#,
+            #"{"gamification":{"limits":{"skinCacheMaxBytes":null}}}"#,
+        ] {
+            #expect(limits(section) == .defaults, "\(section)")
+        }
+        for section in [
+            #"{"gamification":{"storage":{"valueMaxBytes":"big","namespaceMaxBytes":32768}}}"#,
+            #"{"gamification":{"storage":{"valueMaxBytes":false}}}"#,
+        ] {
+            #expect(storage(section) == .defaults, "\(section)")
+        }
+    }
+
+    @Test("a malformed section costs only itself, not its neighbour")
+    func malformedCostsOnlyItself() {
+        let resolved = SdkConfig.resolve(fetched: object(
+            #"{"gamification":{"limits":{"skinFileMaxBytes":"big"},"storage":{"valueMaxBytes":8192}}}"#))
+        #expect(resolved.gameSkinLimits == .defaults)
+        #expect(resolved.gameStorageLimits == GameStorageLimits(
+            valueMaxBytes: 8 * 1024, namespaceMaxBytes: GameStorageLimits.defaults.namespaceMaxBytes))
+        let flipped = SdkConfig.resolve(fetched: object(
+            #"{"gamification":{"limits":{"skinFileMaxBytes":2097152},"storage":{"valueMaxBytes":"big"}}}"#))
+        #expect(flipped.gameSkinLimits.skinFileMaxBytes == 2 * 1024 * 1024)
+        #expect(flipped.gameStorageLimits == .defaults)
+    }
+
+    @Test("the fetched section wins whole over the cached one")
+    func fetchedWinsWholeOverCached() {
+        let cached = object(#"{"gamification":{"limits":{"skinFileMaxBytes":2097152}}}"#)
+        let fetched = object(#"{"gamification":{"limits":{"bridgeMessageMaxBytes":32768}}}"#)
+        let resolved = SdkConfig.resolve(fetched: fetched, cached: cached).gameSkinLimits
+        // Guards the whole-fallback rule: the fetched section decides alone, so the
+        // cached file cap does not leak in beside the fetched message cap.
+        #expect(resolved == GameSkinLimits(
+            skinFileMaxBytes: GameSkinLimits.defaults.skinFileMaxBytes,
+            skinCacheMaxBytes: GameSkinLimits.defaults.skinCacheMaxBytes,
+            bridgeMessageMaxBytes: 32 * 1024))
+        #expect(SdkConfig.resolve(cached: cached).gameSkinLimits.skinFileMaxBytes == 2 * 1024 * 1024)
+    }
+}
+
 @MainActor
 @Suite("SdkConfigStore")
 struct SdkConfigStoreTests {

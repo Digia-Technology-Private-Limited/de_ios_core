@@ -18,7 +18,8 @@ final class GamificationOrchestrator: ObservableObject {
     private unowned let sdk: SDKInstance
 
     /// Gamification skin files, cached immutable by skin id + version.
-    let skinFileCache: SkinFileCache
+    /// Recreated when the SDK config limits land (cached first, then fetched).
+    private(set) var skinFileCache: SkinFileCache
     /// Gamification backend calls (`grantChance`, `getRewards`). Wraps the same
     /// client so tests drive it through `MockNetworkClient` with no second seam.
     let gameOutcomeSource: any GameOutcomeSource
@@ -61,8 +62,21 @@ final class GamificationOrchestrator: ObservableObject {
 
     init(sdk: SDKInstance) {
         self.sdk = sdk
-        self.skinFileCache = SkinFileCache(networkClient: sdk.networkClient)
+        self.skinFileCache = SkinFileCache(
+            networkClient: sdk.networkClient,
+            fileMaxBytes: sdk.gameSkinLimits.skinFileMaxBytes,
+            cacheMaxBytes: Int64(sdk.gameSkinLimits.skinCacheMaxBytes))
         self.gameOutcomeSource = HttpGameOutcomeSource(networkClient: sdk.networkClient)
+    }
+
+    /// Applies the SDK config skin limits to the cache. The SDK calls it for
+    /// the cached config and again when the fetched config lands; entries
+    /// already stored stay servable, the new caps gate the next write.
+    func applySkinLimits(_ limits: GameSkinLimits) {
+        skinFileCache = SkinFileCache(
+            networkClient: sdk.networkClient,
+            fileMaxBytes: limits.skinFileMaxBytes,
+            cacheMaxBytes: Int64(limits.skinCacheMaxBytes))
     }
 
     /// Prefetches every gamification skin on campaign sync, so a later show
@@ -159,6 +173,7 @@ final class GamificationOrchestrator: ObservableObject {
     /// Resets the rewards state for a test teardown.
     func resetForTesting() {
         cancelPrefetches()
+        skinFileCache = SkinFileCache(networkClient: sdk.networkClient)
         GamePrewarmer.resetForTesting()
         rewardsRefreshTask?.cancel()
         rewardsRefreshTask = nil

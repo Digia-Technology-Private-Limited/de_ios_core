@@ -17,6 +17,10 @@ final class GameBridgeStorage: @unchecked Sendable {
     nonisolated static let namespaceMaxBytes = 64 * 1024
     /// Every skin key starts with this; a user change clears the whole domain.
     nonisolated static let keyPrefix = "digia.game."
+    /// The configured per-value and per-namespace budgets (see `init`). The
+    /// static caps above are the defaults when no config arrived.
+    private let valueMaxBytes: Int
+    private let namespaceMaxBytes: Int
     private let defaults: UserDefaults
     private let namespace: String
 
@@ -47,9 +51,16 @@ final class GameBridgeStorage: @unchecked Sendable {
         }
     }
 
-    init(defaults: UserDefaults, namespace: String) {
+    init(
+        defaults: UserDefaults,
+        namespace: String,
+        valueMaxBytes: Int = GameBridgeStorage.valueMaxBytes,
+        namespaceMaxBytes: Int = GameBridgeStorage.namespaceMaxBytes
+    ) {
         self.defaults = defaults
         self.namespace = namespace
+        self.valueMaxBytes = valueMaxBytes
+        self.namespaceMaxBytes = namespaceMaxBytes
     }
 
     func get(_ key: String) -> String? {
@@ -62,9 +73,9 @@ final class GameBridgeStorage: @unchecked Sendable {
     func set(_ key: String, value: String) -> String? {
         guard Self.isValidKey(key) else { return "invalid key" }
         let bytes = value.utf8.count
-        guard bytes <= Self.valueMaxBytes else { return "storage quota exceeded" }
+        guard bytes <= valueMaxBytes else { return "storage quota exceeded" }
         let delta = bytes - (defaults.string(forKey: storageKey(key))?.utf8.count ?? 0)
-        guard storedBytes() + delta <= Self.namespaceMaxBytes else { return "storage quota exceeded" }
+        guard storedBytes() + delta <= namespaceMaxBytes else { return "storage quota exceeded" }
         defaults.set(value, forKey: storageKey(key))
         return nil
     }

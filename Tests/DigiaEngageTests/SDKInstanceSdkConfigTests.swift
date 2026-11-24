@@ -201,6 +201,24 @@ struct SDKInstanceSdkConfigTests {
         return await service.queuedPayloads().filter { names.contains($0["event_name"] as? String ?? "") }
     }
 
+    @Test("a cached gamification limits section applies at launch")
+    func cachedGameLimitsAtLaunch() async throws {
+        let defaults = makeDefaults()
+        seedCache(defaults, #"{"gamification":{"limits":{"skinFileMaxBytes":2097152,"skinCacheMaxBytes":33554432,"bridgeMessageMaxBytes":32768},"storage":{"valueMaxBytes":8192,"namespaceMaxBytes":32768}}}"#)
+        let network = ConfigNetworkClient()
+        let sdk = makeInstance(defaults: defaults, network: network, sink: HealthSink())
+
+        try await sdk.initialize(DigiaConfig(apiKey: apiKey))
+
+        // Guards the applySdkConfig lines: the cached limits land on the SDK
+        // and the skin cache is rebuilt around them.
+        #expect(sdk.gameSkinLimits == GameSkinLimits(
+            skinFileMaxBytes: 2 * 1024 * 1024, skinCacheMaxBytes: 32 * 1024 * 1024,
+            bridgeMessageMaxBytes: 32 * 1024))
+        #expect(sdk.gameStorageLimits == GameStorageLimits(valueMaxBytes: 8 * 1024, namespaceMaxBytes: 32 * 1024))
+        network.answer("{}")
+    }
+
     @Test("a cached upload switch-off drops an event tracked before the call answers")
     func cachedUploadOffAtLaunch() async throws {
         let defaults = makeDefaults()
