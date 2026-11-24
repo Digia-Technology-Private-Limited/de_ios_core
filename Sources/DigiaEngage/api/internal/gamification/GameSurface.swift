@@ -307,7 +307,7 @@ final class GameSurface {
         default:
             fail(
                 settle: settle, campaign: campaign, config: config,
-                reason: GameFailure.closedBeforeReady.wireValue, chanceId: chanceId, timing: timing)
+                reason: GameFailureReason.closedBeforeReady.wireValue, chanceId: chanceId, timing: timing)
         }
     }
 
@@ -322,8 +322,8 @@ final class GameSurface {
         let dropReason: DropReason
         switch reason {
         case PlayDropReason.busy: dropReason = .surfaceBusy
-        case GameFailure.readyTimeout.wireValue, GameFailure.loadTimeout.wireValue,
-             GameFailure.openTimeout.wireValue: dropReason = .timeout
+        case GameFailureReason.readyTimeout.wireValue, GameFailureReason.loadTimeout.wireValue,
+             GameFailureReason.openTimeout.wireValue: dropReason = .timeout
         default: dropReason = .error
         }
         sdk.liveTestContexts[payload.cepCampaignId]?.reportFailed(dropReason, message: reason)
@@ -346,7 +346,7 @@ final class GameSurface {
         case "screen_exit": return .screenExit
         // A shown game whose skin call hung: the SDK withdrew it, like any
         // other shown failure on Android (which reports CANCELLED the same way).
-        case GameFailure.httpTimeout.wireValue: return .cancelled
+        case GameFailureReason.httpTimeout.wireValue: return .cancelled
         default: return .cancelled
         }
     }
@@ -360,7 +360,7 @@ final class GameSurface {
     static func gameDismissReason(closeReason: String) -> String {
         switch closeReason {
         case "user", "back", "screen_exit", GamePresentation.cancelledReason, "skin", "cta", "failure",
-             "superseded", "web_process_terminated", GameFailure.httpTimeout.wireValue:
+             "superseded", "web_process_terminated", GameFailureReason.httpTimeout.wireValue:
             return closeReason
         default: return "user"
         }
@@ -598,13 +598,13 @@ final class GameSurface {
                 self.sdk.events.toDigia(
                     GameRewardsFailedEvent(
                         health: health, op: path,
-                        code: GameBridgeErrorCode.timeout.rawValue, status: nil,
+                        code: GameBridgeError.timeout.rawValue, status: nil,
                         durationMs: durationMs),
                     payload: Self.payload(settle: settle, campaign: campaign))
                 guard shown else { return }
                 self.sdk.events.toDigia(
                     GameOpenFailedEvent(
-                        reason: GameFailure.httpTimeout.wireValue,
+                        reason: GameFailureReason.httpTimeout.wireValue,
                         chanceId: stats.chanceId, entry: entryValue,
                         skinId: config.skinId, skinVersion: config.skinVersion,
                         warm: timing.warm ?? GamePrewarmer.warmKind(campaignKey: campaignKey),

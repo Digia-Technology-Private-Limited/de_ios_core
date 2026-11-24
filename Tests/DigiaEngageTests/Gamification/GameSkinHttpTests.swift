@@ -69,7 +69,7 @@ struct GameSkinHttpTests {
             #expect(success.status == status)
             #expect(success.body?["reason"] as? String == "r\(status)")
         }
-        for (status, code) in [(500, GameBridgeErrorCode.server), (503, .server), (302, .network)] {
+        for (status, code) in [(500, GameBridgeError.server), (503, .server), (302, .network)] {
             let client = FakeSkinNetworkClient(result: .success(status: status, body: [:]))
             let result = await GameHttpBridge.send(
                 client: client, baseUrl: "https://app.digia.tech", headers: [:],

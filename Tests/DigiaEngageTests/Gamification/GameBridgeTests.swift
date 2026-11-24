@@ -58,7 +58,7 @@ struct GameBridgeTests {
     @Test("ready timeout closes a loading session with readyTimeout")
     func timeoutClosesLoading() throws {
         let bridge = makeBridge()
-        var failed: GameFailure?
+        var failed: GameFailureReason?
         bridge.onFailed = { failed = $0 }
 
         let generation = bridge.beginLoading()
@@ -72,7 +72,7 @@ struct GameBridgeTests {
     @Test("the commit re-arm makes the load timer stale; the ready timer then fails readyTimeout")
     func commitHandsLoadTimerToReadyTimer() throws {
         let bridge = makeBridge()
-        var failed: GameFailure?
+        var failed: GameFailureReason?
         bridge.onFailed = { failed = $0 }
 
         let loadGeneration = bridge.beginLoading()
@@ -90,7 +90,7 @@ struct GameBridgeTests {
     @Test("ready timeout is a no-op once ready arrived")
     func timeoutNoOpAfterReady() throws {
         let bridge = makeBridge()
-        var failed: GameFailure?
+        var failed: GameFailureReason?
         bridge.onFailed = { failed = $0 }
 
         let generation = bridge.beginLoading()
@@ -138,7 +138,7 @@ struct GameBridgeTests {
         // parses, and the first one reports game_bridge_dropped{reason:oversize}.
         bridge.receive(msg("ready", payload: ["pad": big]))
         #expect(bridge.state == .loading)
-        #expect(bridge.didRecordDrop)
+        #expect(bridge.dropNoted)
         #expect(drops.count == 1)
         #expect(drops.first?.reason == "oversize")
         #expect(drops.first?.type == nil)
@@ -157,7 +157,7 @@ struct GameBridgeTests {
         bridge.receive(json(["notype": true]))
 
         #expect(bridge.state == .loading)
-        #expect(bridge.didRecordDrop)
+        #expect(bridge.dropNoted)
     }
 
     @Test("unknown type with an id answers unsupported")
@@ -207,7 +207,7 @@ struct GameBridgeTests {
         // Guards the id-less unsupported drop: flagged once, with the type,
         // so the presenter reports game_bridge_dropped{reason:unknown}.
         #expect(requests.isEmpty)
-        #expect(bridge.didRecordDrop)
+        #expect(bridge.dropNoted)
         #expect(drops.count == 1)
         #expect(drops.first?.reason == "unknown")
         #expect(drops.first?.type == "teleport")
@@ -230,7 +230,7 @@ struct GameBridgeTests {
         bridge.receive(msg("storage", payload: ["op": "wipe"]))
 
         #expect(requests.isEmpty)
-        #expect(bridge.didRecordDrop)
+        #expect(bridge.dropNoted)
         #expect(drops.count == 1)
         #expect(drops.first?.reason == "unknown")
         #expect(drops.first?.type == "action")
@@ -279,7 +279,7 @@ struct GameBridgeTests {
             let payload = try #require(reply["payload"] as? [String: Any])
             #expect(payload["code"] as? String == "bad_request")
         }
-        #expect(bridge.didRecordDrop)
+        #expect(bridge.dropNoted)
     }
 
     @Test("an op without a named case passes through the canvas parser")

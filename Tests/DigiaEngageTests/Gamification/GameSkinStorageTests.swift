@@ -6,23 +6,23 @@ import Testing
 /// Guards the skin storage contract: the production lines are `isValidKey`,
 /// the 16 KB value check and namespace-delta check in `set`, and `clearAll`.
 @Suite("Game skin storage", .tags(.unit, .game))
-struct GameSkinStorageTests {
-    private func makeStorage(namespace: String = "proj/wheel/user1") -> (GameSkinStorage, UserDefaults) {
+struct GameBridgeStorageTests {
+    private func makeStorage(namespace: String = "proj/wheel/user1") -> (GameBridgeStorage, UserDefaults) {
         let defaults = UserDefaults(suiteName: "test-game-\(UUID().uuidString)")!
-        return (GameSkinStorage(defaults: defaults, namespace: namespace), defaults)
+        return (GameBridgeStorage(defaults: defaults, namespace: namespace), defaults)
     }
 
     @Test("key regex accepts the contract shape and rejects the rest")
     func keyRegex() {
-        #expect(GameSkinStorage.isValidKey("hi.score-1_x"))
-        #expect(GameSkinStorage.isValidKey("a"))
-        #expect(GameSkinStorage.isValidKey(String(repeating: "k", count: 64)))
+        #expect(GameBridgeStorage.isValidKey("hi.score-1_x"))
+        #expect(GameBridgeStorage.isValidKey("a"))
+        #expect(GameBridgeStorage.isValidKey(String(repeating: "k", count: 64)))
         // Guards the length and character checks in isValidKey.
-        #expect(!GameSkinStorage.isValidKey(""))
-        #expect(!GameSkinStorage.isValidKey(String(repeating: "k", count: 65)))
-        #expect(!GameSkinStorage.isValidKey("a/b"))
-        #expect(!GameSkinStorage.isValidKey("a b"))
-        #expect(!GameSkinStorage.isValidKey("héllo"))
+        #expect(!GameBridgeStorage.isValidKey(""))
+        #expect(!GameBridgeStorage.isValidKey(String(repeating: "k", count: 65)))
+        #expect(!GameBridgeStorage.isValidKey("a/b"))
+        #expect(!GameBridgeStorage.isValidKey("a b"))
+        #expect(!GameBridgeStorage.isValidKey("héllo"))
     }
 
     @Test("set, get and remove round-trip, missing reads null")
@@ -69,12 +69,12 @@ struct GameSkinStorageTests {
     @Test("namespaces are isolated per project, skin and user")
     func namespaceIsolation() {
         let defaults = UserDefaults(suiteName: "test-game-\(UUID().uuidString)")!
-        let first = GameSkinStorage(
+        let first = GameBridgeStorage(
             defaults: defaults,
-            namespace: GameSkinStorage.namespace(projectId: "p", skinId: "wheel", identity: "u1"))
-        let second = GameSkinStorage(
+            namespace: GameBridgeStorage.namespaceFor(projectId: "p", skinId: "wheel", identity: "u1"))
+        let second = GameBridgeStorage(
             defaults: defaults,
-            namespace: GameSkinStorage.namespace(projectId: "p", skinId: "wheel", identity: "u2"))
+            namespace: GameBridgeStorage.namespaceFor(projectId: "p", skinId: "wheel", identity: "u2"))
 
         #expect(first.set("score", value: "1") == nil)
         #expect(second.get("score") == nil)

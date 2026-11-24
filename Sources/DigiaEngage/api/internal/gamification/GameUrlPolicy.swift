@@ -6,7 +6,7 @@ import WebKit
 /// https images and fonts, or files under the bundle root. Anything else —
 /// http, foreign schemes, main-frame navigations away from the entry — is
 /// cancelled in `decidePolicyFor`.
-enum GameURLPolicy {
+enum GameUrlPolicy {
     /// Navigation decision. The entry file always loads. Other file URLs load
     /// only as subresources under the bundle root — a single-file skin never
     /// navigates. Https loads only as subresources (config art, reward

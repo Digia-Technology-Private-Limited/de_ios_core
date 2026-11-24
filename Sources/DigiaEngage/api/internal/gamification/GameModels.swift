@@ -45,7 +45,7 @@ enum GameKeyboardInset {
 /// `wireValue` is the cross-stack contract: it reaches the `game_open_failed`
 /// analytics event from three runtimes and must match character for
 /// character (Android's `GameFailureReason.wireValue`).
-enum GameFailure: String, Equatable, Sendable {
+enum GameFailureReason: String, Equatable, Sendable {
     /// The page committed but the skin sent no `ready` within 5 s.
     case readyTimeout
     /// The page did not commit within 15 s of the load starting.
@@ -178,7 +178,7 @@ struct GameOpenRequest {
     /// for the skin's own `close`, `cta` for a handoff op. Mirrors Android's
     /// `GameOpenRequest.onClose`.
     var onClose: (@MainActor (String) -> Void)?
-    var onFailure: (@MainActor (GameFailure) -> Void)?
+    var onFailure: (@MainActor (GameFailureReason) -> Void)?
     /// Fires once the skin's CTA op has run, with the op as the skin sent it
     /// (`copy`, `openLink`, `share`, or a passthrough op like `requestReview`)
     /// and, for `openLink` only, the link it opens. The surface reports it as a

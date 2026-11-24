@@ -22,7 +22,7 @@ import Testing
 /// mirrored by the harness exactly as the row's `notes` describe — those
 /// mirrors pin the contract shape, not the host trigger. The decisions the
 /// host feeds on are pinned where they are pure and reachable: the storage
-/// backend is the real `GameSkinStorage` on a throwaway suite, the log-level
+/// backend is the real `GameBridgeStorage` on a throwaway suite, the log-level
 /// and haptic-style filters are the real intake mapping, the HTTP reject and
 /// failure legs run the real `GameHttpBridge` `rejectedCall` / `failedCall`
 /// mapping production uses — so the table's `health` expectations pin the
@@ -98,7 +98,7 @@ struct GameBridgeCasesTests {
         var closed = false
 
         // Sinks the host owns.
-        var storage: GameSkinStorage!
+        var storage: GameBridgeStorage!
         var haptics: [String] = []
         var logs: [(level: String, message: String)] = []
         var httpCalls: [(method: String, path: String, body: [String: Any]?)] = []
@@ -111,9 +111,9 @@ struct GameBridgeCasesTests {
 
         init(rowId: String) {
             let defaults = UserDefaults(suiteName: "test-game-cases-\(rowId)-\(UUID().uuidString)")!
-            storage = GameSkinStorage(
+            storage = GameBridgeStorage(
                 defaults: defaults,
-                namespace: GameSkinStorage.namespace(
+                namespace: GameBridgeStorage.namespaceFor(
                     projectId: "proj", skinId: "skin", identity: "user-\(rowId)"))
             bridge.onRequest = { [weak self] in self?.requests.append($0) }
             bridge.onSend = { [weak self] in self?.scripts.append($0) }
@@ -157,7 +157,7 @@ struct GameBridgeCasesTests {
                 case .storageSet(let id, let key, let value):
                     handleStorageSet(id: id, key: key, value: value)
                 case .storageRemove(let id, let key):
-                    guard GameSkinStorage.isValidKey(key) else {
+                    guard GameBridgeStorage.isValidKey(key) else {
                         if let id { fail(id: id, code: .badRequest) }
                         return
                     }
@@ -186,7 +186,7 @@ struct GameBridgeCasesTests {
             // `rejectedCall` mapping the presenter uses, and every transport
             // failure reports through the same `failedCall` mapping — so
             // B14–B16 pin the production health legs.
-            func reject(code: GameBridgeErrorCode) {
+            func reject(code: GameBridgeError) {
                 fail(id: id, code: code)
                 let failed = GameHttpBridge.rejectedCall(method: method, path: path, code: code)
                 healthEvents.append(HealthEvent(
@@ -220,7 +220,7 @@ struct GameBridgeCasesTests {
         }
 
         private func handleStorageGet(id: String, key: String) {
-            guard GameSkinStorage.isValidKey(key) else {
+            guard GameBridgeStorage.isValidKey(key) else {
                 fail(id: id, code: .badRequest)
                 return
             }
@@ -243,7 +243,7 @@ struct GameBridgeCasesTests {
             bridge.answer(id: id, payload: payload)
         }
 
-        func fail(id: String, code: GameBridgeErrorCode) {
+        func fail(id: String, code: GameBridgeError) {
             bridge.fail(id: id, code: code, message: code.rawValue)
         }
 

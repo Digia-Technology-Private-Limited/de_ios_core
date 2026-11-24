@@ -20,9 +20,9 @@ enum RewardsPageURL {
     /// Whether `url` has the same scheme, host and port as `pageURL`.
     static func isSameOrigin(_ url: URL?, as pageURL: URL?) -> Bool {
         guard let url, let pageURL,
-              let origin = GameURLPolicy.normalizedOrigin(url)
+              let origin = GameUrlPolicy.normalizedOrigin(url)
         else { return false }
-        return origin == GameURLPolicy.normalizedOrigin(pageURL)
+        return origin == GameUrlPolicy.normalizedOrigin(pageURL)
     }
 
     /// Navigation inside the page's own origin loads; everything else is
