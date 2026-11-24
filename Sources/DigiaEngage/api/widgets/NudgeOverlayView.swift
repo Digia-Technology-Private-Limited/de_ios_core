@@ -159,7 +159,7 @@ struct GameLayerView: View {
     let game: GamePresentation
 
     var body: some View {
-        GameContainerView(game: game, safeAreaInsets: activeWindowSafeAreaInsets).id(game.id)
+        GameContainer(game: game, safeAreaInsets: activeWindowSafeAreaInsets).id(game.id)
     }
 }
 

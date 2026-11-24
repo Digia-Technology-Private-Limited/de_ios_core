@@ -181,7 +181,7 @@ struct GameBridgeCasesTests {
             // The session forwards the method verbatim and answers what the
             // transport says — here a canned outcome, like Android's fake
             // http call. The exact GET/POST gate one layer down is pinned by
-            // GameSkinHttpTests, not by this table. A missing method or path
+            // GameHttpBridgeTests, not by this table. A missing method or path
             // never runs: the harness rejects it through the same
             // `rejectedCall` mapping the presenter uses, and every transport
             // failure reports through the same `failedCall` mapping — so

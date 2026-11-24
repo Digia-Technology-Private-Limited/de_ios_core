@@ -5,7 +5,7 @@ import Testing
 
 /// Guards the skin storage contract: the production lines are `isValidKey`,
 /// the 16 KB value check and namespace-delta check in `set`, and `clearAll`.
-@Suite("Game skin storage", .tags(.unit, .game))
+@Suite("Game bridge storage", .tags(.unit, .game))
 struct GameBridgeStorageTests {
     private func makeStorage(namespace: String = "proj/wheel/user1") -> (GameBridgeStorage, UserDefaults) {
         let defaults = UserDefaults(suiteName: "test-game-\(UUID().uuidString)")!
