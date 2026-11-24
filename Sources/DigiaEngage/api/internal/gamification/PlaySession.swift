@@ -27,24 +27,48 @@ final class PlaySession {
         self.identity = identity
     }
 
+    /// The one admission point for every play request. A non-direct trigger only
+    /// renders a teaser, so only a direct trigger can be busy — and a live test
+    /// never is, since its open replaces the visible game. On `.open` the
+    /// direct and per-campaign guards stay held until `release` runs; the
+    /// caller releases them in a `defer`, so an admitted request always pairs
+    /// with exactly one release. Matches Android's `PlaySession.admit`.
+    func admit(
+        campaignKey: String,
+        direct: Bool,
+        testSend: Bool,
+        isGameBusy: () -> Bool
+    ) -> AdmitDecision {
+        if direct, !testSend, isGameBusy() {
+            return .busy
+        }
+        if direct, !testSend, directInFlight {
+            return .busy
+        }
+        guard !inFlightCampaigns.contains(campaignKey) else {
+            return .busy
+        }
+        inFlightCampaigns.insert(campaignKey)
+        if direct, !testSend { directInFlight = true }
+        return .open
+    }
+
+    private func release(campaignKey: String, direct: Bool, testSend: Bool) {
+        inFlightCampaigns.remove(campaignKey)
+        if direct, !testSend { directInFlight = false }
+    }
+
     func request(_ request: PlayRequest) async -> PlayDecision {
-        // A game on screen only blocks a direct trigger. An inline or
-        // floating trigger only renders a teaser, so it still asks.
-        if request.direct, request.isGameBusy() {
+        let testSend = request.testInvocationId != nil
+        if admit(
+            campaignKey: request.campaignKey,
+            direct: request.direct,
+            testSend: testSend,
+            isGameBusy: request.isGameBusy
+        ) == .busy {
             return .drop(reason: PlayDropReason.busy, denyReason: nil)
         }
-        if request.direct, directInFlight {
-            return .drop(reason: PlayDropReason.busy, denyReason: nil)
-        }
-        guard !inFlightCampaigns.contains(request.campaignKey) else {
-            return .drop(reason: PlayDropReason.busy, denyReason: nil)
-        }
-        inFlightCampaigns.insert(request.campaignKey)
-        if request.direct { directInFlight = true }
-        defer {
-            inFlightCampaigns.remove(request.campaignKey)
-            if request.direct { directInFlight = false }
-        }
+        defer { release(campaignKey: request.campaignKey, direct: request.direct, testSend: testSend) }
         // The identity is read once: the check and the grant below see the same user.
         guard let identity = identity(),
               !identity.userId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -88,7 +112,14 @@ final class PlaySession {
             return .drop(reason: PlayDropReason.denied, denyReason: reason, events: events)
         case .failure(let error):
             switch error {
-            case .transport, .httpStatus:
+            case .transport(_, let timedOut):
+                // A grant timeout reads `timeout`, like the close-time `state`
+                // leg; any other transport failure reads `network`. Matches
+                // Android's `PlaySession` (`FAIL_TIMEOUT`).
+                return .drop(
+                    reason: timedOut ? PlayDropReason.timeout : PlayDropReason.network,
+                    denyReason: nil)
+            case .httpStatus:
                 return .drop(reason: PlayDropReason.network, denyReason: nil)
             case .invalidResponse:
                 return .drop(reason: PlayDropReason.invalidResponse, denyReason: nil)
@@ -176,6 +207,16 @@ struct PlayRequest {
     let isGameBusy: () -> Bool
 }
 
+/// What `PlaySession.admit` decides. Open proceeds to the grant; Busy drops
+/// the trigger as `busy` without ever asking. A live test is exempt: the open
+/// replaces the visible game instead. Matches Android's `AdmitDecision`.
+enum AdmitDecision {
+    /// Admitted: the grant runs, holding the direct and per-campaign guards until it settles.
+    case open
+    /// Refused: a game is showing, a direct grant is in flight, or this campaign's is.
+    case busy
+}
+
 /// What a `PlaySession.request` decided.
 enum PlayDecision: Equatable, Sendable {
     /// Inline / floating trigger, granted with `show`: store the chance and
@@ -219,6 +260,9 @@ enum PlayDropReason {
     static let busy = "busy"
     /// Blank trigger id, or no identity / blank user id.
     static let missingConfig = "missing_config"
+    /// Transport timeout, kept distinct like the close-time `state` leg.
+    /// Matches Android's `PlaySession.FAIL_TIMEOUT`.
+    static let timeout = "timeout"
     /// Transport failure, non-2xx HTTP status, or no network client.
     static let network = "network"
     /// The response did not parse / violated the strict schema.
