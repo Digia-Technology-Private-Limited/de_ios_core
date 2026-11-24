@@ -43,7 +43,11 @@ struct GameContainer: View {
                         if game.request.showMute {
                             GameMuteButton(muted: game.isMuted) { game.toggleMute() }
                         }
-                        GameCloseButton { GamePresenter.dismiss() }
+                        // The X is opt-out: back and the skin's `close` still
+                        // close a game whose X is hidden.
+                        if game.request.showClose {
+                            GameCloseButton { GamePresenter.dismiss() }
+                        }
                     }
                     .padding(.top, safeAreaInsets.top + GameChrome.top - GameChrome.hitInset)
                     .padding(.trailing, safeAreaInsets.right + GameChrome.trailing - GameChrome.hitInset)

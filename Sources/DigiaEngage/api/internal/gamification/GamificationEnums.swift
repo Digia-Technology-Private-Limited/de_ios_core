@@ -19,6 +19,15 @@ enum GamificationSkinSensor: String, Equatable, Sendable {
     case haptics = "haptics"
     case gyroscope = "gyroscope"
     case accelerometer = "accelerometer"
+    /// The rest mirror Android `GAME_SENSOR_TYPES` and are permission-free:
+    /// none is a body or location sensor.
+    case gravity = "gravity"
+    case linearAcceleration = "linear_acceleration"
+    case rotationVector = "rotation_vector"
+    case magneticField = "magnetic_field"
+    case pressure = "pressure"
+    case light = "light"
+    case proximity = "proximity"
     case unknown = "unknown"
 
     init(wire value: String?) {

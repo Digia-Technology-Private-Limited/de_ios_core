@@ -28,6 +28,20 @@ struct SkinFileCacheTests {
         #expect(SkinFileCache.safeSkinId("") == "_")
     }
 
+    @Test("the injected CSP matches Android's SKIN_CSP_HEADER")
+    func cspMatchesAndroid() {
+        // Guards the cspHeader line: iOS injects character-identically what
+        // Android serves, so https images, fonts and video load the same.
+        #expect(SkinFileCache.cspHeader ==
+            "default-src 'none'; " +
+            "script-src 'self' 'unsafe-inline'; " +
+            "style-src 'self' 'unsafe-inline'; " +
+            "font-src 'self' https: data:; " +
+            "media-src 'self' https: data:; " +
+            "connect-src 'self'; " +
+            "img-src 'self' https: data:")
+    }
+
     @Test("misses read nil, stores hit")
     func storeAndHit() throws {
         let (cache, _, _) = makeCache()

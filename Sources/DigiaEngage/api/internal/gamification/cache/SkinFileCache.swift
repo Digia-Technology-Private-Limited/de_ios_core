@@ -114,8 +114,8 @@ struct SkinFileCache: Sendable {
         "default-src 'none'; " +
         "script-src 'self' 'unsafe-inline'; " +
         "style-src 'self' 'unsafe-inline'; " +
-        "font-src 'self' data:; " +
-        "media-src 'self' data:; " +
+        "font-src 'self' https: data:; " +
+        "media-src 'self' https: data:; " +
         "connect-src 'self'; " +
         "img-src 'self' https: data:"
 

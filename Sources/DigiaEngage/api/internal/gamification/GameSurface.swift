@@ -481,6 +481,7 @@ final class GameSurface {
             entryFile: file,
             bundleRoot: file.deletingLastPathComponent(),
             showMute: config.showMute,
+            showClose: config.showClose,
             onClose: { [weak self] reason in
                 guard let self else { return }
                 guard shown else {

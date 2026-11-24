@@ -175,6 +175,38 @@ struct GameBridgeTests {
         #expect(payload["code"] as? String == "unsupported")
     }
 
+    @Test("motion subscribe with the Android wire names passes the intake")
+    func motionSubscribeAndroidWireNamesPassIntake() throws {
+        let bridge = makeBridge()
+        var scripts: [String] = []
+        var requests: [GameBridgeRequest] = []
+        bridge.onSend = { scripts.append($0) }
+        bridge.onRequest = { requests.append($0) }
+
+        bridge.receive(msg("motion", id: "9", payload: [
+            "op": "subscribe",
+            "sensors": [
+                "gravity", "linear_acceleration", "rotation_vector",
+                "magnetic_field", "pressure", "light", "proximity",
+            ],
+            "hz": 30,
+        ]))
+
+        // Guards the sensor-name check in handleMotion's subscribe case:
+        // every Android wire name passes the intake — a missing sensor
+        // answers `unsupported` later at the host, never `bad_request` here.
+        #expect(scripts.isEmpty)
+        #expect(requests.count == 1)
+        if case .motionSubscribe(let id, let sensors, let hz) = requests[0] {
+            #expect(id == "9")
+            #expect(sensors == [
+                "gravity", "linear_acceleration", "rotation_vector",
+                "magnetic_field", "pressure", "light", "proximity",
+            ])
+            #expect(hz == 30)
+        } else { Issue.record("request 0 is not motion subscribe") }
+    }
+
     @Test("motion with an unknown sensor replies bad_request")
     func motionUnknownSensorBadRequest() throws {
         let bridge = makeBridge()

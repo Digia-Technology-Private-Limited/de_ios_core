@@ -60,4 +60,33 @@ struct GamificationConfigTests {
         #expect(config(GameBridge.bridgeVersion)?.bridgeSupported == true)
         #expect(config(GameBridge.bridgeVersion + 1)?.bridgeSupported == false)
     }
+
+    @Test("showClose defaults true, the top level winning over surface")
+    func showCloseDefaultsTrue() {
+        // Guards the showClose line in fromJson: hiding the X is opt-in,
+        // like Android — a missing flag never hides it.
+        #expect(GamificationConfig.fromJson(template())?.showClose == true)
+
+        var hidden = template()
+        hidden["showClose"] = false
+        #expect(GamificationConfig.fromJson(hidden)?.showClose == false)
+
+        var surfaceHidden = template()
+        surfaceHidden["surface"] = ["showClose": false]
+        #expect(GamificationConfig.fromJson(surfaceHidden)?.showClose == false)
+
+        var topWins = template()
+        topWins["showClose"] = true
+        topWins["surface"] = ["showClose": false]
+        #expect(GamificationConfig.fromJson(topWins)?.showClose == true)
+    }
+
+    @Test("the Android sensor wire names parse, unknown names skip")
+    func sensorsParse() {
+        // Guards the sensors loop in fromJson: every Android wire name
+        // parses; an unknown name skips only itself, never the campaign.
+        var json = template()
+        json["sensors"] = ["gyroscope", "gravity", "light", "nope"]
+        #expect(GamificationConfig.fromJson(json)?.sensors == [.gyroscope, .gravity, .light])
+    }
 }

@@ -112,6 +112,43 @@ struct GameUrlPolicyTests {
             url: URL(string: "http://res.cloudinary.com/demo/Gift_Box")!, accept: imgAccept))
     }
 
+    @Test("https video loads as subresources, never as navigation")
+    func httpsVideoAllowed() {
+        // Guards the video arm of the remote allowlist, kept with Android's
+        // REMOTE_ASSET_EXTENSIONS (mp4, webm, m4v, mov).
+        for raw in [
+            "https://cdn.example.com/intro.mp4",
+            "https://cdn.example.com/clip.WEBM?size=large",
+            "https://cdn.example.com/reel.m4v",
+            "https://cdn.example.com/trailer.mov",
+        ] {
+            #expect(allow(raw))
+            #expect(GameUrlPolicy.allowsRemoteAsset(url: URL(string: raw)!))
+            // Never in the main frame: video stays a subresource.
+            #expect(!allow(raw, navigationType: .linkActivated, isMainFrame: true))
+        }
+    }
+
+    @Test("extensionless https media loads with an image or video Accept")
+    func extensionlessMediaNeedsMediaAccept() {
+        let video = "https://res.cloudinary.com/demo/video/upload/f_auto,q_auto/Intro"
+        let videoAccept = "video/webm,video/mp4,video/*;q=0.9,*/*;q=0.1"
+        #expect(allow(video, accept: videoAccept))
+        #expect(GameUrlPolicy.allowsRemoteAsset(url: URL(string: video)!, accept: videoAccept))
+        #expect(!allow(video))
+        // The Accept sniff is gated to extensionless URLs: a code URL with a
+        // video Accept still cancels.
+        #expect(!allow("https://api.example.com/collect.js", accept: videoAccept))
+        #expect(!GameUrlPolicy.allowsRemoteAsset(
+            url: URL(string: "https://api.example.com/collect.js")!, accept: videoAccept))
+        // An extensioned video still loads on its extension (Accept-agnostic).
+        #expect(allow("https://cdn.example.com/intro.mp4", accept: videoAccept))
+        // Http never passes the sniff, even for a video request.
+        #expect(!allow("http://res.cloudinary.com/demo/Intro", accept: videoAccept))
+        #expect(!GameUrlPolicy.allowsRemoteAsset(
+            url: URL(string: "http://res.cloudinary.com/demo/Intro")!, accept: videoAccept))
+    }
+
     @Test("an http bundle off the API base origin is rejected")
     func httpBundleOffApiBaseRejected() {
         let mock = "http://localhost:8080"

@@ -46,6 +46,10 @@ struct GamificationConfig: Equatable {
     /// The rewards page title for this campaign's chances.
     let rewardsPageTitle: String?
     let showMute: Bool
+    /// Whether the native X shows once the skin is ready; true unless the
+    /// campaign hides it. Back and the skin's own `close` still close a game
+    /// whose X is hidden.
+    let showClose: Bool
     let bundleUrl: String
     let sensors: [GamificationSkinSensor]
     /// The skin's minimum SDK version for this platform
@@ -156,6 +160,7 @@ struct GamificationConfig: Equatable {
             rewardsPageTitle: templateConfig.nonBlankString("rewardsPageTitle")
                 ?? campaignLevel?.nonBlankString("rewardsPageTitle"),
             showMute: templateConfig.bool("showMute", default: surface?.bool("showMute", default: false) ?? false),
+            showClose: templateConfig.bool("showClose", default: surface?.bool("showClose", default: true) ?? true),
             bundleUrl: bundleUrl,
             sensors: sensors,
             minSdkVersion: minSdkVersionIos(templateConfig: templateConfig),
