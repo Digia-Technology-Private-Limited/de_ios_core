@@ -3,8 +3,8 @@ import UIKit
 
 internal import SDWebImageSwiftUI
 
-/// The one image wrapper the non-story surfaces render through: SDWebImage via the shared cache
-/// and downloader (GIF and SVG decoding as before), with the authored BlurHash drawn through
+/// The one image wrapper the non-story surfaces render through: SDWebImage via the owned cache
+/// and loader (GIF and SVG decoding as before), with the authored BlurHash drawn through
 /// the image library's own loading and error slots, so it is gone once the picture draws (a
 /// transparent or letterboxed picture never shows a stale blur) and the box is never empty
 /// before that. There is no spinner.
@@ -32,9 +32,12 @@ struct MediaImage: View {
     static let loadOptions: SDWebImageOptions = [.retryFailed, .scaleDownLargeImages]
 
     /// The context every Engage image load passes: the SDK's `User-Agent`, set on these requests
-    /// only (the shared downloader's headers belong to the host app). It does not touch the cache
-    /// key, so a preload and the draw share one entry.
+    /// only (the shared downloader's headers belong to the host app), through the SDK's own
+    /// image manager, so every picture is read from and written to the owned 100 MiB disk cache
+    /// instead of the host app's shared one. It does not touch the cache key, so a preload and
+    /// the draw share one entry.
     static let loadContext: [SDWebImageContextOption: Any] = [
+        .customManager: DigiaImagePipeline.imageManager,
         .downloadRequestModifier: SDWebImageDownloaderRequestModifier(
             headers: ["User-Agent": DIGIA_IMAGE_USER_AGENT])
     ]
@@ -122,12 +125,12 @@ struct MediaImage: View {
         onSuccess?()
     }
 
-    /// The picture when it is a plain bitmap already in the memory cache, under the key the
-    /// downloader uses. Animated and vector pictures stay with WebImage, which plays and rasterises
-    /// them.
+    /// The picture when it is a plain bitmap already in the owned memory cache, under the key
+    /// the owned manager uses. Animated and vector pictures stay with WebImage, which plays and
+    /// rasterises them.
     private static func memoryCachedPicture(for url: URL) -> UIImage? {
-        let key = SDWebImageManager.shared.cacheKey(for: url)
-        guard let image = SDImageCache.shared.imageFromMemoryCache(forKey: key),
+        let key = DigiaImagePipeline.imageManager.cacheKey(for: url)
+        guard let image = DigiaImagePipeline.imageCache.imageFromMemoryCache(forKey: key),
             !image.sd_isAnimated, !image.sd_isVector
         else { return nil }
         return image

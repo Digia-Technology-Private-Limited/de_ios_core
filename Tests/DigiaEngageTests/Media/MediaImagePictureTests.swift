@@ -180,10 +180,10 @@ struct MediaImagePictureTests {
         defer { MediaOrigin.end() }
         let target = MediaOrigin.url("on-disk.png")
         MediaOrigin.set(.status(200, solidPNG(.red)), for: target)
-        let key = SDWebImageManager.shared.cacheKey(for: target)
+        let key = DigiaImagePipeline.imageManager.cacheKey(for: target)
         defer {
-            SDImageCache.shared.removeImageFromMemory(forKey: key)
-            SDImageCache.shared.removeImageFromDisk(forKey: key)
+            DigiaImagePipeline.imageCache.removeImageFromMemory(forKey: key)
+            DigiaImagePipeline.imageCache.removeImageFromDisk(forKey: key)
         }
         let firstSuccesses = CallCount()
         let secondSuccesses = CallCount()
@@ -191,9 +191,9 @@ struct MediaImagePictureTests {
         let first = MediaStage.image(url: target.absoluteString, onSuccess: { firstSuccesses.value += 1 })
         #expect(await waitUntilMedia { firstSuccesses.value > 0 })
         ComponentTestHost.unmount(first)
-        #expect(await waitUntilMedia { SDImageCache.shared.diskImageDataExists(withKey: key) })
-        SDImageCache.shared.removeImageFromMemory(forKey: key)
-        #expect(SDImageCache.shared.imageFromMemoryCache(forKey: key) == nil)
+        #expect(await waitUntilMedia { DigiaImagePipeline.imageCache.diskImageDataExists(withKey: key) })
+        DigiaImagePipeline.imageCache.removeImageFromMemory(forKey: key)
+        #expect(DigiaImagePipeline.imageCache.imageFromMemoryCache(forKey: key) == nil)
 
         let second = MediaStage.image(url: target.absoluteString, onSuccess: { secondSuccesses.value += 1 })
         defer { ComponentTestHost.unmount(second) }

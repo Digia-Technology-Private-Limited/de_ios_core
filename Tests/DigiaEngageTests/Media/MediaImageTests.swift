@@ -173,9 +173,9 @@ struct MediaImageComponentTests {
         defer { MediaOrigin.end() }
         let target = MediaOrigin.url("cached.png")
         let picture = try #require(UIImage(data: halfTransparentPNG()))
-        SDImageCache.shared.storeImage(toMemory: picture, forKey: target.absoluteString)
-        defer { SDImageCache.shared.removeImageFromMemory(forKey: target.absoluteString) }
-        try #require(SDImageCache.shared.imageFromMemoryCache(forKey: target.absoluteString) != nil)
+        DigiaImagePipeline.imageCache.storeImage(toMemory: picture, forKey: target.absoluteString)
+        defer { DigiaImagePipeline.imageCache.removeImageFromMemory(forKey: target.absoluteString) }
+        try #require(DigiaImagePipeline.imageCache.imageFromMemoryCache(forKey: target.absoluteString) != nil)
         let successes = CallCount()
 
         let window = mount(
@@ -288,5 +288,27 @@ struct MediaImageDecisionTests {
         let first = BlurHashCache.image(for: hash, size: BlurHashCache.decodeSize)
         let second = BlurHashCache.image(for: hash, size: BlurHashCache.decodeSize)
         #expect(first != nil && first === second)
+    }
+
+    // Fails if digia_cached_image.swift changes the namespace (the path no longer ends in
+    // `DigiaEngageImages`), lowers the disk cap, or stops threading the owned manager through
+    // `MediaImage.loadContext` (WebImage then reads the host's shared cache, not this one).
+    @Test("pictures live in the owned 100 MiB disk cache every image path reads")
+    func ownedImageCacheIsCapped() {
+        #expect(DigiaImagePipeline.diskCacheNamespace == "DigiaEngageImages")
+        #expect(DigiaImagePipeline.maxDiskSize == 100 * 1024 * 1024)
+        #expect(DigiaImagePipeline.imageCache.config.maxDiskSize == 100 * 1024 * 1024)
+        #expect(DigiaImagePipeline.imageCache.config.maxDiskAge == 7 * 24 * 3600)
+        #expect(DigiaImagePipeline.imageCache.diskCachePath.hasSuffix("DigiaEngageImages"))
+        #expect(
+            (MediaImage.loadContext[.customManager] as? SDWebImageManager)
+                === DigiaImagePipeline.imageManager)
+        #expect(
+            (DigiaImagePipeline.imageManager.imageCache as? SDImageCache)
+                === DigiaImagePipeline.imageCache)
+        #expect(
+            DigiaImagePipeline.imagePrefetcher.manager === DigiaImagePipeline.imageManager)
+        // The shared cache the host app uses stays unbounded: the cap touches only the owned one.
+        #expect(SDImageCache.shared.config.maxDiskSize == 0)
     }
 }

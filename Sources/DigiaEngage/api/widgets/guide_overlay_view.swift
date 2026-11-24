@@ -7,12 +7,12 @@ internal import SDWebImageSwiftUI
 /// dropped when it has not within this long.
 private let anchorlessImageLoadTimeout: TimeInterval = 3
 
-/// Warms the image cache `MediaImage` reads, so the next step's picture is ready when it starts.
+/// Warms the owned image cache `MediaImage` reads, so the next step's picture is ready when it starts.
 @MainActor
 private func prefetchAnchorlessImage(_ url: URL?) {
     guard let url else { return }
     DigiaImagePipeline.configureIfNeeded()
-    SDWebImagePrefetcher.shared.prefetchURLs(
+    DigiaImagePipeline.imagePrefetcher.prefetchURLs(
         [url], options: MediaImage.loadOptions, context: MediaImage.loadContext, progress: nil, completed: nil)
 }
 

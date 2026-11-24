@@ -66,6 +66,7 @@ struct CanvasGoldenTests {
         // update that asked for it); start empty so every image takes the asynchronous load, which
         // does publish, and wait for it below.
         SDImageCache.shared.clearMemory()
+        DigiaImagePipeline.imageCache.clearMemory()
 
         let payload = CEPTriggerPayload(cepCampaignId: "test_canvas", campaignKey: campaign.campaignKey, cepMetadata: [:])
         let window = makeSlotWindow(config: config, payload: payload, device: .engageGolden)
@@ -187,10 +188,10 @@ struct CanvasGoldenTests {
     @MainActor
     private func awaitImagesLoaded(_ urls: [String]) async throws {
         for url in urls {
-            for _ in 0..<250 where SDImageCache.shared.imageFromMemoryCache(forKey: url) == nil {
+            for _ in 0..<250 where DigiaImagePipeline.imageCache.imageFromMemoryCache(forKey: url) == nil {
                 try await Task.sleep(nanoseconds: 20_000_000)
             }
-            try #require(SDImageCache.shared.imageFromMemoryCache(forKey: url) != nil, "Image did not load: \(url)")
+            try #require(DigiaImagePipeline.imageCache.imageFromMemoryCache(forKey: url) != nil, "Image did not load: \(url)")
         }
     }
 

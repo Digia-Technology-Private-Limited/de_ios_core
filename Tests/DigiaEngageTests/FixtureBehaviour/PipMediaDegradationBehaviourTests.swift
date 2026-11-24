@@ -124,7 +124,7 @@ struct PipMediaDegradationBehaviourTests {
     }
 
     // Fails if: floater_orchestrator.swift `preloadImage` loads the picture some way the image cache
-    // does not see (the `SDWebImageManager.shared.loadImage(...)` call replaced by a plain
+    // does not see (the `DigiaImagePipeline.imageManager.loadImage(...)` call replaced by a plain
     // `URLSession` fetch): the window's `MediaImage` then fetches it a second time, and the log holds
     // two requests, the first without the Digia User-Agent.
     @Test("the image the window waits for is fetched once, with the Digia User-Agent")

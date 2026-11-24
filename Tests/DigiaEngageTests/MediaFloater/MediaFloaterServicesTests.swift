@@ -50,10 +50,14 @@ struct MediaFloaterServicesTests {
     func windowImageFailureCarriesTheCampaignKey() async throws {
         MediaOrigin.install()
         // Every lookup misses the cache, so the window fetches the picture again after the preload
-        // that revealed it, and that second fetch is the one the server refuses.
+        // that revealed it, and that second fetch is the one the server refuses. Set on the owned
+        // manager the floater preload and the window's `MediaImage` read through (and on the
+        // shared one, which nothing image-related reads anymore).
         SDWebImageManager.shared.cacheKeyFilter = unstableCacheKeyFilter()
+        DigiaImagePipeline.imageManager.cacheKeyFilter = unstableCacheKeyFilter()
         defer {
             SDWebImageManager.shared.cacheKeyFilter = nil
+            DigiaImagePipeline.imageManager.cacheKeyFilter = nil
             MediaOrigin.end()
         }
         let target = MediaOrigin.url("pip.png")

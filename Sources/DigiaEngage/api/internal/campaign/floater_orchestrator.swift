@@ -430,10 +430,10 @@ final class FloaterOrchestrator: ObservableObject {
             abandonMedia(token: token, reason: "invalid media url", cause: "invalid_url")
             return
         }
-        // Through the image library's own loader, with the options the window's `MediaImage` loads
+        // Through the SDK's own image manager, with the options the window's `MediaImage` loads
         // with, so the picture is in the cache that wrapper reads from its first frame instead of
         // being fetched a second time. The window is revealed once this has decoded it.
-        SDWebImageManager.shared.loadImage(
+        DigiaImagePipeline.imageManager.loadImage(
             with: parsed, options: MediaImage.loadOptions, context: MediaImage.loadContext, progress: nil
         ) { [weak self] image, _, error, _, _, _ in
             let decoded = image != nil
