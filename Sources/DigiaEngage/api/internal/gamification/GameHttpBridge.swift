@@ -61,7 +61,7 @@ enum GameHttpBridge {
     /// bodies). Carrying the status lets `game_http_failed` report it, like
     /// Android's `Outcome.Error.status`.
     struct Failure: Error {
-        let code: GameBridgeErrorCode
+        let code: GameBridgeError
         let status: Int?
     }
 
@@ -72,13 +72,13 @@ enum GameHttpBridge {
     struct FailedCall: Equatable, Sendable {
         let method: String
         let path: String
-        let code: GameBridgeErrorCode
+        let code: GameBridgeError
         let status: Int?
     }
 
     /// The reject leg (missing method/path, denied path, bad method): answers
     /// `code` and always reports health with no status — the call never ran.
-    static func rejectedCall(method: String, path: String, code: GameBridgeErrorCode) -> FailedCall {
+    static func rejectedCall(method: String, path: String, code: GameBridgeError) -> FailedCall {
         FailedCall(method: method, path: path, code: code, status: nil)
     }
 

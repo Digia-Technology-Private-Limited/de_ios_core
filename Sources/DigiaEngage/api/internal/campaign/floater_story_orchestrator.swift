@@ -45,9 +45,6 @@ final class FloaterStoryOrchestrator: ObservableObject {
     /// keeps rendering through this so the window can animate out; every other caller
     /// should treat the campaign as gone (see `isShowing`).
     @Published private(set) var closing = false
-    /// The window is faded out while a `state` round-trip decides whether it
-    /// stays. It is not a dismissal: `hold(false)` brings it back.
-    @Published private(set) var held = false
     /// The window's current on-screen frame in `.global` space, kept in sync by the
     /// view — `nil` whenever nothing is showing. Same purpose as the PiP's `activeRect`:
     /// an RN/UIKit host's `hitTest` has to tell a touch on this small, draggable window
@@ -135,7 +132,6 @@ final class FloaterStoryOrchestrator: ObservableObject {
         storyOpen = startsExpanded
         storyOverlayActive = startsExpanded
         closing = false
-        held = false
         obscured = false
         visible = false
         moveCount = 0
@@ -277,7 +273,7 @@ final class FloaterStoryOrchestrator: ObservableObject {
         onDismissed(active, reason, metricsSnapshot(), visible)
 
         let exit = active.config.window.exitAnimation
-        guard exit.type != .none, !obscured, !held else {
+        guard exit.type != .none, !obscured else {
             finishDismiss()
             return
         }
@@ -287,12 +283,6 @@ final class FloaterStoryOrchestrator: ObservableObject {
             guard !Task.isCancelled else { return }
             self?.finishDismiss()
         }
-    }
-
-    /// Hides (or restores) the window without ending the showing.
-    func hold(_ hold: Bool) {
-        guard state != nil, !closing else { return }
-        held = hold
     }
 
     /// Marks the showing as having achieved its goal. At most once per showing.

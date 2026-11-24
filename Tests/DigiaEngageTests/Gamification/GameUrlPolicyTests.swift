@@ -8,14 +8,14 @@ import WebKit
 /// under the bundle root, https loads only off the main frame, and everything
 /// else is cancelled.
 @Suite("Game URL policy", .tags(.unit, .game))
-struct GameURLPolicyTests {
+struct GameUrlPolicyTests {
     private let root = URL(string: "file:///tmp/bundle/")!
     private let entry = URL(string: "file:///tmp/bundle/index.html")!
 
     private func allow(
         _ raw: String, navigationType: WKNavigationType = .other, isMainFrame: Bool = false
     ) -> Bool {
-        GameURLPolicy.allowNavigation(
+        GameUrlPolicy.allowNavigation(
             url: URL(string: raw)!, entryURL: entry, bundleRoot: root,
             navigationType: navigationType, isMainFrame: isMainFrame)
     }
@@ -39,9 +39,9 @@ struct GameURLPolicyTests {
     @Test("files escaping the root are rejected")
     func escapeRejected() {
         // Guards isUnderRoot: `..` and sibling trees never load.
-        #expect(!GameURLPolicy.isUnderRoot(URL(string: "file:///tmp/bundle/../secret.txt")!, root))
-        #expect(!GameURLPolicy.isUnderRoot(URL(string: "file:///tmp/other/x.js")!, root))
-        #expect(GameURLPolicy.isUnderRoot(URL(string: "file:///tmp/bundle/a/b.js")!, root))
+        #expect(!GameUrlPolicy.isUnderRoot(URL(string: "file:///tmp/bundle/../secret.txt")!, root))
+        #expect(!GameUrlPolicy.isUnderRoot(URL(string: "file:///tmp/other/x.js")!, root))
+        #expect(GameUrlPolicy.isUnderRoot(URL(string: "file:///tmp/bundle/a/b.js")!, root))
         #expect(!allow("file:///tmp/other/x.js"))
     }
 
@@ -70,7 +70,7 @@ struct GameURLPolicyTests {
         let mock = "http://localhost:8080"
         let skin = "/gamification/skins/w/1/index.html"
         func allowed(_ raw: String, _ base: String = mock) -> Bool {
-            GameURLPolicy.allowsBundle(URL(string: raw)!, apiBaseUrl: base)
+            GameUrlPolicy.allowsBundle(URL(string: raw)!, apiBaseUrl: base)
         }
         // Guards the origin match: only the mock's own origin may serve http.
         #expect(allowed("HTTP://LocalHost:8080\(skin)"))

@@ -485,7 +485,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         // Gamification entries are session state, not stored: hidden entries
         // and trigger-stored chances are cleared too.
         services.identityManager.addUserChangedListener { [defaults = self.defaults, weak self] in
-            GameSkinStorage.clearAll(defaults: defaults)
+            GameBridgeStorage.clearAll(defaults: defaults)
             self?.gamification.clearRewardsForUserChange()
             self?.gamificationSurface.clearForUserChange()
         }

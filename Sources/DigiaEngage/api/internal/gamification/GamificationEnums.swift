@@ -4,18 +4,6 @@ import Foundation
 ///
 /// Every `unknown` parses from any unrecognised wire value, and the campaign
 /// is skipped with a log at the parse site. Nothing here throws.
-enum GamificationFormat: String, Equatable, Sendable {
-    case scratchCard = "scratchCard"
-    case spinWheel = "spinWheel"
-    case rewardChest = "rewardChest"
-    case slotMachine = "slotMachine"
-    case unknown = "unknown"
-
-    init(wire value: String?) {
-        self = GamificationFormat(rawValue: value ?? "") ?? .unknown
-    }
-}
-
 enum GamificationEntryKind: String, Equatable, Sendable {
     case direct = "direct"
     case inlineTeaser = "inlineTeaser"

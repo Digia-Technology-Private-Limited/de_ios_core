@@ -6,8 +6,8 @@ import Testing
 /// Guards the generic skin HTTP gate and transport mapping: the production
 /// lines are `validatedPath`, `httpMethod`, and the status/throw mapping in
 /// `send`.
-@Suite("Game skin http", .tags(.unit, .game))
-struct GameSkinHttpTests {
+@Suite("Game bridge http", .tags(.unit, .game))
+struct GameHttpBridgeTests {
     @Test("allowlist accepts single segments and rejects the rest")
     func allowlist() {
         #expect(GameHttpBridge.validatedPath("play") == "play")
@@ -33,7 +33,7 @@ struct GameSkinHttpTests {
     @Test("HTTP 200 returns the status and body unchanged, refusals included")
     func rawBodyPassthrough() async {
         let envelope: [String: Any] = ["isSuccess": true, "data": ["response": ["refused": "busy"]]]
-        let client = FakeSkinNetworkClient(result: .success(status: 200, body: envelope))
+        let client = FakeBridgeNetworkClient(result: .success(status: 200, body: envelope))
         let body = GameHttpBridge.jsonData(["chanceId": "ch_1", "playId": "p_1"])
         let result = await GameHttpBridge.send(
             client: client, baseUrl: "https://app.digia.tech", headers: [:],
@@ -57,7 +57,7 @@ struct GameSkinHttpTests {
     @Test("4xx passes through with its body; 5xx is server, 3xx network")
     func statusMapping() async {
         for status in [400, 403, 404, 429] {
-            let client = FakeSkinNetworkClient(result: .success(status: status, body: ["reason": "r\(status)"]))
+            let client = FakeBridgeNetworkClient(result: .success(status: status, body: ["reason": "r\(status)"]))
             let result = await GameHttpBridge.send(
                 client: client, baseUrl: "https://app.digia.tech", headers: [:],
                 method: "GET", path: "rewards", body: nil)
@@ -69,8 +69,8 @@ struct GameSkinHttpTests {
             #expect(success.status == status)
             #expect(success.body?["reason"] as? String == "r\(status)")
         }
-        for (status, code) in [(500, GameBridgeErrorCode.server), (503, .server), (302, .network)] {
-            let client = FakeSkinNetworkClient(result: .success(status: status, body: [:]))
+        for (status, code) in [(500, GameBridgeError.server), (503, .server), (302, .network)] {
+            let client = FakeBridgeNetworkClient(result: .success(status: status, body: [:]))
             let result = await GameHttpBridge.send(
                 client: client, baseUrl: "https://app.digia.tech", headers: [:],
                 method: "GET", path: "rewards", body: nil)
@@ -87,7 +87,7 @@ struct GameSkinHttpTests {
 
     @Test("a lowercase method never reaches the network")
     func lowercaseMethodRejected() async {
-        let client = FakeSkinNetworkClient(result: .success(status: 200, body: ["isSuccess": true]))
+        let client = FakeBridgeNetworkClient(result: .success(status: 200, body: ["isSuccess": true]))
 
         // Guards the exact match inside send: the session forwards the method
         // verbatim, and the gate one layer down rejects it before any call.
@@ -104,7 +104,7 @@ struct GameSkinHttpTests {
 
     @Test("transport failures answer network, timeouts answer timeout")
     func transportMapping() async {
-        let failing = FakeSkinNetworkClient(result: .failure(URLError(.notConnectedToInternet)))
+        let failing = FakeBridgeNetworkClient(result: .failure(URLError(.notConnectedToInternet)))
         let network = await GameHttpBridge.send(
             client: failing, baseUrl: "https://app.digia.tech", headers: [:],
             method: "POST", path: "play", body: nil)
@@ -116,7 +116,7 @@ struct GameSkinHttpTests {
         // Guards the nil status on transport failures: there is no status.
         #expect(networkFailure.status == nil)
 
-        let timingOut = FakeSkinNetworkClient(result: .failure(URLError(.timedOut)))
+        let timingOut = FakeBridgeNetworkClient(result: .failure(URLError(.timedOut)))
         let timeout = await GameHttpBridge.send(
             client: timingOut, baseUrl: "https://app.digia.tech", headers: [:],
             method: "POST", path: "play", body: nil)
@@ -137,7 +137,7 @@ struct GameSkinHttpTests {
         let wrapped = NSError(
             domain: "test", code: 1,
             userInfo: [NSUnderlyingErrorKey: URLError(.timedOut)])
-        let wrapping = FakeSkinNetworkClient(result: .failure(wrapped))
+        let wrapping = FakeBridgeNetworkClient(result: .failure(wrapped))
         let result = await GameHttpBridge.send(
             client: wrapping, baseUrl: "https://app.digia.tech", headers: [:],
             method: "POST", path: "play", body: nil)
@@ -150,7 +150,7 @@ struct GameSkinHttpTests {
 }
 
 /// Canned `NetworkClient` for the skin HTTP tests.
-private final class FakeSkinNetworkClient: NetworkClient, @unchecked Sendable {
+private final class FakeBridgeNetworkClient: NetworkClient, @unchecked Sendable {
     enum Result {
         case success(status: Int, body: [String: Any])
         case failure(Error)

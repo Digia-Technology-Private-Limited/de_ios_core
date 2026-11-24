@@ -20,7 +20,7 @@ enum GameMotion {
 /// The rendered size is reported back as the `viewport` push whenever it
 /// changes (rotation, split screen); the safe area comes from the window.
 @MainActor
-struct GameContainerView: View {
+struct GameContainer: View {
     @ObservedObject var game: GamePresentation
     var safeAreaInsets: UIEdgeInsets = .zero
 

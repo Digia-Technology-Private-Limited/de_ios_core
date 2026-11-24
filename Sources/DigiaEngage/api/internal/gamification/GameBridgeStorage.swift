@@ -8,7 +8,7 @@ import Foundation
 /// throw: violations answer `bad_request` with the reason.
 /// The namespace separator is `/`, exactly like Android's
 /// `project/skinId/identity` — never `.`, which a key may itself contain.
-final class GameSkinStorage: @unchecked Sendable {
+final class GameBridgeStorage: @unchecked Sendable {
     /// `^[A-Za-z0-9_.-]{1,64}$`.
     nonisolated static let keyMaxLength = 64
     /// One value may hold this many UTF-8 bytes.
@@ -23,7 +23,7 @@ final class GameSkinStorage: @unchecked Sendable {
     /// Builds the namespace: project + skin (all versions share it) + the
     /// current user identity. `userId`, or the device id when the game opened
     /// without one — Android's `userId ?: deviceId`.
-    static func namespace(projectId: String, skinId: String, identity: String) -> String {
+    static func namespaceFor(projectId: String, skinId: String, identity: String) -> String {
         "\(projectId)/\(skinId)/\(identity)"
     }
 
