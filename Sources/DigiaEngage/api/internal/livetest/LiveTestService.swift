@@ -45,6 +45,9 @@ final class LiveTestService: ObservableObject {
         self.deviceId = deviceId
         guard isDebugBuild else { return }
 
+        // Re-read like `isEnabled` below: the service outlives a reconfigure,
+        // so without this a wiped store still serves the previous name.
+        deviceName = Self.normalizeDeviceName(storage.string(forKey: Self.deviceNameKey))
         isEnabled = storage.bool(forKey: Self.enabledKey)
         ackReporter.configure(config: config)
         let sseClient = LiveTestSSEClient(

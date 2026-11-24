@@ -51,8 +51,47 @@ enum YamlDiscovery {
     }
 
     /// Files that run on iOS: everything without `skip.ios`.
+    /// `TEST_RUNNER_YAML_FILTER=survey/sv0,dmc/c0` (xcodebuild forwards it as
+    /// `YAML_FILTER`) runs only the files whose path contains one of the
+    /// comma-separated parts, while iterating locally; unset runs every file.
+    /// `TEST_RUNNER_YAML_SHARD=0/3` (forwarded as `YAML_SHARD`) runs only shard
+    /// 0 of 3 (interleaved by sorted index) for parallel simulator runs.
     static func runnable(file: StaticString = #filePath) -> [YamlCase] {
-        cases(file: file).filter { $0.skipIos == nil }
+        let env = ProcessInfo.processInfo.environment
+        let parts = (env["YAML_FILTER"] ?? "")
+            .split(separator: ",").map(String.init)
+        let filtered = cases(file: file).filter { test in
+            test.skipIos == nil && (parts.isEmpty || parts.contains { test.path.contains($0) })
+        }
+        guard let shardSpec = env["YAML_SHARD"],
+              case let pieces = shardSpec.split(separator: "/"),
+              pieces.count == 2,
+              let shardIndex = Int(pieces[0]),
+              let shardCount = Int(pieces[1]),
+              shardCount > 1,
+              (0..<shardCount).contains(shardIndex)
+        else { return filtered }
+        // Balance heavy files (many steps / goldens / real-time holds) evenly across
+        // shards using greedy LPT scheduling, then restore path order within each shard.
+        func weight(_ c: YamlCase) -> Int {
+            var w = max(1, c.parsed?.steps.count ?? 1)
+            if c.path.contains("hold") { w += 120 }
+            if c.path.contains("sv16_operators_numbers") { w += 100 }
+            if c.path.contains("f32_floater_goldens") || c.path.contains("f33_pip_goldens") { w += 80 }
+            return w
+        }
+        let weighted = filtered.sorted { a, b in
+            let wa = weight(a), wb = weight(b)
+            return wa != wb ? wa > wb : a.path < b.path
+        }
+        var buckets = Array(repeating: [YamlCase](), count: shardCount)
+        var loads = Array(repeating: 0, count: shardCount)
+        for test in weighted {
+            let target = loads.enumerated().min(by: { $0.element < $1.element })?.offset ?? 0
+            buckets[target].append(test)
+            loads[target] += weight(test)
+        }
+        return buckets[shardIndex].sorted { $0.path < $1.path }
     }
 
     /// Files `skip.ios` marks as skipped, each with its reason in the header.

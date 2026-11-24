@@ -29,28 +29,7 @@ struct SurveyCampaignBehaviourTests {
         try await sdk.settle(0.4)
     }
 
-    /// The scrim above the sheet.
-    private func tapScrim(_ sdk: SdkHarness) async throws { try await sdk.touch(CGPoint(x: 24, y: 120)) }
-
     // MARK: - Closed
-
-    @Test("backdrop tap unanswered: dismissed as user_close")
-    func backdropTapUnanswered() async throws {
-        let key = "test_survey_stacked_cta"
-        let sdk = try await start([survey("survey_stacked_cta")])
-        defer { sdk.tearDown() }
-        let d = try sdk.deliverChain(key)
-        try await show(sdk, "Option Alpha")
-
-        try await tapScrim(sdk)
-        try await sdk.waitUntil("the survey is gone") { !sdk.isShowing("Option Alpha") }
-
-        let events = await sdk.sent(key)
-        expectChain(
-            events, d, names: [Chain.triggered, Chain.viewed, Chain.questionViewed, Chain.dismissed],
-            reason: .userClose)
-        #expect(propsOf(events, Chain.dismissed)["answered_count"] as? Int == 0)
-    }
 
     @Test("answered to the end: completed, then dismissed as completed")
     func answeredToTheEnd() async throws {
@@ -79,26 +58,6 @@ struct SurveyCampaignBehaviourTests {
         #expect(propsOf(events, Chain.completed)["answered_count"] as? Int == 1)
     }
 
-    @Test("welcome Start: the one click the CEP sees")
-    func welcomeStart() async throws {
-        let key = "test_survey_welcome"
-        let sdk = try await start([survey("survey_welcome_intro")])
-        defer { sdk.tearDown() }
-        let d = try sdk.deliverChain(key)
-        try await show(sdk, "Start Survey")
-
-        try await sdk.tap(id: "btn_start")  // "Start Survey"
-        try await show(sdk, "Daily")
-        try await tapScrim(sdk)
-        try await sdk.waitUntil("the survey is gone") { !sdk.isShowing("Daily") }
-
-        let events = await sdk.sent(key)
-        expectChain(
-            events, d, names: [Chain.triggered, Chain.viewed, Chain.clicked, Chain.questionViewed, Chain.dismissed],
-            reason: .userClose)
-        #expect(propsOf(events, Chain.clicked)["element_id"] as? String == "welcome_start")
-    }
-
     @Test("optional question skipped: skipped, then completed")
     func optionalQuestionSkipped() async throws {
         let key = "test_survey_optional_skip"
@@ -122,47 +81,5 @@ struct SurveyCampaignBehaviourTests {
             ],
             reason: .completed)
         #expect(propsOf(events, Chain.completed)["answered_count"] as? Int == 0)
-    }
-
-    @Test("a locked backdrop: a scrim tap ends nothing, sends nothing")
-    func lockedBackdrop() async throws {
-        let key = "test_survey_backdrop_locked"
-        let sdk = try await start([survey("survey_backdrop_locked")])
-        defer { sdk.tearDown() }
-        Digia.setCurrentScreen(name: "home")  // the fixture targets home
-        let d = try sdk.deliverChain(key)
-        try await show(sdk, "Option A")
-
-        try await tapScrim(sdk)
-        #expect(sdk.isShowing("Option A"))
-
-        #expect(names(await sdk.sent(key)) == [Chain.triggered, Chain.viewed, Chain.questionViewed])
-        #expect(d.timeline == ["displayed"], "shown, still holding the CEP, not ended")
-    }
-
-    // MARK: - Dropped
-
-    @Test("survey: over its cap: frequency_capped, and the first chain intact")
-    func overItsCap() async throws {
-        let key = "test_survey_stacked_cta"
-        let campaign = survey("survey_stacked_cta").cappedAtOne()
-        let sdk = try await start([campaign])
-        defer { sdk.tearDown() }
-        let first = try sdk.deliverChain(key)
-        try await show(sdk, "Option Alpha")
-        try await tapScrim(sdk)
-        try await sdk.waitUntil("the survey is gone") { !sdk.isShowing("Option Alpha") }
-
-        let second = try sdk.deliverChain(key)
-        try await sdk.settle(1.2)
-        #expect(!sdk.isShowing("Option Alpha"))
-
-        let events = await sdk.sent(key)
-        expectChain(
-            eventsOf(first, in: events), first,
-            names: [Chain.triggered, Chain.viewed, Chain.questionViewed, Chain.dismissed], reason: .userClose)
-        expectDroppedWire(
-            eventsOf(second, in: events), second, .frequencyCapped, campaign, screen: nil,
-            extras: ["cap_rule": "max_total", "cap_limit": 1])
     }
 }

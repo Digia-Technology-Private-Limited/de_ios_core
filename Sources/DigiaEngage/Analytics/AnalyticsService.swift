@@ -40,7 +40,7 @@ final class AnalyticsService {
     /// Keeps the app running long enough to finish the send started on
     /// entering the background.
     private let backgroundTime: BackgroundTimeProvider
-    private var isDispatching = false
+    private(set) var isDispatching = false
     /// Attempt number of the most recently scheduled retry, reset to 0 on
     /// success. Diagnostic mirror only — the real retry-cap enforcement reads
     /// the persisted per-event counter in `AnalyticsQueue`, not this value, so

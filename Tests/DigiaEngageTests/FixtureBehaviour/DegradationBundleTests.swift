@@ -1,4 +1,3 @@
-import Foundation
 import SwiftUI
 import Testing
 @testable import DigiaEngage
@@ -15,83 +14,10 @@ extension RenderedUITests {
 @MainActor
 struct DegradationBundleTests {
 
-    private static let neighbourTitle = "First Nudge Holds The Surface"
-
-    /// Fixtures the parser must drop, and what makes each one unusable. One guard each:
-    ///   missing id/key/type  — `CampaignModel.fromJson` returns nil for that field
-    ///   canvas version       — the canvas parser's version window
-    ///   outside tap          — the guide parser rejects the removed `dismiss` value
-    ///   anchorless version   — the guide parser's anchorless target `> 1` guard
-    nonisolated static let dropped: [String] = [
-        "degrade_engine_missing_id",
-        "degrade_engine_missing_key",
-        "degrade_engine_missing_type",
-        "degrade_nudge_canvas_version_older",
-        "degrade_nudge_canvas_version_newer",
-        "degrade_guide_removed_outside_tap_value",
-        "degrade_guide_anchorless_target_version_newer",
-    ]
-
-    @Test("never reaches the store, and the campaign beside it still shows", arguments: dropped)
-    func droppedCampaignCostsOnlyItself(name: String) async throws {
-        let bad = try fixture("degradation/\(name)")
-        let neighbour = try fixture("engine/engine_surface_busy_first")
-        let sdk = try await SdkHarness.start(campaigns: [bad, neighbour])
-        defer { sdk.tearDown() }
-        try sdk.mount { Text("host app") }
-
-        #expect(sdk.sdk.campaignStore.keys == [keyOf(neighbour)])
-        if let badKey = bad["campaignKey"] as? String, !badKey.isEmpty {
-            let lost = try sdk.deliver(badKey)
-            #expect(lost.dropReason == .unknownCampaignKey)
-        }
-        try sdk.deliver(keyOf(neighbour))
-        try await sdk.waitUntil("the neighbour is up") { sdk.isShowing(Self.neighbourTitle) }
-    }
-
-    // Fails if an unknown campaign type stops being reported: `CampaignModel.fromJson`'s default
-    // branch must record `campaign_unsupported` with the type, so the drop is diagnosable.
-    @Test("an unknown campaign type is reported as campaign_unsupported and costs only itself")
-    func unknownTypeIsReported() async throws {
-        let unknown = try fixture("degradation/degrade_engine_unknown_type_alt_id")
-        let neighbour = try fixture("engine/engine_surface_busy_first")
-        let sdk = try await SdkHarness.start(campaigns: [unknown, neighbour])
-        defer { sdk.tearDown() }
-        try sdk.mount { Text("host app") }
-
-        let unsupported = sdk.records.filter { $0.reason?.wire == TimelineReason.campaignUnsupported.wire }
-        #expect(unsupported.count == 1)
-        let lost = try sdk.deliver(keyOf(unknown))
-        #expect(lost.dropReason == .invalidConfig)
-        try sdk.deliver(keyOf(neighbour))
-        try await sdk.waitUntil("the neighbour is up") { sdk.isShowing(Self.neighbourTitle) }
-    }
-
-    // A timer is also dropped when the response carries no server clock, so the version guard is
-    // only visible when the bundle brings one. The control is the same timer shape at version 1,
-    // which must reach the store. Fails if the timer's `stateful` version guard goes.
-    @Test("degrade_inline_timer_version_too_new never reaches the store while the same timer at version 1 does")
-    func timerVersionTooNew() async throws {
-        let tooNew = try fixture("degradation/degrade_inline_timer_version_too_new")
-        var current = tooNew
-        current["id"] = "\(tooNew["id"] as? String ?? "")-control"
-        current["campaignKey"] = "\(keyOf(tooNew))_control"
-        var template = try #require(tooNew["templateConfig"] as? [String: Any])
-        var stateful = try #require(template["stateful"] as? [String: Any])
-        stateful["version"] = 1
-        template["stateful"] = stateful
-        current["templateConfig"] = template
-        let neighbour = try fixture("engine/engine_surface_busy_first")
-
-        let sdk = try SdkHarness.create(campaigns: [tooNew, current, neighbour])
-        defer { sdk.tearDown() }
-        let serverTime = ISO8601DateFormatter().date(from: "2029-01-01T00:00:00Z")!
-        sdk.bundleHeaders = ["X-Digia-Server-Time-Ms": "\(Int64(serverTime.timeIntervalSince1970 * 1000))"]
-        try await sdk.initialize()
-        try sdk.requireReady()
-
-        #expect(sdk.sdk.campaignStore.keys == [keyOf(current), keyOf(neighbour)].sorted())
-    }
+    // The never-reaches-the-store, unknown-type and timer-version cases moved
+    // to testkit/sdk-tests/tests/degradation/d01-d03, d08. What stays here
+    // fails in YAML on iOS: the unusable screen lists (#242) and the legacy
+    // carousel (legacy UI, out of scope).
 
     // Fails if an unusable screen list starts hiding the campaign: the parsed list is used as a
     // restriction although it names no usable screen.

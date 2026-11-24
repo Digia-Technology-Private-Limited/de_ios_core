@@ -20,6 +20,12 @@ final class DigiaOverlayController: ObservableObject {
     /// Whether this presentation already reported its impression. SwiftUI can run
     /// `onAppear` more than once for one presentation; Viewed is sent once.
     var nudgeImpressed = false
+
+    /// Test seam: how the auto-dismiss waits out its delay, in nanoseconds.
+    /// `nil` (always, in a shipped app) sleeps on the real clock. Tests set a
+    /// fake clock so they can move time and fire the timer instantly, like
+    /// Flutter's `SDKInstance.waitClockForTesting`.
+    static var autoDismissSleepForTesting: ((UInt64) async throws -> Void)?
     @Published private(set) var activeStoryOverlay: InlineStoryOverlayState?
 
     var onAction: ((_ actionType: String, _ url: String, _ payload: CEPTriggerPayload) -> Bool)?
@@ -54,8 +60,13 @@ final class DigiaOverlayController: ObservableObject {
         guard afterMs > 0 else { return }
         let nanoseconds = UInt64(afterMs) * 1_000_000
         nudgeAutoDismissTask = Task { [weak self] in
-            do { try await Task.sleep(nanoseconds: nanoseconds) }
-            catch { return }
+            do {
+                if let sleep = Self.autoDismissSleepForTesting {
+                    try await sleep(nanoseconds)
+                } else {
+                    try await Task.sleep(nanoseconds: nanoseconds)
+                }
+            } catch { return }
             guard !Task.isCancelled, self?.activeNudge?.id == nudge.id else { return }
             SDKInstance.shared.nudgeOrchestrator.markNudgeDismissed(reason: .autoTimeout)
         }

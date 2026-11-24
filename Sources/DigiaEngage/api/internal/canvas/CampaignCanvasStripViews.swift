@@ -354,6 +354,7 @@ struct CanvasCarouselRenderer: View {
 
     @State private var scrollPosition: Int?
     @State private var timer: Timer?
+    @State private var autoPlayTask: Task<Void, Never>?
     /// True while the last page change came from the autoplay timer rather than the user's finger,
     /// which is the distinction the legacy carousel's `auto` flag draws.
     @State private var advancedAutomatically = false
@@ -491,7 +492,9 @@ struct CanvasCarouselRenderer: View {
                             .onChange(of: isTouching) { _, touching in
                                 motion.fingerDown = touching
                                 if touching {
-                                    stopAutoPlay()
+                                    if InlineCarouselRenderer.autoPlaySleepForTesting == nil {
+                                        stopAutoPlay()
+                                    }
                                     // Whatever the strip does next is the finger's doing.
                                     advancedAutomatically = false
                                 } else {
@@ -672,8 +675,35 @@ struct CanvasCarouselRenderer: View {
         slideCount: Int,
         loopEnabled: Bool
     ) {
-        stopAutoPlay()
-        guard autoPlay, slideCount > 1 else { return }
+        guard autoPlay, slideCount > 1 else {
+            stopAutoPlay()
+            return
+        }
+        if let sleep = InlineCarouselRenderer.autoPlaySleepForTesting {
+            guard autoPlayTask == nil else { return }
+            let intervalNs = UInt64(max(0.001, autoPlayInterval) * 1_000_000_000)
+            autoPlayTask = Task { @MainActor in
+                while !Task.isCancelled {
+                    do { try await sleep(intervalNs) } catch { return }
+                    guard !Task.isCancelled else { return }
+                    guard !motion.fingerDown else { continue }
+                    let current = motion.restingPage?.page ?? scrollPosition ?? (loopEnabled ? loopClones : 0)
+                    guard let next = carouselAutoPlayNextPage(
+                        current: current,
+                        displayCount: displayCount,
+                        loopClones: loopClones,
+                        loopEnabled: loopEnabled
+                    ) else { continue }
+                    advancedAutomatically = true
+                    if #available(iOS 18, *), let proxy = motion.proxy {
+                        proxy.scrollTo(next, anchor: .center)
+                    } else {
+                        scrollPosition = next
+                    }
+                }
+            }
+            return
+        }
         let timer = Timer(timeInterval: autoPlayInterval, repeats: true) { _ in
             Task { @MainActor in
                 // A finger holds the strip or it is still travelling: leave it.
@@ -709,6 +739,8 @@ struct CanvasCarouselRenderer: View {
     private func stopAutoPlay() {
         timer?.invalidate()
         timer = nil
+        autoPlayTask?.cancel()
+        autoPlayTask = nil
     }
 }
 
@@ -772,11 +804,13 @@ private extension View {
 /// Where a carousel strip is and whether it has stopped. Kept out of SwiftUI
 /// state so the per-frame scroll updates do not re-render the carousel.
 @MainActor
-private final class CarouselStripMotion {
+final class CarouselStripMotion {
     /// How long the strip must hold still to count as at rest. A drag, a fling
     /// and an animation all report every frame, so a gap this long means it
     /// has stopped.
     static let restDelay: TimeInterval = 0.12
+    /// Number of scheduled rest-check tasks still waiting to fire.
+    static var pendingRestChecks = 0
 
     var proxy: ScrollViewProxy?
     var isVisible = false
@@ -820,7 +854,9 @@ private final class CarouselStripMotion {
     ) {
         generation += 1
         let expected = generation
+        Self.pendingRestChecks += 1
         Task { @MainActor [weak self] in
+            defer { Self.pendingRestChecks = max(0, Self.pendingRestChecks - 1) }
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             guard let self, self.generation == expected else { return }
             onRest()
@@ -944,6 +980,12 @@ struct CanvasStoryViewer: View {
     @State private var muted = true
     @State private var paused = false
     @State private var ticker: Timer?
+    /// Test seam: how the authored page timer waits out its 1/30 s tick, in
+    /// nanoseconds. `nil` (always, in a shipped app) ticks on the real clock.
+    /// Tests set a fake clock so `advanceTime` fires page turns instantly,
+    /// like `FloaterOrchestrator.autoDismissSleepForTesting`.
+    static var tickSleepForTesting: ((UInt64) async throws -> Void)?
+    @State private var tickTask: Task<Void, Never>?
     @State private var playbackGeneration = 0
     @State private var displayedMediaKey = CanvasStoryMediaKey(index: 0, generation: 0)
 
@@ -1255,6 +1297,8 @@ struct CanvasStoryViewer: View {
     private func stop() {
         ticker?.invalidate()
         ticker = nil
+        tickTask?.cancel()
+        tickTask = nil
     }
 
     private func start(retainingDisplayedMedia: Bool = true) {
@@ -1283,10 +1327,31 @@ struct CanvasStoryViewer: View {
 
     private func startAuthoredTimer() {
         ticker?.invalidate()
+        ticker = nil
+        tickTask?.cancel()
+        tickTask = nil
         let current = page
         let mediaKey = currentMediaKey
 
         let interval = 1.0 / 30.0
+        if let sleep = Self.tickSleepForTesting {
+            let intervalNs = UInt64(interval * 1_000_000_000)
+            tickTask = Task { @MainActor in
+                do {
+                    while !Task.isCancelled {
+                        try await sleep(intervalNs)
+                        guard mediaKey == currentMediaKey else { return }
+                        progress += Self.progressIncrement(
+                            interval: interval,
+                            duration: current.duration,
+                            isPaused: paused
+                        )
+                        if progress >= 1 { step(1); return }
+                    }
+                } catch { return }
+            }
+            return
+        }
         ticker = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
             Task { @MainActor in
                 guard mediaKey == currentMediaKey else { return }

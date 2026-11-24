@@ -270,11 +270,14 @@ public enum ComponentTestHost {
     @MainActor
     public static func settledImage(of view: UIView) -> UIImage {
         var image = renderImage(of: view)
+        var lastBytes = image.cgImage?.dataProvider?.data as Data?
         for _ in 0..<20 {
-            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
             let next = renderImage(of: view)
-            if next.pngData() == image.pngData() { return next }
+            let nextBytes = next.cgImage?.dataProvider?.data as Data?
+            if let lastBytes, let nextBytes, lastBytes == nextBytes { return next }
             image = next
+            lastBytes = nextBytes
         }
         return image
     }

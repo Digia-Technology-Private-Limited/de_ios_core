@@ -128,6 +128,7 @@ extension SDKInstance {
         snapshot["app_opens"] = appOpens.value
         // Read at each evaluation, so a login or logout counts at once.
         snapshot["identified"] = services?.identityManager.userId != nil
+        if let pinned = deviceFactsForTesting { snapshot.merge(pinned) { $1 } }
         return snapshot
     }
 

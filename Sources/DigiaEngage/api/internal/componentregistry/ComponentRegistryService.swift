@@ -39,6 +39,15 @@ final class ComponentRegistryService: ObservableObject {
     /// refire the same key repeatedly.
     private var seen = Set<String>()
 
+    /// Test-only: a fresh install has seen nothing. Keeps the config and the
+    /// persisted toggle; the boot reconfigures from wiped storage.
+    func resetForTesting() {
+        seen.removeAll()
+        pendingAnchors.removeAll()
+        recordedThisSession.removeAll()
+        didWarnNoScreen = false
+    }
+
     /// Anchor keys seen before they could be sent: no screen yet, or `configure`
     /// has not run (iOS configures after the async bundle fetch, and an RN or
     /// SwiftUI tree mounts before that). The backend rejects an anchor without a

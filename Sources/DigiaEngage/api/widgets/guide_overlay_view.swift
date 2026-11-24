@@ -18,14 +18,20 @@ private func svgBitmap(from data: Data) -> UIImage? {
 }
 
 @MainActor
-private enum AnchorlessImageLoader {
+enum AnchorlessImageLoader {
     private static let cache = NSCache<NSURL, UIImage>()
     private static let imageLoadTimeout: TimeInterval = 3
+    private static let lock = NSLock()
+    private static var _inFlightCount = 0
+
+    static var inFlightCount: Int { lock.withLock { _inFlightCount } }
 
     /// On failure, returns the health cause from the HTTP status.
     static func image(for url: URL) async -> (image: UIImage?, failureCause: String?) {
         DigiaImagePipeline.configureIfNeeded()
         if let cached = cache.object(forKey: url as NSURL) { return (cached, nil) }
+        lock.withLock { _inFlightCount += 1 }
+        defer { lock.withLock { _inFlightCount -= 1 } }
         var request = URLRequest(url: url)
         request.timeoutInterval = imageLoadTimeout
         guard let (data, response) = try? await URLSession.shared.data(for: request),

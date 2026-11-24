@@ -68,6 +68,12 @@ final class PresentationCoordinator {
     /// Spec §3.5 `anchorLayoutMs`.
     static let defaultAnchorLayoutTimeout: TimeInterval = 5
 
+    /// Test seam: how the acceptance watchdog waits out its window, in
+    /// nanoseconds. `nil` (always, in a shipped app) sleeps on the real clock.
+    /// Tests set a fake clock so they can move time and fire the watchdog
+    /// instantly, like `DigiaOverlayController.autoDismissSleepForTesting`.
+    static var acceptanceSleepForTesting: ((UInt64) async throws -> Void)?
+
     /// How long a non-inline presentation may sit `pending` before the watchdog
     /// settles it `dropped('timeout')`.
     ///
@@ -160,7 +166,13 @@ final class PresentationCoordinator {
         let armedInForeground = isAppInForeground
         entry.acceptance = Task { @MainActor [weak self] in
             guard let self else { return }
-            try? await Task.sleep(nanoseconds: nanoseconds(window))
+            do {
+                if let sleep = Self.acceptanceSleepForTesting {
+                    try await sleep(nanoseconds(window))
+                } else {
+                    try await Task.sleep(nanoseconds: nanoseconds(window))
+                }
+            } catch { return }
             guard !Task.isCancelled, !controller.isSettled else { return }
             log.e(
                 "Dropped — acceptance watchdog fired, still pending; releasing the CEP hold "
@@ -208,7 +220,13 @@ final class PresentationCoordinator {
         let window = anchorLayoutTimeout + max(0, dueDelay)
         entry.anchor = Task { @MainActor [weak self] in
             guard let self else { return }
-            try? await Task.sleep(nanoseconds: nanoseconds(window))
+            do {
+                if let sleep = Self.acceptanceSleepForTesting {
+                    try await sleep(nanoseconds(window))
+                } else {
+                    try await Task.sleep(nanoseconds: nanoseconds(window))
+                }
+            } catch { return }
             guard !Task.isCancelled, !controller.isSettled else { return }
             let displaying = controller.state == .displaying
             log.e(

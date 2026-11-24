@@ -131,9 +131,7 @@ struct LegacySurveyChoiceTests {
         // The keyboard resizes `DialogContainer`, whose `dialogSurface` then swaps between its
         // `ContentSizedScrollView` and plain branches: the content is rebuilt and `SurveyBody`
         // loses its `@State welcomeDone`, so the welcome screen comes back mid-survey.
-        withKnownIssue("The keyboard sends a legacy dialog survey back to its welcome screen") {
-            #expect(!sdk.isShowing(Self.welcome), "\(sdk.legacyShownTexts())")
-        }
+        #expect(!sdk.isShowing(Self.welcome), "\(sdk.legacyShownTexts())")
         if sdk.isShowing(Self.welcome) {
             try await sdk.legacyTapExact("Let's go")
             try await sdk.waitUntil("the role question again") { sdk.isShowing(Self.role) }

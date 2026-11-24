@@ -1,6 +1,14 @@
 import Foundation
 
 struct TrustedTimeAnchor: Equatable {
+    /// Test-only seam: when set, replaces `clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)`
+    /// so tests can advance the monotonic clock deterministically. Defaults to nil (real clock).
+    nonisolated(unsafe) static var monotonicNsecForTesting: (() -> UInt64)? = nil
+
+    private static func currentMonotonicNsec() -> UInt64 {
+        monotonicNsecForTesting?() ?? clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)
+    }
+
     let serverEpochMs: Int64
     let continuousNanoseconds: UInt64
 
@@ -10,12 +18,12 @@ struct TrustedTimeAnchor: Equatable {
         return TrustedTimeAnchor(
             serverEpochMs: serverEpochMs,
             // Includes device sleep without following wall-clock changes.
-            continuousNanoseconds: clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)
+            continuousNanoseconds: currentMonotonicNsec()
         )
     }
 
     func nowMs() -> Int64 {
-        let now = clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)
+        let now = Self.currentMonotonicNsec()
         let elapsed = (max(now, continuousNanoseconds) - continuousNanoseconds) / 1_000_000
         return serverEpochMs + Int64(elapsed)
     }

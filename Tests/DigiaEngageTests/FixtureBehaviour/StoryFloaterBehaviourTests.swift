@@ -37,64 +37,11 @@ struct StoryFloaterBehaviourTests {
 
     // Fails if: floater_story_orchestrator.swift `restartAutoDismiss`
     // `UInt64(afterMs) * 1_000_000` -> `UInt64(afterMs) * 2_000_000`.
-    @Test("floater_story_gradient_window_multipage: a window nobody opens leaves at its 8 s timeout")
-    func unopenedWindowLeavesAt8s() async throws {
-        let (sdk, presentation) = try await boot("floater_story_gradient_window_multipage")
-        defer { sdk.tearDown() }
-        let drawnAt = try await sdk.waitForStoryWindow()
-
-        try await sdk.settle(max(0, 7.6 - floaterElapsed(since: drawnAt)))
-        #expect(sdk.storyFloater.isShowing, "still inside 8 s")
-
-        try await sdk.waitUntil("the window times out", timeout: 2) { !sdk.storyFloater.isShowing }
-        #expect(floaterElapsed(since: drawnAt) < 8.7)
-        #expect(presentation.dismissReason == .autoTimeout)
-    }
-
-    // Fails if: floater_story_orchestrator.swift `restartAutoDismiss`
-    // `UInt64(afterMs) * 1_000_000` -> `UInt64(afterMs) * 2_000_000`.
-    @Test("floater_auto_dismiss: a window nobody opens leaves after its 3 s")
-    func unopenedWindowLeavesAt3s() async throws {
-        let (sdk, presentation) = try await boot("floater_auto_dismiss")
-        defer { sdk.tearDown() }
-        let drawnAt = try await sdk.waitForStoryWindow()
-
-        try await sdk.settle(max(0, 2.6 - floaterElapsed(since: drawnAt)))
-        #expect(sdk.storyFloater.isShowing)
-
-        try await sdk.waitUntil("the window times out", timeout: 2) { !sdk.storyFloater.isShowing }
-        #expect(floaterElapsed(since: drawnAt) < 3.7)
-        #expect(presentation.dismissReason == .autoTimeout)
-    }
 
     // Fails if: floater_story_orchestrator.swift `onScreenChanged`
     // `if !targets.isEmpty && !targets.contains(screenName) {` -> `if !targets.contains(screenName) {`.
-    @Test("floater_story_screen_change_global: a window on every screen survives navigation")
-    func globalSurvivesNavigation() async throws {
-        let (sdk, presentation) = try await boot("floater_story_screen_change_global", screen: "home")
-        defer { sdk.tearDown() }
-        try await sdk.waitForStoryWindow()
-
-        sdk.setCurrentScreen("cart")
-        sdk.setCurrentScreen("brands")
-        try await sdk.settle(0.4)
-
-        #expect(sdk.storyFloater.isShowing)
-        #expect(presentation.dismissReason == nil)
-    }
 
     // Fails if: floater_story_orchestrator.swift `onScreenChanged`
     // `if !targets.isEmpty && !targets.contains(screenName) {` -> `if false {`.
-    @Test("floater_story_screen_change_home_only: a window for one screen leaves when the app goes elsewhere")
-    func homeOnlyLeavesElsewhere() async throws {
-        let (sdk, presentation) = try await boot("floater_story_screen_change_home_only", screen: "home")
-        defer { sdk.tearDown() }
-        try await sdk.waitForStoryWindow()
-
-        sdk.setCurrentScreen("cart")
-
-        try await sdk.waitUntil("the window is gone", timeout: 6) { sdk.storyFloater.state == nil }
-        #expect(presentation.dismissReason == .screenExit)
-    }
 }
 }

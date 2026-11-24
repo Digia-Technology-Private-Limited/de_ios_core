@@ -4,6 +4,10 @@ internal import SDWebImageSwiftUI
 
 @MainActor
 enum InlineCarouselRenderer {
+    /// Test-only: replaces `Timer.scheduledTimer` in autoplay so tests advance
+    /// carousel slides via their fake clock.
+    static var autoPlaySleepForTesting: ((UInt64) async throws -> Void)?
+
     static func makeView(
         _ config: InlineCarouselConfig,
         payload: CEPTriggerPayload,

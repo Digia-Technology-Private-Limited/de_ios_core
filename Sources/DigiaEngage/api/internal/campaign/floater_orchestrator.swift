@@ -178,6 +178,11 @@ final class FloaterOrchestrator: ObservableObject {
     private var autoDismissTask: Task<Void, Never>?
     private var exitTask: Task<Void, Never>?
     private var mediaReadyTask: Task<Void, Never>?
+    /// Test seam: how the auto-dismiss waits out its delay, in nanoseconds.
+    /// `nil` (always, in a shipped app) sleeps on the real clock. Tests set a
+    /// fake clock so they can move time and fire the timer instantly, like
+    /// `DigiaOverlayController.autoDismissSleepForTesting`.
+    static var autoDismissSleepForTesting: ((UInt64) async throws -> Void)?
     private(set) var lastStartFailureReason: String?
     /// `true` when the last start failed only because a floater already shows.
     private(set) var lastStartFailedBusy = false
@@ -502,7 +507,13 @@ final class FloaterOrchestrator: ObservableObject {
         autoDismissTask = nil
         guard let afterMs = state?.config.behavior.autoDismissAfterMs, surface != .expanded else { return }
         autoDismissTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(afterMs) * 1_000_000)
+            do {
+                if let sleep = Self.autoDismissSleepForTesting {
+                    try await sleep(UInt64(afterMs) * 1_000_000)
+                } else {
+                    try await Task.sleep(nanoseconds: UInt64(afterMs) * 1_000_000)
+                }
+            } catch { return }
             guard !Task.isCancelled else { return }
             self?.dismiss(.autoTimeout)
         }
@@ -642,7 +653,7 @@ final class FloaterOrchestrator: ObservableObject {
         let exit = active.config.collapsed.exitAnimation
         // Full screen fills the display, so animating it "out" to nothing looks like
         // a glitch — only the small window gets an exit.
-        let animates = exit.type != .none && surface == .collapsed && !obscured
+        let animates = exit.type != .none && surface == .collapsed && !obscured && !Self.disableExitAnimationForTesting
         guard animates else {
             finishDismiss()
             return
@@ -656,6 +667,9 @@ final class FloaterOrchestrator: ObservableObject {
             self?.finishDismiss()
         }
     }
+
+    /// Test-only: skip exit/expand animation sleeps so tests don't wait on wall-clock transitions.
+    static var disableExitAnimationForTesting = false
 
     private func finishDismiss() {
         exitTask?.cancel()

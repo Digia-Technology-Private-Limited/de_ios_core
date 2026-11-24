@@ -69,7 +69,7 @@ final class SurveyReporter {
         guard let state = orchestrator.state else { return }
         guard let block = state.config.blockForNode(nodeId) else { return }
         if block.type.isContent { return }
-        questionViewedAt[Self.questionKey(token: state.token, nodeId: nodeId)] = Date()
+        questionViewedAt[Self.questionKey(token: state.token, nodeId: nodeId)] = SurveyClock.now()
         let typeWire = block.type.rawValue
         ctx.events.toDigia(
             SurveyEvent.QuestionViewed(
@@ -112,7 +112,7 @@ final class SurveyReporter {
         let values = Self.stringArray(answer["values"])
         let viewedKey = Self.questionKey(token: state.token, nodeId: stepId)
         let timeToAnswerMs: Int64? = questionViewedAt[viewedKey].map {
-            Int64(Date().timeIntervalSince($0) * 1000)
+            Int64(SurveyClock.now().timeIntervalSince($0) * 1000)
         }
         questionViewedAt.removeValue(forKey: viewedKey)
         let scaleBounds = block.flatMap(Self.scaleBounds)
@@ -175,7 +175,7 @@ final class SurveyReporter {
             SurveyEvent.Completed(
                 itemTotal: state.config.questionCount,
                 answeredCount: answeredCount,
-                timeToCompleteMs: Int64(Date().timeIntervalSince(state.startedAt) * 1000),
+                timeToCompleteMs: Int64(SurveyClock.now().timeIntervalSince(state.startedAt) * 1000),
                 response: Self.foundation(response)
             ),
             payload: state.payload
@@ -231,7 +231,7 @@ final class SurveyReporter {
             survey: state.config,
             answers: answers,
             startedAt: state.startedAt,
-            now: Date(),
+            now: SurveyClock.now(),
             userId: nil
         )
         guard let payload = body["payload"], let computed = body["computed"] else { return }

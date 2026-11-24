@@ -36,6 +36,10 @@ final class SessionReporter: @unchecked Sendable {
     /// and flushes run one at a time, in call order, and never race on the
     /// persisted pending list.
     private var tail: Task<Void, Never>?
+    private var activeOperations = 0
+
+    /// True while a scheduled report or flush is still running.
+    var isBusy: Bool { lock.withLock { activeOperations > 0 } }
 
     /// Retries pending reports, oldest first, then reports the current session.
     /// Returns the scheduled work (nil when no body could be built), so a
@@ -66,10 +70,12 @@ final class SessionReporter: @unchecked Sendable {
 
     private func serialize(_ operation: @escaping @Sendable (SessionReporter) async -> Void) -> Task<Void, Never> {
         lock.withLock {
+            activeOperations += 1
             let previous = tail
             let task = Task { [weak self] in
                 await previous?.value
                 guard let self else { return }
+                defer { self.lock.withLock { self.activeOperations -= 1 } }
                 await operation(self)
             }
             tail = task

@@ -56,7 +56,7 @@ final class SubmissionReporter: @unchecked Sendable {
             survey: survey,
             answers: answers,
             startedAt: startedAt,
-            now: Date(),
+            now: SurveyClock.now(),
             userId: userId,
             sessionId: sessionIdProvider()
         )

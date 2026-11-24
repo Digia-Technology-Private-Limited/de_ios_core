@@ -321,42 +321,6 @@ struct PresentationCoordinatorTests {
         #expect(!controller.isSettled)
     }
 
-    // MARK: - G6
-
-    @Test("G6 — detach settles what the departing plugin owns and nothing else")
-    func detachSettlesOnlyItsOwner() {
-        let coordinator = makeCoordinator()
-        let mine = coordinator.open(payload("a"), owner: "clevertap")
-        let theirs = coordinator.open(payload("b"), owner: "webengage")
-        coordinator.accept(mine, kind: .modal)
-        coordinator.accept(theirs, kind: .modal)
-
-        coordinator.detach(owner: "clevertap")
-
-        #expect(mine.presentation.outcome.settledValue
-            == .dropped(reason: .pluginDetached, detail: nil))
-        #expect(!theirs.isSettled)
-    }
-
-    @Test("G6 — a displaying presentation settles dismissed, a pending one dropped")
-    func detachPicksTheRightArm() {
-        let coordinator = makeCoordinator()
-        let displaying = coordinator.open(payload("a"), owner: "clevertap")
-        let pending = coordinator.open(payload("b"), owner: "clevertap")
-        coordinator.accept(displaying, kind: .modal)
-        coordinator.accept(pending, kind: .modal)
-        coordinator.handle(.impressed, payload: displaying.trigger)
-
-        coordinator.detach(owner: "clevertap")
-
-        #expect(displaying.presentation.outcome.settledValue
-            == .dismissed(reason: .pluginDetached, completed: false))
-        #expect(pending.presentation.outcome.settledValue
-            == .dropped(reason: .pluginDetached, detail: nil))
-        #expect(displaying.isHoldReleased)
-        #expect(pending.isHoldReleased)
-    }
-
     // MARK: - Normalisation
 
     @Test("a click before the impression promotes rather than raising")

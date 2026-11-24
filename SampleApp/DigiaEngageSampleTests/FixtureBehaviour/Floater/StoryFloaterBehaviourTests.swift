@@ -54,41 +54,9 @@ struct StoryFloaterBehaviourTests {
 
     // MARK: - floater_story_gradient_window_multipage
 
-    // Fails if: Sources/DigiaEngage/api/internal/canvas/CampaignCanvasParser.swift `parseStory`
-    // `duration: seconds > 0 ? seconds : fallbackSeconds,` -> `duration: fallbackSeconds,`.
-    // Fails if: CampaignCanvasParser.swift `parseStory`
-    // `let fallbackSeconds = max(0.1, propertyNumber(props["defaultDurationSeconds"]) ?? 5)` ->
-    // `let fallbackSeconds = 8.0`.
-    // Fails if: Sources/DigiaEngage/api/internal/campaign/floater_story_orchestrator.swift
-    // `closeStory` `if active.config.behavior.onStoryEnd == .dismiss {` -> `if false {`.
-    // Fails if: floater_story_orchestrator.swift `openStory` `autoDismissTask?.cancel()` is deleted.
-    @Test("floater_story_gradient_window_multipage: each page lasts its own length, the unset one the 5 s default, and the story then ends the whole showing")
-    func pagesLastTheirOwnLength() async throws {
-        let (sdk, presentation) = try await boot("floater_story_gradient_window_multipage")
-        defer { sdk.tearDown() }
-        try await sdk.waitForStoryWindow()
-        let opened = try await openStory(sdk)
-
-        try await sdk.waitUntil("page 2", timeout: 5) { sdk.isShowing("Page 2 of 3") }
-        let first = floaterElapsed(since: opened)
-        #expect(first > 1.7 && first < 3.2, "page 1 lasted \(first) s, authored 2 s")
-        let secondStart = Date()
-
-        try await sdk.waitUntil("page 3", timeout: 14) { sdk.isShowing("Page 3 of 3") }
-        let second = floaterElapsed(since: secondStart)
-        #expect(second > 7.6 && second < 10.5, "page 2 lasted \(second) s, authored 8 s")
-        #expect(sdk.storyFloater.isShowing, "the 8 s timeout must not run while the story is open")
-        let thirdStart = Date()
-
-        try await sdk.waitUntil("the story ends", timeout: 9) { !sdk.storyFloater.isShowing }
-        let third = floaterElapsed(since: thirdStart)
-        #expect(third > 4.6 && third < 6.6, "page 3 lasted \(third) s, the 5 s default")
-
-        // `onStoryEnd: dismiss` ends the showing as the story's own goal reached.
-        #expect(presentation.dismissReason == .ctaAction)
-        try await sdk.waitUntil("the window is gone", timeout: 6) { sdk.storyFloater.state == nil }
-        #expect(sdk.isShowing("App home"))
-    }
+    // YAML-covered (tests/floater/f29_floater_multipage.yaml passes): each
+    // page lasts its own length, the unset one the 5 s default, and the story
+    // then ends the whole showing.
 
     // MARK: - floater_story_video_pages_mute_restart
 
@@ -157,107 +125,20 @@ struct StoryFloaterBehaviourTests {
 
     // MARK: - floater_window_clear_background_child_shadows
 
-    // Fails if: floater_story_orchestrator.swift `openStory` `storyOpen = true` -> `storyOpen = false`.
-    @Test("floater_window_clear_background_child_shadows: a tap on the window opens the story and does not close it")
-    func tapOpensTheStory() async throws {
-        let (sdk, presentation) = try await boot("floater_window_clear_background_child_shadows")
-        defer { sdk.tearDown() }
-        try await sdk.waitForStoryWindow()
-        #expect(!sdk.storyFloater.storyOpen)
-
-        try await openStory(sdk)
-        try await sdk.waitUntil("the story's page is on screen", timeout: 6) { sdk.isShowing("Story") }
-
-        #expect(sdk.storyFloater.isShowing)
-        #expect(presentation.dismissReason == nil)
-    }
-
-    // Fails if: floater_story_orchestrator.swift `closeStory`
-    // `if active.config.behavior.onStoryEnd == .dismiss {` -> `if true {`.
-    @Test("floater_window_clear_background_child_shadows: closing the story returns to the window")
-    func closingTheStoryReturnsToTheWindow() async throws {
-        let (sdk, presentation) = try await boot("floater_window_clear_background_child_shadows")
-        defer { sdk.tearDown() }
-        try await sdk.waitForStoryWindow()
-        try await openStory(sdk)
-
-        // The story chrome's authored close.
-        try await sdk.tap(id: "close")
-
-        // `onStoryEnd` default `collapse`: `dismiss` would end the showing.
-        try await sdk.waitUntil("the story closes", timeout: 6) { !sdk.storyFloater.storyOpen }
-        #expect(sdk.storyFloater.isShowing)
-        try await sdk.waitUntil("the window is back", timeout: 6) { sdk.storyFloater.activeRect != nil }
-        #expect(presentation.dismissReason == nil)
-    }
-
-    // Fails if: Sources/DigiaEngage/api/widgets/floater_story_overlay_view.swift `closeButton`
-    // `orchestrator.dismiss(.userClose)` -> `orchestrator.dismiss(.autoTimeout)`.
-    @Test("floater_window_clear_background_child_shadows: the window's × ends the showing as the user closing it")
-    func windowCloseEndsTheShowing() async throws {
-        let (sdk, presentation) = try await boot("floater_window_clear_background_child_shadows")
-        defer { sdk.tearDown() }
-        try await sdk.waitForStoryWindow()
-        let rect = try #require(sdk.storyFloater.activeRect)
-
-        try sdk.tapFloater(at: try sdk.floaterButton(in: rect, nearest: CGPoint(x: rect.maxX, y: rect.minY)))
-
-        try await sdk.waitUntil("the window is gone", timeout: 6) { !sdk.storyFloater.isShowing }
-        #expect(!sdk.storyFloater.storyOpen, "the × closes, it does not open the story")
-        #expect(presentation.dismissReason == .userClose)
-    }
+    // YAML-covered (tests/floater/f28_floater_window_opens_story.yaml passes):
+    // a tap on the window opens the story and does not close it; closing the
+    // story returns to the window; the window's × ends the showing as the
+    // user closing it.
 
     // MARK: - floater_auto_dismiss
 
-    // Fails if: floater_story_orchestrator.swift `openStory` `autoDismissTask?.cancel()` is deleted.
-    // Fails if: floater_story_orchestrator.swift `closeStory` `onStepDismissed(active)
-    // restartAutoDismiss()` -> `onStepDismissed(active)`.
-    @Test("floater_auto_dismiss: its 3 s timeout stops while the story is open and starts over, in full, when the story ends")
-    func timeoutPausesWhileTheStoryIsOpen() async throws {
-        let (sdk, presentation) = try await boot("floater_auto_dismiss")
-        defer { sdk.tearDown() }
-        let drawnAt = try await sdk.waitForStoryWindow()
-
-        try await sdk.settle(max(0, 2 - floaterElapsed(since: drawnAt)))
-        try await openStory(sdk)
-        // The single page runs its 5 s default; the timeout must not fire during it (the window
-        // has been up for far more than 3 s by then).
-        try await sdk.settle(4)
-        #expect(sdk.storyFloater.isShowing)
-        #expect(sdk.storyFloater.storyOpen)
-
-        try await sdk.waitUntil("the story ends", timeout: 3) { !sdk.storyFloater.storyOpen }
-        let endedAt = Date()
-        #expect(sdk.storyFloater.isShowing)
-
-        try await sdk.settle(2.6)
-        #expect(sdk.storyFloater.isShowing, "the clock restarted when the story ended")
-        try await sdk.waitUntil("the window times out", timeout: 2) { !sdk.storyFloater.isShowing }
-        #expect(floaterElapsed(since: endedAt) < 3.7)
-        #expect(presentation.dismissReason == .autoTimeout)
-    }
+    // YAML-covered (tests/floater/f34_floater_timeout_pause.yaml passes):
+    // its 3 s timeout stops while the story is open and starts over, in full,
+    // when the story ends.
 
     // MARK: - Screen scope
 
     // Fails if: floater_story_orchestrator.swift `onScreenChanged`
     // `if !targets.isEmpty && !targets.contains(screenName) {` -> `if false {`.
-    @Test("floater_story_screen_change_targeted: a window targeted at some screens survives them, and leaves with its open story on any other")
-    func targetedLeavesWithItsStory() async throws {
-        let (sdk, presentation) = try await boot("floater_story_screen_change_targeted", screen: "home")
-        defer { sdk.tearDown() }
-        try await sdk.waitForStoryWindow()
-        try await openStory(sdk)
-
-        sdk.setCurrentScreen("brands")
-        try await sdk.settle(0.3)
-        #expect(sdk.storyFloater.isShowing, "brands is targeted")
-        #expect(sdk.storyFloater.storyOpen)
-
-        sdk.setCurrentScreen("cart")
-        try await sdk.waitUntil("the window and its story are gone", timeout: 6) {
-            sdk.storyFloater.state == nil && !sdk.storyFloater.storyOverlayActive
-        }
-        #expect(presentation.dismissReason == .screenExit)
-    }
 }
 }

@@ -34,7 +34,7 @@ final class SurveyOrchestrator: ObservableObject {
             payload: payload,
             config: config,
             token: tokenCounter,
-            startedAt: Date(),
+            startedAt: SurveyClock.now(),
             variableContext: buildVariableContext(
                 schemas: config.variableSchemas,
                 cepVars: payload.variables

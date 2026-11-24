@@ -334,27 +334,6 @@ final class SdkHarness {
         records.filter { $0.campaignKey == campaignKey && $0.reason?.wire == reason.wire }
     }
 
-    /// The stored value the SDK keeps a campaign's frequency state under, as an earlier run left it.
-    static func frequencyState(
-        _ campaignKey: String,
-        total: Int = 0,
-        windowCount: Int = 0,
-        windowAnchorAt: Int64? = nil,
-        stoppedAt: Int64? = nil
-    ) -> [String: Any] {
-        var state: [String: Any] = ["total": total, "windowCount": windowCount]
-        if let windowAnchorAt { state["windowAnchorAt"] = windowAnchorAt }
-        if let stoppedAt { state["stoppedAt"] = stoppedAt }
-        let raw = String(data: try! JSONSerialization.data(withJSONObject: state), encoding: .utf8)!
-        return ["frequency.\(campaignKey)": raw]
-    }
-
-    /// Epoch milliseconds [seconds] before the wall clock: the frequency gate reads it, so a state
-    /// "left by an earlier run" is anchored to it.
-    static func msAgo(seconds: TimeInterval) -> Int64 {
-        Int64((Date().timeIntervalSince1970 - seconds) * 1000)
-    }
-
     // MARK: - Waiting
 
     func waitUntil(

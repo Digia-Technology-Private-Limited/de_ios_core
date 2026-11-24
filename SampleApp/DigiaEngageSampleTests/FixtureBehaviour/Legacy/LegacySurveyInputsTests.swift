@@ -55,10 +55,8 @@ struct LegacySurveyInputsTests {
         try await sdk.legacyType("9", keepFocus: true)
         #expect(sdk.isShowing("Must be at least 13"), "\(sdk.legacyShownTexts())")
         sdk.legacyDismissKeyboard()
-        withKnownIssue("The legacy dialog forgets the entry and its error when the keyboard goes") {
-            #expect(sdk.isShowing("Must be at least 13"), "\(sdk.legacyShownTexts())")
-            #expect(sdk.legacyFieldText() == "9")
-        }
+        #expect(sdk.isShowing("Must be at least 13"), "\(sdk.legacyShownTexts())")
+        #expect(sdk.legacyFieldText() == "9")
         try await sdk.legacyTapExact("Next")
         try await sdk.settle(0.3)
         #expect(sdk.isShowing(Self.age))

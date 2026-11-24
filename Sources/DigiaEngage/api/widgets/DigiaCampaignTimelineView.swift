@@ -68,10 +68,25 @@ struct DigiaCampaignTimelineView: View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Button(action: { dismiss() }) {
-                    Text("←")
-                        .font(digiaFont(size: 24))
-                        .foregroundColor(Color(hex: "212121") ?? .primary)
-                        .frame(width: 48, height: 48)
+                    // The back chevron, drawn rather than set in type: Roboto
+                    // (the shared test font, and many host fonts) has no
+                    // U+2190, which rendered as tofu on Flutter while this
+                    // stack fell back to a system arrow — three different
+                    // glyphs for one affordance. One stroked path is identical
+                    // everywhere: a left-pointing chevron, 12 wide x 20 tall,
+                    // centred in the 48x48 target, 2.5 stroke with round caps
+                    // and joins, ink 212121 like the title. Same geometry is
+                    // drawn by the Flutter and Android twins.
+                    Path { path in
+                        path.move(to: CGPoint(x: 30, y: 14))
+                        path.addLine(to: CGPoint(x: 18, y: 24))
+                        path.addLine(to: CGPoint(x: 30, y: 34))
+                    }
+                    .stroke(
+                        Color(hex: "212121") ?? .primary,
+                        style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round)
+                    )
+                    .frame(width: 48, height: 48)
                 }
                 .accessibilityLabel("Back")
                 Text("Campaign timeline")

@@ -245,6 +245,13 @@ private func plainScalar(_ scalar: Node.Scalar) -> Any? {
     default:
         break
     }
+    switch string {
+    // YAML 1.2 core schema: `.nan` and `.inf` are floats (`package:yaml` too).
+    case ".nan", ".NaN", ".NAN": return Double.nan
+    case ".inf", ".Inf", ".INF", "+.inf", "+.Inf", "+.INF": return Double.infinity
+    case "-.inf", "-.Inf", "-.INF": return -Double.infinity
+    default: break
+    }
     if let int = Int(string) {
         return int
     }

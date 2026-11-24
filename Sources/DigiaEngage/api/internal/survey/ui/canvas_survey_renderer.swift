@@ -242,7 +242,7 @@ struct CanvasSurveyPanel: View {
         lastAutoAdvanceKey = key
         autoAdvanceTask?.cancel()
         autoAdvanceTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 250_000_000)
+            try? await SurveyClock.sleep(nanoseconds: 250_000_000)
             if Task.isCancelled { return }
             guard vm.currentNode?.id == node.id else { return }
             SDKInstance.shared.surveyReporter.reportSurveyAnswered(stepId: node.id, answer: ans.toMap())
@@ -267,7 +267,7 @@ struct CanvasSurveyPanel: View {
             while remainingSecs > 0 {
                 if Task.isCancelled { return }
                 let paused = timer.pauseOnNonTimerBlock && (vm.currentBlock?.type.isContent == true)
-                try? await Task.sleep(nanoseconds: paused ? 500_000_000 : 1_000_000_000)
+                try? await SurveyClock.sleep(nanoseconds: paused ? 500_000_000 : 1_000_000_000)
                 if Task.isCancelled { return }
                 if !paused { remainingSecs = max(0, remainingSecs - 1) }
             }

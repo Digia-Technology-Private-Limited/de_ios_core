@@ -292,6 +292,11 @@ private extension StoryRailVisibility {
     }
 }
 
+enum DigiaInlineStoryTiming {
+    /// Test-only: drives the inline story viewer's 50ms progress tick on a fake clock.
+    @MainActor static var tickSleepForTesting: ((UInt64) async throws -> Void)?
+}
+
 private struct StoryViewportReader: UIViewRepresentable {
     let onChange: (CGRect) -> Void
 
@@ -731,7 +736,17 @@ private struct InlineStoryOverlayContent: View {
         }
         .ignoresSafeArea()
         .onReceive(Timer.publish(every: 0.05, on: .main, in: .common).autoconnect()) { _ in
-            tick()
+            if DigiaInlineStoryTiming.tickSleepForTesting == nil {
+                tick()
+            }
+        }
+        .task {
+            guard let sleep = DigiaInlineStoryTiming.tickSleepForTesting else { return }
+            while !Task.isCancelled {
+                do { try await sleep(50_000_000) } catch { return }
+                guard !Task.isCancelled else { return }
+                tick()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(
             for: UIApplication.willResignActiveNotification

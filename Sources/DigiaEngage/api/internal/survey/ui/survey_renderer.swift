@@ -179,7 +179,7 @@ private struct SurveySession: View {
                 return (model.currentItemIndex, model.answers.values.filter { $0.isAnswered }.count)
             }
             let delayNs = UInt64(max(0, survey.timeDelayMs + RENDER_DELAY_MS)) * 1_000_000
-            try? await Task.sleep(nanoseconds: delayNs)
+            try? await SurveyClock.sleep(nanoseconds: delayNs)
             visible = true
         }
         .onChange(of: vm.isComplete) { complete in
@@ -187,7 +187,9 @@ private struct SurveySession: View {
         }
         .onChange(of: vm.redirectUrl) { url in
             guard let url, let parsed = URL(string: url) else { return }
-            UIApplication.shared.open(parsed)
+            // Through the action platform (live: `UIApplication.shared.open`), so a
+            // test records the redirect instead of leaving the app.
+            ActionPlatform.current.open(parsed)
         }
     }
 
@@ -450,7 +452,10 @@ private struct DialogContainer<Content: View>: View {
             }
             .animation(keyboardScrollsContent ? nil : keyboard.animation, value: keyboardInset)
             .task {
-                try? await Task.sleep(nanoseconds: 350_000_000)
+                let delayNs = SurveyClock.backdropArmDelayNsForTesting ?? 350_000_000
+                if delayNs > 0 {
+                    try? await Task.sleep(nanoseconds: delayNs)
+                }
                 armed = true
             }
         }
@@ -967,7 +972,7 @@ private struct SurveyBody: View {
         lastAutoAdvanceKey = key
         autoAdvanceTask?.cancel()
         autoAdvanceTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 250_000_000)
+            try? await SurveyClock.sleep(nanoseconds: 250_000_000)
             if Task.isCancelled { return }
             guard vm.currentNode?.id == node.id else { return }
             SDKInstance.shared.surveyReporter.reportSurveyAnswered(stepId: node.id, answer: ans.toMap())
@@ -989,11 +994,11 @@ private struct SurveyBody: View {
             while remainingSecs > 0 {
                 if Task.isCancelled { return }
                 if !paused {
-                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    try? await SurveyClock.sleep(nanoseconds: 1_000_000_000)
                     if Task.isCancelled { return }
                     remainingSecs = max(0, remainingSecs - 1)
                 } else {
-                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    try? await SurveyClock.sleep(nanoseconds: 500_000_000)
                 }
             }
             if remainingSecs == 0 { onClose() }

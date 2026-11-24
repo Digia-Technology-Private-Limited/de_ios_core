@@ -442,32 +442,14 @@ struct NudgeDialogContainer: View {
                             height: safeHeight
                         )
                     )
-                    if closeButton.placement?.mode == .outside {
-                        ScrollView(.vertical, showsIndicators: false) {
-                            panel
-                                // Centre like the inside-close branch; scroll only on overflow.
-                                // The outside × is an overlay anchored to the panel and reserves
-                                // no space — Android and Flutter centre the card in the window
-                                // and draw the × over it. Reserving its extent here pushed the
-                                // whole card off-centre by half the extent.
-                                .frame(maxWidth: .infinity, minHeight: height)
-                                // The ScrollView covers the scrim and swallows its taps, so the
-                                // area around the card carries the backdrop dismiss itself.
-                                .background(
-                                    Color.clear
-                                        .contentShape(Rectangle())
-                                        .onTapGesture { if surface.backdropDismissible { dismiss() } }
-                                )
-                        }
-                        // Fixes carousel swipes in this dialog: without this line the
-                        // vertical scroll view claims drags even when the card fits on
-                        // screen, so a carousel on the card never gets the swipe. Now it
-                        // only scrolls (and bounces) when the card is taller than the screen.
-                        .modifier(ScrollBouncesOnlyWhenOverflowing())
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    } else {
-                        panel.frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
+                    // No ScrollView, for either close placement: the canvas already
+                    // scales down to `safeHeight` (`CampaignCanvasView` fit), so the
+                    // panel never overflows and a ScrollView could never scroll. It also
+                    // hid the card's elements from the accessibility tree in the package
+                    // tests (no UIApplication), so CTAs could not be found by id there.
+                    // The outside × is an overlay anchored to the panel and reserves no
+                    // space; taps around the card fall through to the scrim.
+                    panel.frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     dialogPanel(
                         width: width * surface.widthFraction,
@@ -683,17 +665,5 @@ struct NudgeCloseButton: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel ?? "Close")
-    }
-}
-
-/// `scrollBounceBehavior(.basedOnSize)` where available (iOS 16.4+); a no-op below,
-/// where the SDK does not initialize anyway.
-private struct ScrollBouncesOnlyWhenOverflowing: ViewModifier {
-    func body(content: Content) -> some View {
-        if #available(iOS 16.4, *) {
-            content.scrollBounceBehavior(.basedOnSize)
-        } else {
-            content
-        }
     }
 }

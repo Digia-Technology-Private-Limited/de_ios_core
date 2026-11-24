@@ -7,6 +7,9 @@ func shouldDismissBottomSheet(dragDistance: CGFloat, sheetHeight: CGFloat) -> Bo
 }
 
 struct DigiaBottomSheetConfig {
+    /// Test-only: skip the close spring animation and fire `onDismiss`
+    /// immediately so tests don't wait on SwiftUI's animation clock.
+    @MainActor static var disableAnimationForTesting = false
     var cornerRadius: CGFloat = 18
     var background: Color = .white
     var scrimColor: Color = Color.black.opacity(0.4)
@@ -46,7 +49,11 @@ struct DigiaBottomSheet<Content: View>: View {
     @State private var dragOffset: CGFloat = 0
 
     private let animationResponse: TimeInterval = 0.35
-    private var animation: Animation { .spring(response: animationResponse, dampingFraction: 0.85) }
+    private var animation: Animation? {
+        DigiaBottomSheetConfig.disableAnimationForTesting
+            ? nil
+            : .spring(response: animationResponse, dampingFraction: 0.85)
+    }
 
     var body: some View {
         GeometryReader { geo in
@@ -293,6 +300,12 @@ struct DigiaBottomSheet<Content: View>: View {
     }
 
     func close() {
+        if DigiaBottomSheetConfig.disableAnimationForTesting {
+            shown = false
+            dragOffset = 0
+            onDismiss()
+            return
+        }
         // The completion-closure overload of `withAnimation` needs iOS 17; below that,
         // fire `onDismiss()` after the spring's response time instead.
         if #available(iOS 17, *) {

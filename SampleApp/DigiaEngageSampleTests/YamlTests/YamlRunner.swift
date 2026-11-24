@@ -44,7 +44,12 @@ private func runSteps(
     handlers: [String: YamlHandler]
 ) async {
     let world = YamlWorld(yamlDir: yamlDir)
+    let stem = test.path.split(separator: "/").last.map(String.init) ?? test.path
+    world.testStem = stem.hasSuffix(".yaml") ? String(stem.dropLast(5)) : stem
     defer { world.tearDown() }
+    // `TEST_RUNNER_YAML_KEEP_GOING=1`: a failed step is recorded and the file
+    // goes on, to see every failure of a file in one local run.
+    let keepGoing = ProcessInfo.processInfo.environment["YAML_KEEP_GOING"] == "1"
     for (index, step) in test.steps.enumerated() {
         world.step = step
         do {
@@ -63,6 +68,7 @@ private func runSteps(
             Issue.record(Comment(rawValue: describeYamlFailure(
                 test.path, test.name, error,
                 step: step, index: index + 1, total: test.steps.count)))
+            if keepGoing { continue }
             return
         }
     }

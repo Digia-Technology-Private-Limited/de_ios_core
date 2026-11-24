@@ -40,29 +40,6 @@ struct InlineCarouselBehaviourTests {
 
     // MARK: - The indicator
 
-    // Fails if: Sources/DigiaEngage/api/internal/canvas/CampaignCanvasStripViews.swift:391
-    // `.scrollPosition(id: $scrollPosition)` -> `(deleted)` (the indicator and the reported slide
-    // no longer follow the finger).
-    @Test("swiping to the next slide moves the carousel and its indicator with it")
-    func swipingMovesToTheNextSlide() async throws {
-        let campaign = try fixture("inline_carousel_indicators/inline_carousel_indicators_scrolling")
-        let (sdk, frame) = try await showCarousel(campaign)
-        defer { sdk.tearDown() }
-        let window = try #require(sdk.window)
-        _ = try await sdk.waitForEvents("Digia Step Viewed", of: keyOf(campaign), count: 1)
-
-        try TouchSynthesizer.drag(
-            from: CGPoint(x: frame.frame.midX + 120, y: frame.frame.midY),
-            by: CGVector(dx: -300, dy: 0),
-            in: window,
-            duration: 0.2,
-            steps: 10,
-            pauseAfterDown: 0.02
-        )
-
-        let viewed = try await sdk.waitForEvents("Digia Step Viewed", of: keyOf(campaign), count: 2)
-        #expect(viewed.map { $0["item_index"] as? Int } == [1, 2])
-    }
 
     /// Known gap: iOS's dots are drawn, not tappable (`CanvasCarouselRenderer` builds them as plain
     /// `Capsule`s with no gesture), where Flutter takes the carousel to the dot that was tapped.

@@ -64,6 +64,11 @@ final class FloaterStoryOrchestrator: ObservableObject {
 
     private var autoDismissTask: Task<Void, Never>?
     private var exitTask: Task<Void, Never>?
+    /// Test seam: how the auto-dismiss waits out its delay, in nanoseconds.
+    /// `nil` (always, in a shipped app) sleeps on the real clock. Tests set a
+    /// fake clock so they can move time and fire the timer instantly, like
+    /// `DigiaOverlayController.autoDismissSleepForTesting`.
+    static var autoDismissSleepForTesting: ((UInt64) async throws -> Void)?
     private(set) var lastStartFailureReason: String?
     /// `true` when the last start failed only because a floater already shows.
     private(set) var lastStartFailedBusy = false
@@ -271,7 +276,7 @@ final class FloaterStoryOrchestrator: ObservableObject {
         onDismissed(active, reason, metricsSnapshot(), visible)
 
         let exit = active.config.window.exitAnimation
-        guard exit.type != .none, !obscured else {
+        guard exit.type != .none, !obscured, !Self.disableExitAnimationForTesting else {
             finishDismiss()
             return
         }
@@ -282,6 +287,9 @@ final class FloaterStoryOrchestrator: ObservableObject {
             self?.finishDismiss()
         }
     }
+
+    /// Test-only: skip exit/expand/collapse animation sleeps so tests don't wait on wall-clock transitions.
+    static var disableExitAnimationForTesting = false
 
     /// Marks the showing as having achieved its goal. At most once per showing.
     func complete() {
@@ -339,7 +347,13 @@ final class FloaterStoryOrchestrator: ObservableObject {
               let afterMs = state?.config.behavior.autoDismissAfterMs
         else { return }
         autoDismissTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(afterMs) * 1_000_000)
+            do {
+                if let sleep = Self.autoDismissSleepForTesting {
+                    try await sleep(UInt64(afterMs) * 1_000_000)
+                } else {
+                    try await Task.sleep(nanoseconds: UInt64(afterMs) * 1_000_000)
+                }
+            } catch { return }
             guard !Task.isCancelled else { return }
             self?.dismiss(.autoTimeout)
         }
