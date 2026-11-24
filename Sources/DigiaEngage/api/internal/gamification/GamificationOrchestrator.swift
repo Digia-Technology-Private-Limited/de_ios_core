@@ -40,15 +40,24 @@ final class GamificationOrchestrator: ObservableObject {
     /// Nil until the first fetch; a failed fetch keeps the previous one.
     @Published private(set) var rewardsResponse: GameRewardsResponse?
     /// Campaigns from the latest `getRewards` that are paused or ended — and
-    /// so not in the bundle. Keyed by campaign key.
-    private var rewardsCampaigns: [String: CampaignModel] = [:]
+    /// so not in the bundle. Indexed by backend id, for the O(1) rewards-chance
+    /// lookup (`chance.campaignId` is the id, not the key). Matches Android's
+    /// id-keyed map.
+    private var rewardsCampaignsById: [String: CampaignModel] = [:]
     private var rewardsRefreshTask: Task<Void, Never>?
 
     /// In-flight skin prefetches. Stored so they die with the SDK instead of
     /// leaking on a never-cancelled scope: cancelled on user change and test
     /// reset, like Android's SDK-scoped prefetcher. Entries reap themselves
     /// when their prefetch lands, so the map never grows.
-    private var prefetchTasks: [UUID: Task<Void, Never>] = [:]
+    /// `nonisolated(unsafe)` so `deinit` can cancel them: every mutation
+    /// otherwise runs on the main actor, and `deinit` only runs with no
+    /// other reference alive.
+    nonisolated(unsafe) private var prefetchTasks: [UUID: Task<Void, Never>] = [:]
+
+    deinit {
+        for task in prefetchTasks.values { task.cancel() }
+    }
 
     init(sdk: SDKInstance) {
         self.sdk = sdk
@@ -124,15 +133,15 @@ final class GamificationOrchestrator: ObservableObject {
     }
 
     private func storeRewards(_ response: GameRewardsResponse) {
-        var campaigns: [String: CampaignModel] = [:]
+        var byId: [String: CampaignModel] = [:]
         for raw in response.campaigns {
             guard let campaign = try? CampaignModel.fromJson(
                 raw, designTokens: sdk.currentDesignTokens,
                 devicePlatform: "ios", timeAnchor: sdk.currentTimeAnchor)
             else { continue }
-            campaigns[campaign.campaignKey] = campaign
+            byId[campaign.id] = campaign
         }
-        rewardsCampaigns = campaigns
+        rewardsCampaignsById = byId
         rewardsResponse = response
     }
 
@@ -144,7 +153,7 @@ final class GamificationOrchestrator: ObservableObject {
         rewardsRefreshTask?.cancel()
         rewardsRefreshTask = nil
         rewardsResponse = nil
-        rewardsCampaigns.removeAll()
+        rewardsCampaignsById.removeAll()
     }
 
     /// Resets the rewards state for a test teardown.
@@ -154,7 +163,7 @@ final class GamificationOrchestrator: ObservableObject {
         rewardsRefreshTask?.cancel()
         rewardsRefreshTask = nil
         rewardsResponse = nil
-        rewardsCampaigns.removeAll()
+        rewardsCampaignsById.removeAll()
     }
 
     /// Opens the hosted rewards page full screen. The app calls this from its
@@ -217,14 +226,13 @@ final class GamificationOrchestrator: ObservableObject {
     /// the reason-coded `game_open_failed` event — never a toast.
     ///
     /// `chance.campaignId` is the backend campaign id, not the key, so the
-    /// lookup matches on `CampaignModel.id` first (the store and the rewards
-    /// map are both keyed by campaign key). Android keys its rewards map by
-    /// id and falls back to `findById`; this is the same lookup.
+    /// lookup hits the id-keyed index first, then the campaign store (the
+    /// rewards map holds only paused/ended campaigns missing from the bundle).
+    /// Android keys its rewards map by id and falls back to `findById`; this
+    /// is the same lookup.
     func openGameForRewardsChance(_ chance: GameRewardChance) {
-        guard let campaign = rewardsCampaigns.values.first(where: { $0.id == chance.campaignId })
-            ?? sdk.campaignStore.all.first(where: { $0.id == chance.campaignId })
-            ?? sdk.campaignStore.find(chance.campaignId)
-            ?? rewardsCampaigns[chance.campaignId],
+        guard let campaign = rewardsCampaignsById[chance.campaignId]
+            ?? sdk.campaignStore.all.first(where: { $0.id == chance.campaignId }),
             let config = campaign.gamificationConfig
         else {
             log.w("Game skipped — unknown rewards campaign (campaignId=\(chance.campaignId))")
@@ -267,12 +275,13 @@ final class GamificationOrchestrator: ObservableObject {
         config: GamificationConfig,
         payload: CEPTriggerPayload,
         direct: Bool,
-        driver: CampaignDriver?
+        driver: CampaignDriver?,
+        presentationId: String? = nil
     ) {
         let key = campaign.campaignKey
         // The analytics timings (`ms_elapsed`, `ms_to_ready`) run from here.
         let intentAt = MonotonicClock.nowSeconds()
-        let triggerId = PlaySession.triggerId(of: payload)
+        let triggerId = PlaySession.triggerId(of: payload, presentationId: presentationId)
         let testInvocationId = testInvocationIdOf(payload.cepCampaignId)
         // Direct parallel load: the skin loads hidden while the grant is
         // asked; the grant's open adopts it, any other answer discards it.

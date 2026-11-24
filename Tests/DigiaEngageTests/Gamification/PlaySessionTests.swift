@@ -229,6 +229,25 @@ struct PlaySessionTests {
         #expect(entryDecision == .showEntry(granted(show: false)))
     }
 
+    // Fails if a tap stops opening the stored chance, or stops refusing a tap
+    // while a game is showing (`busy`) or with no chance stored
+    // (`missing_config`): the `decideTap` branches. A tap never asks for a
+    // chance — `decideTap` is pure and the entry open path replays the stored
+    // one. Mirrors Android's `a tap opens the stored chance and refuses a
+    // shown game or no chance`; the live-test exemption stays in
+    // `liveTestTapReplacesVisibleGame`.
+    @Test("a tap opens the stored chance and refuses a shown game or no chance")
+    func tapOpensStoredChance() {
+        let chance = granted(show: true)
+        #expect(PlaySession.decideTap(gameVisible: false, chance: chance) == .open(chance))
+        #expect(
+            PlaySession.decideTap(gameVisible: true, chance: chance)
+                == .fail(reason: PlayDropReason.busy))
+        #expect(
+            PlaySession.decideTap(gameVisible: false, chance: nil)
+                == .fail(reason: PlayDropReason.missingConfig))
+    }
+
     // Fails if a played chance keeps the floater (the `.played` case in
     // `decideAfterClose`), or a failed call dismisses it (the `.failed` arm).
     @Test("a played chance hides the entry after close; a failed call keeps it")
@@ -267,5 +286,61 @@ struct PlaySessionTests {
             #expect(PlaySession.dropReason(forDenyReason: denyReason) == reason)
         }
         #expect(PlaySession.dropReason(forDenyReason: nil) == .notEligible)
+    }
+
+    private func triggerPayload(
+        cepCampaignId: String = "cep-1", stamped presentationId: String? = nil
+    ) -> CEPTriggerPayload {
+        let payload = CEPTriggerPayload(
+            cepCampaignId: cepCampaignId, campaignKey: "bill_pay_spin", cepMetadata: [:])
+        guard let presentationId else { return payload }
+        return payload.stamped(presentationId: presentationId)
+    }
+
+    // Guards the explicit-first ordering in `triggerId(of:presentationId:)`:
+    // the routing-passed presentation id wins over the stamped payload id,
+    // which wins over `cepCampaignId`. Mirrors Android's
+    // `PlaySession.triggerIdOrNull` and Flutter's `triggerIdOrNull` group.
+    @Test("an explicit presentation id wins over the stamped payload id")
+    func explicitPresentationIdWins() {
+        let payload = triggerPayload(stamped: "p-stamped")
+
+        #expect(PlaySession.triggerId(of: payload, presentationId: "p-explicit") == "p-explicit")
+        #expect(PlaySession.triggerId(of: payload, presentationId: "  p-explicit  ") == "p-explicit")
+    }
+
+    // Guards the fallthrough: a blank explicit id reads the stamped payload
+    // id, and an unstamped payload reads `cepCampaignId`.
+    @Test("a blank explicit id falls through to the stamped id, then the cep id")
+    func blankExplicitFallsThrough() {
+        let stamped = triggerPayload(stamped: "p-stamped")
+        #expect(PlaySession.triggerId(of: stamped, presentationId: nil) == "p-stamped")
+        #expect(PlaySession.triggerId(of: stamped, presentationId: "") == "p-stamped")
+        #expect(PlaySession.triggerId(of: stamped, presentationId: "   ") == "p-stamped")
+        #expect(PlaySession.triggerId(of: stamped) == "p-stamped")
+
+        let unstamped = triggerPayload(cepCampaignId: "cep-1")
+        #expect(PlaySession.triggerId(of: unstamped) == "cep-1")
+        #expect(PlaySession.triggerId(of: unstamped, presentationId: "  ") == "cep-1")
+    }
+
+    // Guards the no-id floor: a payload with no ids at all reads empty, so
+    // the surface drops instead of inventing a trigger id.
+    @Test("no id anywhere reads empty")
+    func noIdReadsEmpty() {
+        let payload = triggerPayload(cepCampaignId: "   ")
+        #expect(PlaySession.triggerId(of: payload).isEmpty)
+    }
+
+    // Guards that a live test still falls back to its cep id — the
+    // synthesised live-test payload is never stamped, so the trigger and the
+    // entry key both read the invocation-carrying cep id.
+    @Test("a live-test trigger falls back to its cep id and keys its entry by it")
+    func liveTestKeysByCepId() {
+        let cepId = liveTestCepId("inv-7")
+        let payload = triggerPayload(cepCampaignId: cepId)
+
+        #expect(PlaySession.triggerId(of: payload) == cepId)
+        #expect(GamificationSurface.entryKey(payload) == cepId)
     }
 }
