@@ -96,6 +96,45 @@ struct SdkConfigAppEventsTests {
     }
 }
 
+@Suite("SdkConfig game prewarm")
+struct SdkConfigGamePrewarmTests {
+    @Test("game prewarm is opt-in: on only for explicit true, eligible only for a listed tier")
+    func gamePrewarmOptIn() {
+        #expect(SdkConfig.resolve().gamePrewarm == .off)
+        #expect(SdkConfig.defaults.gamePrewarm == .off)
+        let mistyped = SdkConfig.resolve(fetched: object(
+            #"{"gamification":{"prewarm":{"engine":1,"game":true}}}"#)).gamePrewarm
+        #expect(mistyped.engine == false)
+        #expect(mistyped.game == true)
+        #expect(mistyped.tiers == ["high"], "tiers default to high")
+
+        let on = SdkConfig.resolve(fetched: object(
+            #"{"gamification":{"prewarm":{"engine":true}}}"#)).gamePrewarm
+        #expect(on.allowsEngine(tier: "high"))
+        #expect(on.allowsEngine(tier: "mid") == false)
+        #expect(on.allowsGame(tier: "high") == false, "game defaults off")
+
+        let all = SdkConfig.resolve(fetched: object(
+            #"{"gamification":{"prewarm":{"engine":true,"tiers":["high","mid","low"]}}}"#)).gamePrewarm
+        #expect(all.allowsEngine(tier: "low"))
+        let unknown = SdkConfig.resolve(fetched: object(
+            #"{"gamification":{"prewarm":{"engine":true,"tiers":["high","full"]}}}"#)).gamePrewarm
+        #expect(unknown.tiers == ["high"], "one unknown tier falls back whole")
+    }
+
+    @Test("deviceTier parses a valid config and falls back to the default on a bad one")
+    func deviceTierParse() {
+        #expect(SdkConfig.resolve().deviceTier == .default)
+        let valid = SdkConfig.resolve(fetched: object(
+            #"{"gamification":{"deviceTier":{"weights":{"cpuLevel":1},"rules":[{"tier":"mid","all":[{"fact":"a","eq":1}]}],"fallback":"low"}}}"#)).deviceTier
+        #expect(valid.rules.count == 1)
+        #expect(valid.rules.first?.tier == "mid")
+        let bad = SdkConfig.resolve(fetched: object(
+            #"{"gamification":{"deviceTier":{"weights":{"cpuLevel":1},"rules":[],"fallback":"full"}}}"#)).deviceTier
+        #expect(bad == .default)
+    }
+}
+
 @MainActor
 @Suite("SdkConfigStore")
 struct SdkConfigStoreTests {
@@ -240,6 +279,16 @@ private final class SilentNetworkClient: NetworkClient, @unchecked Sendable {
     func execute(request: NetworkRequest) async throws -> NetworkResponse {
         try await Task.sleep(nanoseconds: 60 * 1_000_000_000)
         throw URLError(.timedOut)
+    }
+
+    func executeCapped(request: NetworkRequest, maxBytes: Int) async throws -> NetworkResponse {
+        let response = try await execute(request: request)
+        guard let body = response.body, body.count > maxBytes else { return response }
+        return NetworkResponse(
+            statusCode: response.statusCode,
+            headers: response.headers,
+            body: Data(body.prefix(maxBytes + 1)),
+            isSuccessful: response.isSuccessful)
     }
 
     func executeMultipart(request: MultipartUploadRequest) async throws -> NetworkResponse {

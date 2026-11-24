@@ -3,17 +3,27 @@ import Foundation
 private let log = DigiaLogger()
 
 /// The flags and limits the backend can change without an SDK release.
-/// `sdkHealth` and `appEvents` are read here; the saved response is kept whole.
+/// `sdkHealth`, `appEvents`, `gamification.prewarm` and `gamification.deviceTier` are read here;
+/// the saved response is kept whole.
 struct SdkConfig: Equatable, Sendable {
     let healthEnabled: Bool
     let healthSessionCap: Int
     /// The app-event upload switch, rate, burst, blocklist and limits.
     let appEvents: AppEventUploadPolicy
+    /// The game prewarm switches. Off unless the response turns them on.
+    let gamePrewarm: GamePrewarmConfig
+    /// How a device is placed in a game tier; the built-in default unless the backend sends one.
+    let deviceTier: DeviceTierConfig
 
-    init(healthEnabled: Bool, healthSessionCap: Int, appEvents: AppEventUploadPolicy = .unlimited) {
+    init(
+        healthEnabled: Bool, healthSessionCap: Int, appEvents: AppEventUploadPolicy = .unlimited,
+        gamePrewarm: GamePrewarmConfig = .off, deviceTier: DeviceTierConfig = .default
+    ) {
         self.healthEnabled = healthEnabled
         self.healthSessionCap = healthSessionCap
         self.appEvents = appEvents
+        self.gamePrewarm = gamePrewarm
+        self.deviceTier = deviceTier
     }
 
     /// What the SDK runs on with no cache and no answer. A test pins it to the shared fixture.
@@ -40,10 +50,15 @@ struct SdkConfig: Equatable, Sendable {
         func flag(_ path: [String]) -> Bool {
             (section(primary, path) as? NSNumber).flatMap(boolean) ?? true
         }
+        /// An opt-in switch: on only for an explicit `true`.
+        func optIn(_ path: [String]) -> Bool {
+            (section(primary, path) as? NSNumber).flatMap(boolean) ?? false
+        }
 
         let limits = ["appEvents", "limits"]
         let defaults = AppEventLimits.defaults
         let blocked = section(primary, ["appEvents", "blockedNames"]) as? [Any]
+        let prewarm = ["gamification", "prewarm"]
         return SdkConfig(
             healthEnabled: flag(["sdkHealth", "enabled"]),
             healthSessionCap: number(["sdkHealth", "sessionCap"], min: 0, fallback: HealthSink.defaultSessionCap),
@@ -61,8 +76,24 @@ struct SdkConfig: Equatable, Sendable {
                         limits + ["stringMaxLength"], min: 1, fallback: defaults.stringMaxLength),
                     listMaxItems: number(limits + ["listMaxItems"], min: 1, fallback: defaults.listMaxItems)
                 )
-            )
+            ),
+            gamePrewarm: GamePrewarmConfig(
+                engine: optIn(prewarm + ["engine"]),
+                game: optIn(prewarm + ["game"]),
+                tiers: tiers(section(primary, prewarm + ["tiers"]))
+            ),
+            deviceTier: DeviceTierConfig.parse(section(primary, ["gamification", "deviceTier"]) as? [String: Any])
         )
+    }
+
+    /// A non-empty list of known tiers, else the default; one unknown tier falls back whole.
+    private static func tiers(_ raw: Any?) -> Set<String> {
+        guard let array = raw as? [Any], !array.isEmpty else { return GamePrewarmConfig.defaultTiers }
+        let tiers = array.compactMap { $0 as? String }
+        guard tiers.count == array.count, tiers.allSatisfy(DeviceTierConfig.tiers.contains) else {
+            return GamePrewarmConfig.defaultTiers
+        }
+        return Set(tiers)
     }
 
     private static func boolean(_ number: NSNumber) -> Bool? {
@@ -76,6 +107,29 @@ struct SdkConfig: Equatable, Sendable {
               (Double(min)...Double(Int32.max)).contains(value)
         else { return nil }
         return number.intValue
+    }
+}
+
+/// `gamification.prewarm`: `engine` keeps one blank game web view warm, `game` loads a
+/// whole game ahead of the tap (and the Direct load alongside the grant). Every switch is
+/// off unless the response says `true`, so a missing block leaves today's behaviour. Only a
+/// device whose game tier is in `tiers` is eligible.
+struct GamePrewarmConfig: Equatable, Sendable {
+    var engine = false
+    var game = false
+    var tiers: Set<String> = GamePrewarmConfig.defaultTiers
+
+    static let defaultTiers: Set<String> = ["high"]
+    static let off = GamePrewarmConfig()
+
+    /// Eligible for the engine prewarm: `engine` on and the tier allowed.
+    func allowsEngine(tier: String) -> Bool {
+        engine && tiers.contains(tier)
+    }
+
+    /// Eligible for the game prewarm and the Direct parallel load.
+    func allowsGame(tier: String) -> Bool {
+        game && tiers.contains(tier)
     }
 }
 

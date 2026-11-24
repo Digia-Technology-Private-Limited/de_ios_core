@@ -38,6 +38,13 @@ final class InlineReporter {
                 slotKey: cfg.slotKey,
                 screenName: ctx.currentScreen
             )
+        // A gamification inline teaser is Viewed when it renders, as on Android;
+        // the game it opens reports no second Viewed.
+        case .gamification(let cfg):
+            guard case .inline(let entry)? = cfg.entryCanvas,
+                  controller.getCampaign(entry.slotKey) == payload else { return }
+            viewed = InlineCanvasEvent.Viewed(slotKey: entry.slotKey, screenName: ctx.currentScreen)
+            ctx.sdk.gamificationSurface.prewarmEntry(payload)
         default:
             return
         }
