@@ -8,10 +8,6 @@ enum MonotonicClock {
     static func nowMs() -> Int {
         Int(clock_gettime_nsec_np(CLOCK_MONOTONIC) / 1_000_000)
     }
-
-    static func nowSeconds() -> TimeInterval {
-        TimeInterval(clock_gettime_nsec_np(CLOCK_MONOTONIC)) / 1_000_000_000
-    }
 }
 
 /// Why a pending wait ended without its campaign being shown.

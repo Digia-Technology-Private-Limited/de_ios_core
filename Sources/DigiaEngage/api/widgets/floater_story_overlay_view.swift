@@ -337,11 +337,9 @@ private struct FloaterStorySessionView: View {
             isDark: isDark,
             showBackground: true,
             onAction: runCanvasAction,
-            // Only elements act: an empty canvas falls through to the shield
-            // below, which opens the story when this window has one and does
-            // nothing when it is a gamification entry; a button or tap region
-            // on the same canvas still takes its own touch, because children
-            // opt into hit testing individually.
+            // Empty canvas falls through to the shield below, which opens the story;
+            // a button or tap region on the same canvas still takes its own touch,
+            // because children opt into hit testing individually.
             backgroundTakesTouches: false
         )
         .frame(width: config.canvas.width, height: config.canvas.height, alignment: .topLeading)
@@ -447,10 +445,6 @@ private struct FloaterStorySessionView: View {
 
     private func openStory() {
         guard !orchestrator.storyOpen, !orchestrator.closing else { return }
-        // No whole-card tap: only an authored `Action.showStory` on an element
-        // opens the story. A window with no story (a gamification entry) does
-        // nothing here — its elements open the game through `Action.openGame`.
-        guard config.story != nil else { return }
         SDKInstance.shared.floaterStoryReporter.reportFloaterStoryClicked(
             elementId: "floater_window", actionType: "show_story", ctaRole: "primary"
         )
@@ -459,10 +453,8 @@ private struct FloaterStorySessionView: View {
 
     /// Runs an authored action from the window's canvas or from inside a story.
     ///
-    /// `Action.showStory` opens this floater's story at an authored page, and
-    /// `Action.openGame` opens the game of the gamification campaign this
-    /// window is the entry of. A tap on the window itself does nothing — there
-    /// is no whole-card tap, only element actions.
+    /// `Action.showStory` can open this floater's story at an authored page; window taps
+    /// without an authored action still open the story through `openStory()` above.
     private func runCanvasAction(_ request: CampaignCanvasActionRequest) {
         let action = request.actions.first?.resolved(with: state.variableContext)
         // Which level of the funnel this tap belongs to, decided by where it came from.
@@ -569,7 +561,6 @@ private struct FloaterStorySessionView: View {
         let entry = config.window.entryAnimation
         guard entry.type != .appear else {
             alpha = 1
-            flyOffsetFraction = .zero
             return
         }
         alpha = 0

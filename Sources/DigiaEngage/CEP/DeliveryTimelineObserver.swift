@@ -118,8 +118,7 @@ func stageOf(_ reason: DropReason) -> TimelineStage {
         .digiaManaged:
         return .trigger
     case .frequencyCapped, .screenNotTargeted, .surfaceBusy, .superseded,
-        .hostSuppressed, .hostModalOpen, .userNotVerified, .campaignNotLive, .notInAudience,
-        .budgetExhausted, .chanceExpired, .notEligible:
+        .hostSuppressed, .hostModalOpen:
         return .gating
     case .invalidConfig, .anchorNotRegistered, .hostNotMounted, .timeout,
         .cancelled, .pluginDetached, .error:

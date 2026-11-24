@@ -19,7 +19,6 @@ enum CampaignConfigModel: Equatable {
     case story(InlineStoryConfig)
     case survey(SurveyConfigModel)
     case floater(FloaterConfig)
-    case gamification(GamificationConfig)
     /// The floater family's second member: a small floating **canvas** window that opens
     /// a full-screen story on tap. Shares the PiP's window vocabulary and none of its media.
     case floaterStory(FloaterStoryConfig)
@@ -105,29 +104,6 @@ struct CampaignModel: Equatable {
         return nil
     }
 
-    var gamificationConfig: GamificationConfig? {
-        if case let .gamification(value) = config { return value }
-        return nil
-    }
-
-    /// A gamification campaign's floating entry, shaped as the story floater it
-    /// reuses (same key, so payloads, caps and analytics stay the campaign's own).
-    /// Nil unless this campaign carries a floating entry canvas.
-    var floatingEntryCampaign: CampaignModel? {
-        guard case .floating(let floater)? = gamificationConfig?.entryCanvas else { return nil }
-        return CampaignModel(
-            id: id,
-            campaignKey: campaignKey,
-            campaignType: "floater",
-            config: .floaterStory(floater),
-            targetScreenNames: targetScreenNames,
-            variableSchemas: variableSchemas,
-            frequency: frequency,
-            audienceGated: audienceGated,
-            rule: rule
-        )
-    }
-
     /// The inline slot this campaign fills; nil for any other campaign.
     var inlineSlotKey: String? {
         switch config {
@@ -135,9 +111,6 @@ struct CampaignModel: Equatable {
         case .story(let value): return value.slotKey
         case .banner(let value): return value.slotKey
         case .inlineCanvas(let value): return value.slotKey
-        case .gamification(let value):
-            if case .inline(let entry)? = value.entryCanvas { return entry.slotKey }
-            return nil
         default: return nil
         }
     }
@@ -273,12 +246,6 @@ struct CampaignModel: Equatable {
                 ) else { return nil }
                 config = .floater(floaterConfig)
             }
-        case "gamification":
-            guard let templateConfig = selectedJson.object("templateConfig"),
-                  let gamificationConfig = GamificationConfig.fromJson(
-                      templateConfig, campaignLevel: selectedJson, designTokens: designTokens)
-            else { return nil }
-            config = .gamification(gamificationConfig)
         default:
             config = .unsupported(
                 UnsupportedCampaignConfig(

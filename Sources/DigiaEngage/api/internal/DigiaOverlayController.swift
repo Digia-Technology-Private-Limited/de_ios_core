@@ -21,9 +21,6 @@ final class DigiaOverlayController: ObservableObject {
     /// `onAppear` more than once for one presentation; Viewed is sent once.
     var nudgeImpressed = false
     @Published private(set) var activeStoryOverlay: InlineStoryOverlayState?
-    /// The open gamification game, if any. Separate from `activeNudge`: a game
-    /// owns the surface through `GamePresenter`, not the nudge presentation.
-    @Published private(set) var activeGame: GamePresentation?
 
     var onAction: ((_ actionType: String, _ url: String, _ payload: CEPTriggerPayload) -> Bool)?
 
@@ -46,21 +43,6 @@ final class DigiaOverlayController: ObservableObject {
     /// Used when the JS bundle reloads so a stale overlay doesn't persist.
     func forceNudgeDismiss() {
         activeNudge = nil
-    }
-
-    /// Sets the game state. Impression/dismissal analytics are emitted by
-    /// ``SDKInstance``, not here — same split as `showNudge`.
-    func showGame(_ presentation: GamePresentation) {
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) {
-            activeGame = presentation
-        }
-    }
-
-    func dismissGame() {
-        guard activeGame != nil else { return }
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) {
-            activeGame = nil
-        }
     }
 
     /// Starts on appearance and stays owned by this nudge when child views appear.

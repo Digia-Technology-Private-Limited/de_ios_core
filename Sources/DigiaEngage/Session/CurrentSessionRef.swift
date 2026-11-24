@@ -7,10 +7,8 @@ import Foundation
 /// through this per request instead (D8): after a rotation, the very next
 /// request carries the new ID. The request headers (Project-Id, Device-Id,
 /// environment, SDK version) are read the same way, so call sites pass only
-/// their protocol headers. `X-Digia-User-Id` and `X-Digia-User-Hash` are added
-/// from the live `IdentityManager` while a user is set, as Android and
-/// Flutter do. Neither ever reaches a skin: the bridge sends only headers,
-/// never body fields the skin could read.
+/// their protocol headers. `X-Digia-User-Id` is added from the live
+/// `IdentityManager` while a user is set, as Android and Flutter do.
 final class CurrentSessionRef: @unchecked Sendable {
     private let lock = NSLock()
     private weak var manager: SessionManager?
@@ -32,10 +30,6 @@ final class CurrentSessionRef: @unchecked Sendable {
     var requestHeaders: [String: String] {
         let (headers, identity) = lock.withLock { (self.headers, self.identity) }
         guard let userId = identity?.userId, !userId.isEmpty else { return headers }
-        var out = headers.merging(["X-Digia-User-Id": userId]) { _, new in new }
-        if let userHash = identity?.userHash, !userHash.isEmpty {
-            out["X-Digia-User-Hash"] = userHash
-        }
-        return out
+        return headers.merging(["X-Digia-User-Id": userId]) { _, new in new }
     }
 }

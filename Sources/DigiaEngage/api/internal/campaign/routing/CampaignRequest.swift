@@ -14,24 +14,6 @@ struct CampaignRequest {
     let campaign: CampaignModel
     let payload: CEPTriggerPayload
 
-    /// The delivering presentation's id, so every presentation asks for
-    /// its own gamification chance; nil when absent. Routing passes the
-    /// controller's id because the payload stamp lands after routing on
-    /// Android. Mirrors Android's `CampaignRequest.presentationId`.
-    let presentationId: String?
-
-    init(
-        driver: CampaignDriver,
-        campaign: CampaignModel,
-        payload: CEPTriggerPayload,
-        presentationId: String? = nil
-    ) {
-        self.driver = driver
-        self.campaign = campaign
-        self.payload = payload
-        self.presentationId = presentationId
-    }
-
     /// The drop for a campaign whose own config cannot be rendered, with `cause`
     /// carrying the symbolic reason. Logs it and reports it to the driver first.
     @MainActor
@@ -63,15 +45,6 @@ extension CampaignModel {
         case .survey: return .survey
         case .guide: return .guide
         case .floater, .floaterStory: return .floaterCollapsed
-        case .gamification(let cfg):
-            switch cfg.entryKind {
-            case .direct: return .gamification
-            case .inlineTeaser:
-                if case .inline(let entry)? = cfg.entryCanvas { return .inline(slot: entry.slotKey) }
-                return nil
-            case .floating: return .floaterCollapsed
-            case .unknown: return nil
-            }
         case .unsupported: return nil
         }
     }

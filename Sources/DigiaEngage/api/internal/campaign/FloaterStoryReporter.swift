@@ -23,7 +23,6 @@ final class FloaterStoryReporter {
             state.payload,
             campaignKey: state.payload.campaignKey,
             viewed: FloaterEvent.Viewed(screenName: ctx.currentScreen))
-        ctx.sdk.gamificationSurface.prewarmEntry(state.payload)
     }
 
     /// Deliberately silent.
@@ -43,10 +42,6 @@ final class FloaterStoryReporter {
         _ state: ActiveFloaterStoryState, _ reason: FloaterDismissReason,
         _ metrics: FloaterMetrics, _ wasVisible: Bool
     ) {
-        GamePrewarmer.discard(reason: "entry_closed", campaignKey: state.payload.campaignKey)
-        // A floating game entry that ends because its game was spent (`.completed`, sent
-        // only by `GameSurface.hideFloatingEntry`) reports its own Digia Dismissed like
-        // every other end of a visible window; the game's Dismissed is the game's.
         if !wasVisible {
             ctx.events.toCep(.dismissed(reason: reason.presentationReason), payload: state.payload)
             return

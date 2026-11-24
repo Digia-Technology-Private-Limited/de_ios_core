@@ -40,14 +40,8 @@ struct CEPInterfaceEnumValuesTests {
         #expect(DropReason.pluginDetached.value == "plugin_detached")
         #expect(DropReason.pendingExpired.value == "pending_expired")
         #expect(DropReason.digiaManaged.value == "digia_managed")
-        #expect(DropReason.userNotVerified.value == "user_not_verified")
-        #expect(DropReason.campaignNotLive.value == "campaign_not_live")
-        #expect(DropReason.notInAudience.value == "not_in_audience")
-        #expect(DropReason.budgetExhausted.value == "budget_exhausted")
-        #expect(DropReason.chanceExpired.value == "chance_expired")
-        #expect(DropReason.notEligible.value == "user_held_out")
         #expect(DropReason.error.value == "error")
-        #expect(DropReason.allCases.count == 25)
+        #expect(DropReason.allCases.count == 19)
     }
 
     @Test("DismissReason values")

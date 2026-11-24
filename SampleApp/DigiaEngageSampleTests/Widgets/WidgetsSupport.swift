@@ -256,10 +256,6 @@ final class WidgetsLiveStreamNetwork: NetworkClient, @unchecked Sendable {
         try await base.execute(request: request)
     }
 
-    func executeCapped(request: NetworkRequest, maxBytes: Int) async throws -> NetworkResponse {
-        try await base.executeCapped(request: request, maxBytes: maxBytes)
-    }
-
     func executeMultipart(request: MultipartUploadRequest) async throws -> NetworkResponse {
         try await base.executeMultipart(request: request)
     }

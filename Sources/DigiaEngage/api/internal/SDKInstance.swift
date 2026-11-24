@@ -117,7 +117,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         coordinator.noHostAtTimeout = { [weak self] in self?.noHostOnScreen() ?? false }
         return coordinator
     }()
-    let hostActionExecutor = HostActionExecutor()
+    private let hostActionExecutor = HostActionExecutor()
     private lazy var actionExecutor = EngageActionExecutor(
         hostActionExecutor: hostActionExecutor
     )
@@ -141,8 +141,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     ///
     /// Held because live test parses a campaign that never came through the
     /// bundle, and it has to resolve the same tokens the bundle's campaigns do.
-    var currentDesignTokens = DesignTokenCatalog.empty
-    var currentTimeAnchor: TrustedTimeAnchor?
+    private var currentDesignTokens = DesignTokenCatalog.empty
+    private var currentTimeAnchor: TrustedTimeAnchor?
 
     /// Built once in `initialize(_:)`, after the storage migration ran (D1).
     /// Nil before that: anything needed earlier is owned directly below.
@@ -169,12 +169,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// The capture toggles `SDKInstance` itself persists.
     private let captureStorage: LocalStorage
     let networkClient: any NetworkClient
-    /// The one gamification owner: play decisions, game open, skin cache,
-    /// rewards fetch and state, and skin event reporting. `openRewards`,
-    /// `refreshRewards` and the rewards state delegate below for the public
-    /// API and the rewards views; the game surfaces reach in for the rest.
-    lazy var gamification = GamificationOrchestrator(sdk: self)
-
     /// Where `networkClient` reads `X-Digia-Session-Id` from, per request.
     private let currentSession = CurrentSessionRef()
     let campaignStore: CampaignStore
@@ -236,7 +230,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// occupants in, and which of two blockers in one column is reported.
     lazy var surfaces: [any CampaignSurface] = [
         nudgeSurface, surveySurface, guideSurface, pipSurface, floaterStorySurface, inlineSurface,
-        gamificationSurface,
     ]
     lazy var nudgeSurface = NudgeCampaignSurface(self)
     lazy var surveySurface = SurveySurface(self)
@@ -244,9 +237,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     lazy var pipSurface = PipSurface(self)
     lazy var floaterStorySurface = FloaterStorySurface(self)
     lazy var inlineSurface = InlineSurface(self)
-    lazy var gamificationSurface = GamificationSurface(self)
-    /// The one open path for every game: direct, entry and rewards.
-    lazy var gameSurface = GameSurface(self)
 
     /// What every surface's reporter reads from the SDK.
     ///
@@ -295,9 +285,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     // Campaign id/type are resolved from the store inside the Digia sink.
     let dwellTracker = DwellTracker()
     var events: EngageEventEmitter!
-    /// Forwards the gamification orchestrator's updates, so views observing
-    /// this instance refresh when the rewards state changes.
-    private var cancellables = Set<AnyCancellable>()
 
     /// `shared` is the only production instance. Tests build their own with
     /// isolated defaults, a fake network client and, to simulate time, a clock.
@@ -371,7 +358,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 presentation.noteDropDetail("cancel_cause", "slot_removed")
             }
             self?.events.inlineRemoved(payload, reason: reason)
-            GamePrewarmer.discard(reason: "entry_hidden", campaignKey: payload.campaignKey)
         }
         floaterOrchestrator = FloaterOrchestrator(
             onDismissed: { [weak self] state, reason, metrics, wasVisible in
@@ -403,10 +389,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
         floaterOrchestrator.isCoveredByBlockingCampaign = coveredByBlocking
         floaterStoryOrchestrator.isCoveredByBlockingCampaign = coveredByBlocking
-        // The rewards views observe this instance, so the orchestrator's
-        // updates are forwarded.
-        gamification.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }
-            .store(in: &cancellables)
 
         appBackgroundObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didEnterBackgroundNotification,
@@ -480,15 +462,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             appEventNetworkMonitor: makeNetworkMonitor()
         )
         self.services = services
-        // Skin storage and rewards are namespaced by user: a change must not
-        // leave the old user's values behind for the next one to inherit.
-        // Gamification entries are session state, not stored: hidden entries
-        // and trigger-stored chances are cleared too.
-        services.identityManager.addUserChangedListener { [defaults = self.defaults, weak self] in
-            GameBridgeStorage.clearAll(defaults: defaults)
-            self?.gamification.clearRewardsForUserChange()
-            self?.gamificationSurface.clearForUserChange()
-        }
         currentSession.set(services.sessionManager, identity: services.identityManager, requestHeaders: services.requestHeaders)
         // The startup session is reported before the buffered user change
         // below can rotate it.
@@ -596,8 +569,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     private(set) var sdkConfigFetchTask: Task<Void, Never>?
     /// What `trackEvent` validates against; the SDK config's, or the defaults.
     var appEventLimits = AppEventLimits.defaults
-    /// The SDK config's game prewarm switches; off until a config turns them on.
-    var gamePrewarm = GamePrewarmConfig.off
 
     /// Not awaited. A failed call changes nothing, except that a first install with no
     /// cached config runs on the defaults from here, which also sends the held health events.
@@ -617,9 +588,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         healthSink.applyConfig(enabled: config.healthEnabled, sessionCap: config.healthSessionCap)
         appEventLimits = config.appEvents.limits
         services?.appEventsService?.applyPolicy(config.appEvents)
-        GameDeviceTier.applyConfig(config.deviceTier)
-        gamePrewarm = config.gamePrewarm
-        GamePrewarmer.refreshEngine()
     }
 
     private func applyFetchResult(_ fetched: Result<CampaignBundle, Error>) {
@@ -719,7 +687,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
 
     private func completeInitialization(_ campaigns: [CampaignModel]) {
         campaignStore.populate(campaigns)
-        gamification.prefetchGamificationSkins(campaigns)
         if campaignStore.isEmpty {
             // The most common answer to "my campaign never showed": it is not
             // live. A success with nothing in it is not a failure, and reads
@@ -786,25 +753,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 }
             )
         }
-    }
-
-    // MARK: - Gamification
-
-    /// The inline slot the host app places once for the rewards widget.
-    static let rewardsWidgetSlotKey = "digia_rewards_widget"
-
-    /// The latest `getRewards` answer, driving the rewards page and widget.
-    var rewardsResponse: GameRewardsResponse? { gamification.rewardsResponse }
-
-    /// Fetches `getRewards` and stores it for the page and the widget.
-    func refreshRewards() {
-        gamification.refreshRewards()
-    }
-
-    /// Opens the hosted rewards page. The app calls this from its own button
-    /// or menu — or maps its own deep link to it (see `Digia.openRewards`).
-    func openRewards() {
-        gamification.openRewards()
     }
 
     /// Retired RN entrypoint, kept only so an older `@digia-engage/core` bundle running
@@ -979,11 +927,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         recordDelivery(controller, source: Self.deliverySource(driver))
         // Routing must see the stamped payload: it is the instance every render
         // surface stores and hands back, and the only thing that leads an event
-        // back to this presentation. The controller's id rides along
-        // explicitly too, because the payload stamp lands after routing on
-        // Android — the explicit leg wins in `PlaySession.triggerId`.
-        let verdict = routeOrganicTrigger(
-            controller.trigger, driver: driver, presentationId: controller.id)
+        // back to this presentation.
+        let verdict = routeOrganicTrigger(controller.trigger, driver: driver)
         switch verdict {
         case .accepted(let payload, let kind):
             let campaign = findCampaign(payload)
@@ -1078,7 +1023,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         case .floater, .floaterStory:
             return campaign.floaterStoryConfig != nil ? "story_floater" : "pip"
         case .inline, .banner, .inlineCanvas, .story: return nil
-        case .gamification: return "gamification"
         case .unsupported: return nil
         }
     }
@@ -1368,20 +1312,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             events.toCep(.dismissed(reason: .screenExit), payload: guide.payload)
         }
 
-        // A Direct game, loading or shown, follows its campaign's targetScreenNames like a nudge:
-        // it stays on a target screen and ends on any other. Shown it reports
-        // Dismissed(screen_exit), still loading it is closed_before_ready. A game opened from an
-        // inline or floating entry is left to its entry.
-        if let game = controller.activeGame ?? GamePresenter.loading,
-           [GamificationEntryKind.direct, .unknown].map(\.rawValue).contains(game.request.entry) {
-            dismissForScreenChangeIfNeeded(
-                campaignKey: game.request.campaignKey,
-                campaignType: "gamification",
-                campaign: campaignStore.find(game.request.campaignKey),
-                dismiss: { GamePresenter.dismiss(reason: "screen_exit") }
-            )
-        }
-
         // Floater and Floater Story orchestrators evaluate screen changes against their
         // campaign's targetScreenNames allowlist via their own onScreenChanged methods.
         floaterOrchestrator.onScreenChanged(_currentScreen ?? "")
@@ -1521,7 +1451,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             case .nudge: nudgeSurface.end(occupant, reason: .cancelled)
             case .survey: surveySurface.end(occupant, reason: .cancelled)
             case .guide: guideSurface.end(occupant, reason: .cancelled)
-            case .floaterExpanded, .floaterCollapsed, .inline, .gamification: continue
+            case .floaterExpanded, .floaterCollapsed, .inline: continue
             }
         }
     }
@@ -1532,9 +1462,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// `unknown_campaign_key` and `frequency_capped` are the same "false" to a
     /// caller that can only see accepted/not, and only one of them is a bug.
     @discardableResult
-    func routeOrganicTrigger(
-        _ payload: CEPTriggerPayload, driver: CampaignDriver, presentationId: String? = nil
-    ) -> RoutingVerdict {
+    func routeOrganicTrigger(_ payload: CEPTriggerPayload, driver: CampaignDriver) -> RoutingVerdict {
         logVerbose(
             "deliver cepCampaignId='\(payload.cepCampaignId)' "
                 + "campaignKey='\(payload.campaignKey)'")
@@ -1549,7 +1477,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 detail: "no campaign for key '\(resolvedKey)'"
             )
         }
-        return route(campaign, payload: payload, driver: driver, presentationId: presentationId)
+        return route(campaign, payload: payload, driver: driver)
     }
 
     /// The store key a trigger routes by. Route purely by the campaignKey
@@ -1631,8 +1559,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     private func route(
         _ campaign: CampaignModel,
         payload: CEPTriggerPayload,
-        driver: CampaignDriver,
-        presentationId: String? = nil
+        driver: CampaignDriver
     ) -> RoutingVerdict {
         // `Digia.attach(to:)`: the app may have replaced its root since; put the host back before drawing.
         DigiaHostAttachment.ensure()
@@ -1655,8 +1582,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             hostUnavailable: { [unowned self] in hostUnavailable($0) }
         )
         logVerbose("routeByCampaignKey key='\(campaign.campaignKey)' type='\(campaign.campaignType)'")
-        return router.route(
-            CampaignRequest(driver: driver, campaign: campaign, payload: payload, presentationId: presentationId))
+        return router.route(CampaignRequest(driver: driver, campaign: campaign, payload: payload))
     }
 
     /// Whether no Digia host is on screen to draw an overlay. Not checked on arrival: a campaign
@@ -1736,8 +1662,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 return floaterStorySurface.start(request)
             }
             return pipSurface.start(request)
-        case .gamification:
-            return gamificationSurface.start(request)
         case .unsupported(let config):
             request.driver.policy.onDropped(TimelineReason.campaignUnsupported, config.reason)
             log.e(
@@ -1818,9 +1742,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
 
         let supportsLiveTest: Bool
         switch campaign.config {
-        case .guide, .floater, .floaterStory,
-             .nudge, .survey, .inline, .inlineCanvas, .gamification:
-            supportsLiveTest = true
+        case .guide, .floater, .floaterStory: supportsLiveTest = true
+        case .nudge, .survey, .inline, .inlineCanvas: supportsLiveTest = true
         case .banner, .story: supportsLiveTest = false
         case .unsupported: supportsLiveTest = false
         }
@@ -2093,8 +2016,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                     self?.floaterStoryOrchestrator.dismiss(.ctaTaken)
                 }, showStory: { [weak self] index in
                     self?.floaterStoryOrchestrator.openStory(initialIndex: index)
-                }, openGame: { [weak self] in
-                    self?.gamification.openGame(forPayload: state.payload)
                 })
             )
         }
@@ -2422,7 +2343,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         fetchTask = nil
         sdkConfigFetchTask?.cancel()
         sdkConfigFetchTask = nil
-        gamePrewarm = .off
         services?.tearDown()
         services = nil
         currentSession.set(nil, requestHeaders: [:])
@@ -2432,7 +2352,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         liveTestService.ackReporter.resetForTesting()
         config = nil
         hostActionExecutor.clearHandlers()
-        gamification.resetForTesting()
         sdkState = .notInitialized
         HostRegistry.shared.reset()
         // Tests drive the SDK without drawing a host view; routing drops an overlay as `host_not_mounted`

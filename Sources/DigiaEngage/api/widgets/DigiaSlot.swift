@@ -8,21 +8,6 @@ public struct DigiaSlot<Placeholder: View>: View {
     private let placeholder: Placeholder
     @ObservedObject private var inlineController = SDKInstance.shared.inlineController
     @State private var visible = false
-    // Teaser (inline canvas) motion: fade + slight scale in, fade + height collapse out.
-    @State private var lastCanvas: LastCanvas?
-    @State private var appeared = false
-    @State private var collapsed = false
-    @State private var canvasHeight: CGFloat = 0
-    @State private var exitToken = 0
-
-    private struct LastCanvas {
-        let config: InlineCanvasConfig
-        let payload: CEPTriggerPayload
-    }
-
-    private static var appearDuration: Double { 0.24 }
-    private static var exitDuration: Double { 0.2 }
-    private static var startScale: CGFloat { 0.96 }
 
     public init(
         _ placementKey: String,
@@ -41,89 +26,22 @@ public struct DigiaSlot<Placeholder: View>: View {
     public var body: some View {
         // Empty, the slot emits nothing (an EmptyView placeholder is no stack child), so it
         // adds no spacing to the host's layout. `slot_visible` is not sent for an empty slot.
-        let live = inlineController.getCampaign(placementKey)
-        let liveCanvas = live != nil && isGamificationCanvas(placementKey)
-        // Once a canvas teaser is dismissed, its last content stays for the exit animation.
-        let ghost = live == nil ? lastCanvas : nil
-        let animated = liveCanvas || ghost != nil
-        if live != nil || ghost != nil {
-            let reduced = GameMotion.reduced
+        if inlineController.getCampaign(placementKey) != nil {
             ZStack {
-                content(ghost: ghost)
+                content
             }
             .background(SlotAppearanceReader(placementKey: placementKey))
-            .background {
-                if animated {
-                    GeometryReader { proxy in
-                        Color.clear
-                            .onAppear { if ghost == nil { canvasHeight = proxy.size.height } }
-                            .onChange(of: proxy.size.height) { if ghost == nil { canvasHeight = $0 } }
-                    }
-                }
-            }
-            .frame(height: ghost != nil && collapsed ? 0 : nil, alignment: .top)
-            .clippedIf(animated)
-            .opacity(animated ? ((collapsed || !appeared) ? 0 : 1) : 1)
-            .scaleEffect(animated && !reduced && !collapsed && !appeared ? Self.startScale : 1)
-            .onAppear {
-                recordCanvas()
-                guard animated else { return }
-                if reduced { appeared = true } else {
-                    withAnimation(.easeOut(duration: Self.appearDuration)) { appeared = true }
-                }
-            }
-            .onChange(of: live?.cepCampaignId) { _ in
-                recordCanvas()
-                exitToken += 1
-                collapsed = false
-            }
-            .onChange(of: ghost != nil) { exiting in
-                guard exiting else { return }
-                runExit()
-            }
         } else {
             placeholder
         }
     }
 
-    /// Only a gamification entry teaser animates; every other inline canvas appears as-is.
-    private func isGamificationCanvas(_ placementKey: String) -> Bool {
-        guard inlineController.getCanvasConfig(placementKey) != nil,
-            let payload = inlineController.getCampaign(placementKey)
-        else { return false }
-        return SDKInstance.shared.gamificationSurface.entryCampaign(payload)?.gamificationConfig != nil
-    }
-
-    private func recordCanvas() {
-        guard isGamificationCanvas(placementKey),
-            let config = inlineController.getCanvasConfig(placementKey),
-            let payload = inlineController.getCampaign(placementKey)
-        else { return }
-        lastCanvas = LastCanvas(config: config, payload: payload)
-    }
-
-    private func runExit() {
-        exitToken += 1
-        let token = exitToken
-        let finish = {
-            guard token == exitToken, inlineController.getCampaign(placementKey) == nil else { return }
-            lastCanvas = nil
-            collapsed = false
-            appeared = false
-        }
-        if GameMotion.reduced { finish(); return }
-        withAnimation(.easeIn(duration: Self.exitDuration)) { collapsed = true }
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.exitDuration, execute: finish)
-    }
-
     @ViewBuilder
-    private func content(ghost: LastCanvas?) -> some View {
+    private var content: some View {
         Group {
-            if placementKey == SDKInstance.rewardsWidgetSlotKey {
-                GameRewardsWidgetView()
-            } else if let payload = inlineController.getCampaign(placementKey) ?? ghost?.payload {
+            if let payload = inlineController.getCampaign(placementKey) {
                 let deliveryID = payload.presentationId ?? payload.cepCampaignId
-                slotContent(for: payload, ghost: ghost)
+                slotContent(for: payload)
                     .id(deliveryID)
                     .background(SlotVisibilityReader(visible: $visible))
                     .task(id: "\(deliveryID)-\(visible)") {
@@ -131,7 +49,6 @@ public struct DigiaSlot<Placeholder: View>: View {
                         // per campaign and resets it when the slot is cleared, so a
                         // redelivery of the same CEP campaign ID impresses again.
                         if visible { SDKInstance.shared.inlineReporter.reportSlotFirstRender(payload) }
-                        GamePrewarmer.entryVisibility(campaignKey: payload.campaignKey, visible: visible)
                     }
             } else {
                 placeholder
@@ -140,7 +57,7 @@ public struct DigiaSlot<Placeholder: View>: View {
     }
 
     @ViewBuilder
-    private func slotContent(for payload: CEPTriggerPayload, ghost: LastCanvas?) -> some View {
+    private func slotContent(for payload: CEPTriggerPayload) -> some View {
         if let carouselConfig = inlineController.getCarouselConfig(placementKey) {
             CarouselStepScope(payload: payload) { gate in
                 InlineCarouselRenderer.makeView(carouselConfig, payload: payload, stepGate: gate)
@@ -149,7 +66,7 @@ public struct DigiaSlot<Placeholder: View>: View {
             DigiaInlineBannerView(config: bannerConfig, payload: payload)
         } else if let storyConfig = inlineController.getStoryConfig(placementKey) {
             DigiaInlineStoryView(config: storyConfig, payload: payload)
-        } else if let canvasConfig = inlineController.getCanvasConfig(placementKey) ?? ghost?.config {
+        } else if let canvasConfig = inlineController.getCanvasConfig(placementKey) {
             CarouselStepScope(payload: payload) { gate in
                 DigiaInlineCanvasView(config: canvasConfig, payload: payload, stepGate: gate)
             }
@@ -271,12 +188,5 @@ struct SlotVisibilityReader: UIViewRepresentable {
             // SwiftUI state must not change during a view update.
             DispatchQueue.main.async { [onChange] in onChange?(shown) }
         }
-    }
-}
-
-private extension View {
-    @ViewBuilder
-    func clippedIf(_ clip: Bool) -> some View {
-        if clip { clipped() } else { self }
     }
 }

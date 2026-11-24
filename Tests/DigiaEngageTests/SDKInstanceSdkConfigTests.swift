@@ -315,16 +315,6 @@ final class ConfigNetworkClient: NetworkClient, @unchecked Sendable {
         }
     }
 
-    func executeCapped(request: NetworkRequest, maxBytes: Int) async throws -> NetworkResponse {
-        let response = try await execute(request: request)
-        guard let body = response.body, body.count > maxBytes else { return response }
-        return NetworkResponse(
-            statusCode: response.statusCode,
-            headers: response.headers,
-            body: Data(body.prefix(maxBytes + 1)),
-            isSuccessful: response.isSuccessful)
-    }
-
     func executeMultipart(request: MultipartUploadRequest) async throws -> NetworkResponse {
         NetworkResponse(statusCode: 200, headers: [:], body: nil, isSuccessful: true)
     }
