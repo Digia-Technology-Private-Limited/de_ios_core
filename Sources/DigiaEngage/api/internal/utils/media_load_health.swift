@@ -73,7 +73,32 @@ func loadLottieSource(_ url: URL) async -> (source: LottieAnimationSource?, fail
 }
 
 /// Keeps remote animations on disk under the HTTP rules, separate from the host's `URLCache.shared`.
-private let lottieDownloadSession: URLSession = {
+///
+/// A `URLCache`'s capacity is fixed when it is created, so the session is rebuilt whenever the
+/// server-driven cap changes. Every generation keeps the same policy, memory capacity and
+/// directory, so entries cached on disk survive the swap; an in-flight download keeps the
+/// session it started on.
+private let lottieSessionLock = NSLock()
+private nonisolated(unsafe) var lottieDiskBytes: Int = SdkConfig.defaultMediaDiskCacheBytes
+private nonisolated(unsafe) var currentLottieSession: URLSession = makeLottieDownloadSession(
+    diskBytes: SdkConfig.defaultMediaDiskCacheBytes)
+
+/// The session `loadLottieSource` downloads through, at the currently applied disk cap.
+func lottieDownloadSession() -> URLSession {
+    lottieSessionLock.withLock { currentLottieSession }
+}
+
+/// Applies the resolved Lottie cap. A no-op when the cap did not change, so the defaults path
+/// and repeats of the same config never rebuild the session.
+func setLottieDiskCacheBytes(_ bytes: Int) {
+    lottieSessionLock.withLock {
+        guard bytes != lottieDiskBytes else { return }
+        lottieDiskBytes = bytes
+        currentLottieSession = makeLottieDownloadSession(diskBytes: bytes)
+    }
+}
+
+private func makeLottieDownloadSession(diskBytes: Int) -> URLSession {
     let configuration = URLSessionConfiguration.default
     configuration.requestCachePolicy = .useProtocolCachePolicy
     let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
@@ -81,11 +106,11 @@ private let lottieDownloadSession: URLSession = {
     configuration.urlCache = URLCache(
         memoryCapacity: 0,
         // URLCache accepts responses up to about 5% of capacity, or about 5 MiB here.
-        diskCapacity: 100 * 1024 * 1024,
+        diskCapacity: diskBytes,
         directory: directory
     )
     return URLSession(configuration: configuration)
-}()
+}
 
 /// Records the HTTP status of the one download Lottie makes through it.
 private final class StatusRecordingLottieSession: LottieURLSession, @unchecked Sendable {
@@ -98,7 +123,7 @@ private final class StatusRecordingLottieSession: LottieURLSession, @unchecked S
         with url: URL,
         completionHandler: @escaping @Sendable (Data?, URLResponse?, Error?) -> Void
     ) -> URLSessionDataTask? {
-        lottieDownloadSession.dataTask(with: url) { data, response, error in
+        lottieDownloadSession().dataTask(with: url) { data, response, error in
             self.lock.withLock { self.recorded = (response as? HTTPURLResponse)?.statusCode }
             completionHandler(data, response, error)
         }

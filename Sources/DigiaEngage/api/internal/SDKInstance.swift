@@ -584,6 +584,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         healthSink.applyConfig(enabled: config.healthEnabled, sessionCap: config.healthSessionCap)
         appEventLimits = config.appEvents.limits
         services?.appEventsService?.applyPolicy(config.appEvents)
+        // Server-driven media caps. The image cache mutates in place; the Lottie session is
+        // rebuilt only when its cap changed (a no-op on the defaults path).
+        DigiaImagePipeline.imageCache.config.maxDiskSize = UInt(config.imageDiskCacheBytes)
+        setLottieDiskCacheBytes(config.lottieDiskCacheBytes)
     }
 
     private func applyFetchResult(_ fetched: Result<CampaignBundle, Error>) {

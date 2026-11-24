@@ -13,6 +13,9 @@ enum DigiaImagePipeline {
 
     /// The disk cap for Engage pictures: 100 MiB, kept for a week. SDWebImage's shared cache
     /// defaults to unbounded disk (`maxDiskSize == 0`); this owned cache is bounded instead.
+    /// The starting value: `SDKInstance` moves the live `imageCache.config.maxDiskSize` to the
+    /// server-driven `SdkConfig.imageDiskCacheBytes` whenever a config applies. `maxDiskAge`
+    /// is not configured and stays a week.
     static let maxDiskSize: UInt = 100 * 1024 * 1024
     static let maxDiskAge: TimeInterval = 7 * 24 * 3600
 

@@ -9,11 +9,28 @@ struct SdkConfig: Equatable, Sendable {
     let healthSessionCap: Int
     /// The app-event upload switch, rate, burst, blocklist and limits.
     let appEvents: AppEventUploadPolicy
+    /// The image disk cap the owned `DigiaImagePipeline.imageCache` runs with.
+    let imageDiskCacheBytes: Int
+    /// The Lottie HTTP disk cap the download session's `URLCache` runs with.
+    let lottieDiskCacheBytes: Int
 
-    init(healthEnabled: Bool, healthSessionCap: Int, appEvents: AppEventUploadPolicy = .unlimited) {
+    /// The single default max for both media disk caches: 100 MiB. The backend
+    /// sends a plain byte count per cache; `URLCache` only stores a response
+    /// under about 5% of its capacity, so this keeps typical Lottie files cacheable.
+    static let defaultMediaDiskCacheBytes = 100 * 1024 * 1024
+
+    init(
+        healthEnabled: Bool,
+        healthSessionCap: Int,
+        appEvents: AppEventUploadPolicy = .unlimited,
+        imageDiskCacheBytes: Int = defaultMediaDiskCacheBytes,
+        lottieDiskCacheBytes: Int = defaultMediaDiskCacheBytes
+    ) {
         self.healthEnabled = healthEnabled
         self.healthSessionCap = healthSessionCap
         self.appEvents = appEvents
+        self.imageDiskCacheBytes = imageDiskCacheBytes
+        self.lottieDiskCacheBytes = lottieDiskCacheBytes
     }
 
     /// What the SDK runs on with no cache and no answer. A test pins it to the shared fixture.
@@ -61,7 +78,9 @@ struct SdkConfig: Equatable, Sendable {
                         limits + ["stringMaxLength"], min: 1, fallback: defaults.stringMaxLength),
                     listMaxItems: number(limits + ["listMaxItems"], min: 1, fallback: defaults.listMaxItems)
                 )
-            )
+            ),
+            imageDiskCacheBytes: number(["media", "imageDiskCacheBytes"], min: 1, fallback: Self.defaultMediaDiskCacheBytes),
+            lottieDiskCacheBytes: number(["media", "lottieDiskCacheBytes"], min: 1, fallback: Self.defaultMediaDiskCacheBytes)
         )
     }
 
