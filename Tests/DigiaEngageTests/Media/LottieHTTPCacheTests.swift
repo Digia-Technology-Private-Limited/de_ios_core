@@ -6,7 +6,7 @@ import Testing
 @Suite("Lottie HTTP cache", .tags(.integration, .media))
 struct LottieHTTPCacheTests {
     // Fails if media_load_health.swift sets requestCachePolicy to .reloadIgnoringLocalCacheData
-    // or reduces diskCapacity to 100 MiB (the 6 MiB reply no longer fits the per-response limit).
+    // or reduces diskCapacity below 100 MiB (the 4 MiB reply no longer fits the per-response limit).
     // Restoring Lottie's parsed cache makes the second no-store load skip the origin.
     @Test("remote Lottie obeys HTTP freshness, storage and revalidation")
     func httpCache() async throws {
@@ -109,7 +109,7 @@ private final class LottieHTTPOrigin: @unchecked Sendable {
         switch name {
         case "fresh":
             headers = "Cache-Control: max-age=3600\r\n"
-            body.append(Data(repeating: 0x20, count: 6 * 1024 * 1024 - body.count))
+            body.append(Data(repeating: 0x20, count: 4 * 1024 * 1024 - body.count))
         case "no-store":
             headers = "Cache-Control: no-store, max-age=3600\r\nETag: \(Self.etag)\r\n"
         case "etag":

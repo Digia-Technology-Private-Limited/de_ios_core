@@ -80,8 +80,8 @@ private let lottieDownloadSession: URLSession = {
         .appendingPathComponent("DigiaEngageLottie", isDirectory: true)
     configuration.urlCache = URLCache(
         memoryCapacity: 0,
-        // URLCache accepts responses up to about 5% of capacity, or about 10 MiB here.
-        diskCapacity: 200 * 1024 * 1024,
+        // URLCache accepts responses up to about 5% of capacity, or about 5 MiB here.
+        diskCapacity: 100 * 1024 * 1024,
         directory: directory
     )
     return URLSession(configuration: configuration)
