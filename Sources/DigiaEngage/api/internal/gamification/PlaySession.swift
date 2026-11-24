@@ -27,40 +27,48 @@ final class PlaySession {
         self.identity = identity
     }
 
-    /// The one admission gate before the grant. A game on screen blocks only
-    /// a direct trigger — an inline or floating trigger only renders a
-    /// teaser, so it still asks. Only one direct grant runs at a time across
-    /// campaigns: two direct triggers would otherwise both spend a chance.
-    /// One request runs at a time per campaign: a second trigger for a
-    /// campaign whose grant is still in flight drops `busy` at once. Admitting
-    /// reserves the campaign (and direct) slots; `request` releases them when
-    /// the grant settles. Returns the busy drop reason when the request must
-    /// not ask, else nil. Matches Android's `PlaySession` admission.
-    func admit(_ request: PlayRequest) -> String? {
-        if request.direct, request.isGameBusy() {
-            return PlayDropReason.busy
+    /// The one admission point for every play request. A non-direct trigger only
+    /// renders a teaser, so only a direct trigger can be busy — and a live test
+    /// never is, since its open replaces the visible game. On `.open` the
+    /// direct and per-campaign guards stay held until `release` runs; the
+    /// caller releases them in a `defer`, so an admitted request always pairs
+    /// with exactly one release. Matches Android's `PlaySession.admit`.
+    func admit(
+        campaignKey: String,
+        direct: Bool,
+        testSend: Bool,
+        isGameBusy: () -> Bool
+    ) -> AdmitDecision {
+        if direct, !testSend, isGameBusy() {
+            return .busy
         }
-        if request.direct, directInFlight {
-            return PlayDropReason.busy
+        if direct, !testSend, directInFlight {
+            return .busy
         }
-        guard !inFlightCampaigns.contains(request.campaignKey) else {
-            return PlayDropReason.busy
+        guard !inFlightCampaigns.contains(campaignKey) else {
+            return .busy
         }
-        inFlightCampaigns.insert(request.campaignKey)
-        if request.direct { directInFlight = true }
-        return nil
+        inFlightCampaigns.insert(campaignKey)
+        if direct, !testSend { directInFlight = true }
+        return .open
     }
 
-    private func release(_ request: PlayRequest) {
-        inFlightCampaigns.remove(request.campaignKey)
-        if request.direct { directInFlight = false }
+    private func release(campaignKey: String, direct: Bool, testSend: Bool) {
+        inFlightCampaigns.remove(campaignKey)
+        if direct, !testSend { directInFlight = false }
     }
 
     func request(_ request: PlayRequest) async -> PlayDecision {
-        if let busy = admit(request) {
-            return .drop(reason: busy, denyReason: nil)
+        let testSend = request.testInvocationId != nil
+        if admit(
+            campaignKey: request.campaignKey,
+            direct: request.direct,
+            testSend: testSend,
+            isGameBusy: request.isGameBusy
+        ) == .busy {
+            return .drop(reason: PlayDropReason.busy, denyReason: nil)
         }
-        defer { release(request) }
+        defer { release(campaignKey: request.campaignKey, direct: request.direct, testSend: testSend) }
         // The identity is read once: the check and the grant below see the same user.
         guard let identity = identity(),
               !identity.userId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -197,6 +205,16 @@ struct PlayRequest {
     let testInvocationId: String?
     let direct: Bool
     let isGameBusy: () -> Bool
+}
+
+/// What `PlaySession.admit` decides. Open proceeds to the grant; Busy drops
+/// the trigger as `busy` without ever asking. A live test is exempt: the open
+/// replaces the visible game instead. Matches Android's `AdmitDecision`.
+enum AdmitDecision {
+    /// Admitted: the grant runs, holding the direct and per-campaign guards until it settles.
+    case open
+    /// Refused: a game is showing, a direct grant is in flight, or this campaign's is.
+    case busy
 }
 
 /// What a `PlaySession.request` decided.

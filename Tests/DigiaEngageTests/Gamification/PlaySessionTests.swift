@@ -215,16 +215,18 @@ struct PlaySessionTests {
         #expect(source.lastRequest?.userHash == "h-1")
     }
 
-    // Guards `admit` itself: only a direct trigger finds a visible game busy —
-    // an entry trigger still asks. `request` funnels through this gate.
-    @Test("admission blocks only a direct trigger while a game shows")
-    func admitDirectOnly() {
-        #expect(
-            session(FakeSource(.granted(granted(show: true)))).admit(
-                playRequest(direct: true, isGameBusy: { true })) == PlayDropReason.busy)
-        #expect(
-            session(FakeSource(.granted(granted(show: true)))).admit(
-                playRequest(direct: false, isGameBusy: { true })) == nil)
+    // Guards admission through `request`: a live-test direct trigger replaces
+    // the visible game instead of dropping busy, while an entry trigger still
+    // asks. Fails if `admit` stops exempting the test send.
+    @Test("a live-test direct opens over a visible game; an entry still asks")
+    func liveTestDirectExempt() async {
+        let live = playRequest(direct: true, testInvocationId: "inv-1", isGameBusy: { true })
+        let liveDecision = await session(FakeSource(.granted(granted(show: true)))).request(live)
+        #expect(liveDecision == .open(granted(show: true)))
+
+        let entry = playRequest(direct: false, isGameBusy: { true })
+        let entryDecision = await session(FakeSource(.granted(granted(show: false)))).request(entry)
+        #expect(entryDecision == .showEntry(granted(show: false)))
     }
 
     // Fails if a played chance keeps the floater (the `.played` case in

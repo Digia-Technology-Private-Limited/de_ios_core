@@ -290,8 +290,8 @@ final class GamificationOrchestrator: ObservableObject {
                     testInvocationId: testInvocationId,
                     direct: direct,
                     // A test send replaces an open game (GameSurface.open),
-                    // so it is never dropped busy here.
-                    isGameBusy: { !isLiveTestCepId(payload.cepCampaignId) && GamePresenter.isBusy }
+                    // so admit() exempts it from busy there.
+                    isGameBusy: { GamePresenter.isBusy }
                 ))
             self.applyPlayDecision(
                 decision, campaign: campaign, config: config, payload: payload,
