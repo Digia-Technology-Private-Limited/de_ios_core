@@ -30,9 +30,10 @@ struct GamificationConfig: Equatable {
 
     /// Whether this SDK speaks the skin's bridge: absent means a skin of this SDK's era.
     var bridgeSupported: Bool { (bridgeVersion ?? GameBridge.bridgeVersion) <= GameBridge.bridgeVersion }
-    /// The skin's format, passed through to `init` unchanged. Never gates:
-    /// an unknown or missing type still opens the skin.
-    let format: GamificationFormat
+    /// The skin's format label (`templateType`) is intentionally not stored:
+    /// nothing reads it — an unknown or missing type still opens the skin,
+    /// and the `init` message carries no type key. (Android carries no such
+    /// field either.)
     /// `config.values`, carried opaquely until the `init` sends them.
     let values: [String: JSONValue]
     /// `config.slots`, read whenever present and passed through to `init`.
@@ -74,8 +75,6 @@ struct GamificationConfig: Equatable {
             nonBlank(templateConfig["bundleUrl"])
             ?? campaignLevel.flatMap { nonBlank($0["bundleUrl"]) }
         guard let bundleUrl, URL(string: bundleUrl) != nil else { return nil }
-
-        let format = GamificationFormat(wire: templateConfig.string("templateType"))
 
         // `entry` is `{ kind }` on the wire; a bare string is accepted too. An
         // unknown or missing kind stays `.unknown` — never a silent direct
@@ -150,7 +149,6 @@ struct GamificationConfig: Equatable {
             skinId: skinId,
             skinVersion: skinVersion,
             bridgeVersion: positiveInt(templateConfig["bridgeVersion"]),
-            format: format,
             values: values,
             slots: slots,
             entryKind: entryKind,

@@ -23,7 +23,7 @@ struct GamificationLauncherTests {
     private func request(
         chanceId: String = "ch-1",
         entry: String = GamificationEntryKind.direct.rawValue,
-        onFailure: (@MainActor (GameFailure) -> Void)? = nil
+        onFailure: (@MainActor (GameFailureReason) -> Void)? = nil
     ) throws -> GameOpenRequest {
         let (file, dir) = try tempFile()
         let payload = CEPTriggerPayload(
@@ -150,7 +150,7 @@ struct GamificationLauncherTests {
         // Still closing: the pending test has not run yet, and a real open
         // still fails busy through `GamePresenter.open`'s guard.
         #expect(GamePresenter.isBusy)
-        var busy: GameFailure?
+        var busy: GameFailureReason?
         var second = try request(chanceId: "ch-2")
         second.onFailure = { busy = $0 }
         GamePresenter.open(second)
@@ -172,9 +172,9 @@ struct GamificationLauncherTests {
     @Test("a game that never shows fails open_timeout and frees the slot")
     func neverShowsFailsOpenTimeoutAndFreesSlot() throws {
         defer { cleanup() }
-        #expect(GameFailure.openTimeout.wireValue == "open_timeout")
+        #expect(GameFailureReason.openTimeout.wireValue == "open_timeout")
 
-        var failure: GameFailure?
+        var failure: GameFailureReason?
         let openRequest = try request(
             entry: GamificationEntryKind.floating.rawValue,
             onFailure: { failure = $0 })
@@ -221,7 +221,7 @@ struct GamificationLauncherTests {
     @Test("a stale watchdog never fails a later game")
     func staleWatchdogNeverFailsReplacement() {
         let bridge = GameBridge()
-        var failed: GameFailure?
+        var failed: GameFailureReason?
         bridge.onFailed = { failed = $0 }
 
         let stale = bridge.beginLoading()

@@ -191,7 +191,7 @@ final class GameWebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         }
         let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? true
         let accept = navigationAction.request.value(forHTTPHeaderField: "Accept")
-        decisionHandler(GameURLPolicy.allowNavigation(
+        decisionHandler(GameUrlPolicy.allowNavigation(
             url: url,
             entryURL: game.entryFile,
             bundleRoot: game.bundleRoot,

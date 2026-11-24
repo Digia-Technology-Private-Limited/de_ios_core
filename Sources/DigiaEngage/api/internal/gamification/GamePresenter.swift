@@ -54,14 +54,13 @@ final class GamePresentation: Identifiable, ObservableObject {
     /// True from the first close request until the exit animation ends and the
     /// session settles; the container animates out on it.
     @Published private(set) var isClosing = false
-    /// The native mute button's state: off for each new game, in memory only.
     /// Muted sends `device.soundAllowed = false`, so the skin goes quiet.
     @Published private(set) var isMuted = false
 
     private var didFinish = false
     private let haptics = GameHaptics()
     private let motion = GameMotionSource()
-    private let storage: GameSkinStorage
+    private let storage: GameBridgeStorage
     /// Skin `error` logs reported this open; capped, so a noisy skin cannot spam analytics.
     private var skinErrorCount = 0
     private static let maxSkinErrorsPerOpen = 5
@@ -87,7 +86,6 @@ final class GamePresentation: Identifiable, ObservableObject {
     /// Every in-flight skin `http` call, by skin request id; cancelled at
     /// close so a call the user closed on stops instead of running on (row 21).
     private var httpTasks: [String: Task<Void, Never>] = [:]
-    /// One armed http watchdog per watched in-flight call, by skin request id.
     private var httpWatchdogs: [String: Task<Void, Never>] = [:]
     /// When each watched call started, for the `game_rewards_failed` duration.
     private var httpWatchdogStarted: [String: Date] = [:]
@@ -116,9 +114,9 @@ final class GamePresentation: Identifiable, ObservableObject {
         self.id = request.campaignKey
         self.entryFile = request.entryFile
         self.bundleRoot = request.bundleRoot
-        self.storage = GameSkinStorage(
+        self.storage = GameBridgeStorage(
             defaults: Self.storageDefaults,
-            namespace: GameSkinStorage.namespace(
+            namespace: GameBridgeStorage.namespaceFor(
                 projectId: request.projectId, skinId: request.skinId, identity: request.userId))
         self.initMessage = Self.initMessage(for: request)
         bridge.onReady = { [weak self] version in
@@ -365,7 +363,7 @@ final class GamePresentation: Identifiable, ObservableObject {
                 log.d("Game haptic dropped (style=\(style.rawValue))", campaign: self.request.campaignKey)
             }
         case .storageGet(let id, let key):
-            guard GameSkinStorage.isValidKey(key) else {
+            guard GameBridgeStorage.isValidKey(key) else {
                 bridge.fail(id: id, code: .badRequest, message: "invalid key")
                 return
             }
@@ -381,7 +379,7 @@ final class GamePresentation: Identifiable, ObservableObject {
                 bridge.answer(id: id)
             }
         case .storageRemove(let id, let key):
-            guard GameSkinStorage.isValidKey(key) else {
+            guard GameBridgeStorage.isValidKey(key) else {
                 if let id { bridge.fail(id: id, code: .badRequest, message: "invalid key") }
                 return
             }
@@ -487,7 +485,7 @@ final class GamePresentation: Identifiable, ObservableObject {
     /// answer `{status, body}`; anything else answers by kind.
     private func performHttp(id: String, method: String, path: String, body: [String: Any]?) {
         let start = Date()
-        func reject(code: GameBridgeErrorCode) {
+        func reject(code: GameBridgeError) {
             bridge.fail(id: id, code: code, message: self.httpErrorMessage(code))
             let failed = GameHttpBridge.rejectedCall(method: method, path: path, code: code)
             SDKInstance.shared.events.toDigia(
@@ -582,7 +580,7 @@ final class GamePresentation: Identifiable, ObservableObject {
         GameChanceStateCache.shared.record(campaignKey: request.campaignKey, response: response)
     }
 
-    private func httpErrorMessage(_ code: GameBridgeErrorCode) -> String {
+    private func httpErrorMessage(_ code: GameBridgeError) -> String {
         code == .timeout ? "request timed out" : "request failed"
     }
 
@@ -629,7 +627,7 @@ final class GamePresentation: Identifiable, ObservableObject {
         request.onHttpTimeout?(path, durationMs)
         if isReady {
             log.w("Game http call timed out with no answer — closing", campaign: request.campaignKey)
-            dismiss(reason: GameFailure.httpTimeout.wireValue)
+            dismiss(reason: GameFailureReason.httpTimeout.wireValue)
         } else {
             didFail(.httpTimeout)
         }
@@ -973,7 +971,7 @@ final class GamePresentation: Identifiable, ObservableObject {
         }
     }
 
-    private func didFail(_ reason: GameFailure) {
+    private func didFail(_ reason: GameFailureReason) {
         log.w("Game closed", error: reason.rawValue)
         finish(report: { [request] in request.onFailure?(reason) })
     }

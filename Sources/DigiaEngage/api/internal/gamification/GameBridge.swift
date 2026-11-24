@@ -5,7 +5,7 @@ private let log = DigiaLogger()
 
 /// Wire error codes for `{id, type:"error"}` replies — the whole set. A skin
 /// feature-detects by sending a request and handling `unsupported`.
-enum GameBridgeErrorCode: String, Sendable, Error {
+enum GameBridgeError: String, Sendable, Error {
     case unsupported
     case badRequest = "bad_request"
     case network
@@ -87,7 +87,7 @@ final class GameBridge {
 
     private(set) var state: State = .loading
     /// Set once per session by the first dropped message.
-    private(set) var didRecordDrop = false
+    private(set) var dropNoted = false
 
     /// Fires once, when `ready` moves `loading` → `idle`, with the skin's
     /// declared bridge version. A version above ``GameBridge/bridgeVersion``
@@ -104,7 +104,7 @@ final class GameBridge {
     /// Timeout close fires `onFailed` instead — never both.
     var onClosed: (@MainActor () -> Void)?
     /// Fires once, when the session closes as a failure.
-    var onFailed: (@MainActor (GameFailure) -> Void)?
+    var onFailed: (@MainActor (GameFailureReason) -> Void)?
     /// One parsed request per skin message the bridge accepts.
     var onRequest: (@MainActor (GameBridgeRequest) -> Void)?
     /// One full `window.DigiaBridge.__receive(...)` script per reply or push.
@@ -217,7 +217,7 @@ final class GameBridge {
         timeoutFired(generation: generation, failure: .loadTimeout)
     }
 
-    private func timeoutFired(generation: Int, failure: GameFailure) {
+    private func timeoutFired(generation: Int, failure: GameFailureReason) {
         guard generation == self.generation, state == .loading else { return }
         failPendingAsClosed()
         state = .closed
@@ -243,7 +243,7 @@ final class GameBridge {
     }
 
     /// Answers a request with `{id, type:"error", payload:{code, message}}`.
-    func fail(id: String, code: GameBridgeErrorCode, message: String) {
+    func fail(id: String, code: GameBridgeError, message: String) {
         pendingIds.remove(id)
         guard state != .closed else { return }
         send(["id": id, "type": "error", "payload": ["code": code.rawValue, "message": message]])
@@ -255,7 +255,7 @@ final class GameBridge {
         pendingIds.removeAll()
         for id in ids {
             send(["id": id, "type": "error",
-                  "payload": ["code": GameBridgeErrorCode.closed.rawValue, "message": "game closed"]])
+                  "payload": ["code": GameBridgeError.closed.rawValue, "message": "game closed"]])
         }
     }
 
@@ -293,8 +293,8 @@ final class GameBridge {
     }
 
     private func recordDrop(reason: String = "malformed", type: String? = nil) {
-        if !didRecordDrop {
-            didRecordDrop = true
+        if !dropNoted {
+            dropNoted = true
             log.w("Game bridge message dropped (unknown, malformed, or over 64 KB)")
             onDropped?(reason, type)
         } else if log.isEnabled(.debug) {

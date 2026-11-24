@@ -8,7 +8,7 @@ import WebKit
 /// under the bundle root, https loads only off the main frame, and everything
 /// else is cancelled.
 @Suite("Game URL policy", .tags(.unit, .game))
-struct GameURLPolicyTests {
+struct GameUrlPolicyTests {
     private let root = URL(string: "file:///tmp/bundle/")!
     private let entry = URL(string: "file:///tmp/bundle/index.html")!
 
@@ -16,7 +16,7 @@ struct GameURLPolicyTests {
         _ raw: String, navigationType: WKNavigationType = .other, isMainFrame: Bool = false,
         accept: String? = nil
     ) -> Bool {
-        GameURLPolicy.allowNavigation(
+        GameUrlPolicy.allowNavigation(
             url: URL(string: raw)!, entryURL: entry, bundleRoot: root,
             navigationType: navigationType, isMainFrame: isMainFrame, accept: accept)
     }
@@ -40,9 +40,9 @@ struct GameURLPolicyTests {
     @Test("files escaping the root are rejected")
     func escapeRejected() {
         // Guards isUnderRoot: `..` and sibling trees never load.
-        #expect(!GameURLPolicy.isUnderRoot(URL(string: "file:///tmp/bundle/../secret.txt")!, root))
-        #expect(!GameURLPolicy.isUnderRoot(URL(string: "file:///tmp/other/x.js")!, root))
-        #expect(GameURLPolicy.isUnderRoot(URL(string: "file:///tmp/bundle/a/b.js")!, root))
+        #expect(!GameUrlPolicy.isUnderRoot(URL(string: "file:///tmp/bundle/../secret.txt")!, root))
+        #expect(!GameUrlPolicy.isUnderRoot(URL(string: "file:///tmp/other/x.js")!, root))
+        #expect(GameUrlPolicy.isUnderRoot(URL(string: "file:///tmp/bundle/a/b.js")!, root))
         #expect(!allow("file:///tmp/other/x.js"))
     }
 
@@ -70,7 +70,7 @@ struct GameURLPolicyTests {
             "https://cdn.example.com/rewards/coupon.html",
         ] {
             #expect(!allow(raw))
-            #expect(!GameURLPolicy.allowsRemoteAsset(url: URL(string: raw)!))
+            #expect(!GameUrlPolicy.allowsRemoteAsset(url: URL(string: raw)!))
         }
     }
 
@@ -84,7 +84,7 @@ struct GameURLPolicyTests {
             "https://audio.example.com/win.mp3",
         ] {
             #expect(allow(raw))
-            #expect(GameURLPolicy.allowsRemoteAsset(url: URL(string: raw)!))
+            #expect(GameUrlPolicy.allowsRemoteAsset(url: URL(string: raw)!))
             // Never in the main frame: art stays a subresource.
             #expect(!allow(raw, navigationType: .linkActivated, isMainFrame: true))
         }
@@ -95,20 +95,20 @@ struct GameURLPolicyTests {
         let cloudinary = "https://res.cloudinary.com/demo/image/upload/f_auto,q_auto/Gift_Box"
         let imgAccept = "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
         #expect(allow(cloudinary, accept: imgAccept))
-        #expect(GameURLPolicy.allowsRemoteAsset(url: URL(string: cloudinary)!, accept: imgAccept))
+        #expect(GameUrlPolicy.allowsRemoteAsset(url: URL(string: cloudinary)!, accept: imgAccept))
         #expect(!allow(cloudinary, accept: "*/*"))
         #expect(!allow(cloudinary, accept: "text/html"))
         #expect(!allow(cloudinary))
         // The Accept sniff is gated to extensionless URLs: a code URL with an
         // image Accept still cancels.
         #expect(!allow("https://api.example.com/collect.js", accept: imgAccept))
-        #expect(!GameURLPolicy.allowsRemoteAsset(
+        #expect(!GameUrlPolicy.allowsRemoteAsset(
             url: URL(string: "https://api.example.com/collect.js")!, accept: imgAccept))
         // An extensioned image still loads on its extension (Accept-agnostic).
         #expect(allow("https://cdn.example.com/rewards/coupon.png", accept: imgAccept))
         // Http never passes the sniff, even for an image request.
         #expect(!allow("http://res.cloudinary.com/demo/Gift_Box", accept: imgAccept))
-        #expect(!GameURLPolicy.allowsRemoteAsset(
+        #expect(!GameUrlPolicy.allowsRemoteAsset(
             url: URL(string: "http://res.cloudinary.com/demo/Gift_Box")!, accept: imgAccept))
     }
 
@@ -117,7 +117,7 @@ struct GameURLPolicyTests {
         let mock = "http://localhost:8080"
         let skin = "/gamification/skins/w/1/index.html"
         func allowed(_ raw: String, _ base: String = mock) -> Bool {
-            GameURLPolicy.allowsBundle(URL(string: raw)!, apiBaseUrl: base)
+            GameUrlPolicy.allowsBundle(URL(string: raw)!, apiBaseUrl: base)
         }
         // The TestKit http exception is origin-pinned: another host, another
         // port, or the https API base never serves an http bundle.
@@ -140,7 +140,7 @@ struct GameURLPolicyTests {
         let mock = "http://localhost:8080"
         let skin = "/gamification/skins/w/1/index.html"
         func allowed(_ raw: String, _ base: String = mock) -> Bool {
-            GameURLPolicy.allowsBundle(URL(string: raw)!, apiBaseUrl: base)
+            GameUrlPolicy.allowsBundle(URL(string: raw)!, apiBaseUrl: base)
         }
         // Guards the origin match: only the mock's own origin may serve http.
         #expect(allowed("HTTP://LocalHost:8080\(skin)"))
@@ -156,12 +156,12 @@ struct GameURLPolicyTests {
         let bundle = URL(string: "https://cdn.example.com/gamification/skins/wheelClassic/1/index.html")!
         // Guards the scheme/host/port normalization: the version folder's
         // origin is the CDN origin the launcher opens.
-        #expect(GameURLPolicy.normalizedOrigin(bundle) == "https://cdn.example.com")
+        #expect(GameUrlPolicy.normalizedOrigin(bundle) == "https://cdn.example.com")
         // An unusable URL has no origin.
-        #expect(URL(string: "not a url").flatMap(GameURLPolicy.normalizedOrigin) == nil)
+        #expect(URL(string: "not a url").flatMap(GameUrlPolicy.normalizedOrigin) == nil)
         // An http bundle off the API base origin never opens: allowsBundle
         // refuses its origin, like Android's empty cdnOrigin.
-        #expect(!GameURLPolicy.allowsBundle(
+        #expect(!GameUrlPolicy.allowsBundle(
             URL(string: "http://cdn.example.com/gamification/skins/w/1/index.html")!,
             apiBaseUrl: "https://app.digia.tech"))
     }
