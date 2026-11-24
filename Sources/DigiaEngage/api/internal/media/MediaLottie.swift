@@ -4,7 +4,7 @@ import UIKit
 internal import Lottie
 
 /// The one Lottie wrapper the non-story surfaces render through: the platform composition
-/// loaded through Lottie's own cache (Lottie bytes are never routed through the image cache),
+/// loaded through the dedicated Lottie HTTP cache,
 /// with the authored BlurHash as the still while the animation loads and no backdrop of its own,
 /// so a transparent animation stays transparent over the page.
 ///

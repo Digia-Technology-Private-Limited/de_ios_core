@@ -57,32 +57,31 @@ func mediaFailureCause(playerItem: AVPlayerItem) -> String? {
     }
 }
 
-/// Loads a remote Lottie or dotLottie file through Lottie's own cache.
+/// Loads a remote Lottie or dotLottie file through the session's HTTP cache.
 /// On failure, returns the health cause from the download's HTTP status.
 func loadLottieSource(_ url: URL) async -> (source: LottieAnimationSource?, failureCause: String?) {
     let session = StatusRecordingLottieSession()
+    // A parsed-cache hit would skip HTTP freshness and revalidation checks.
     if url.pathExtension.lowercased() == "lottie" {
-        if let file = try? await DotLottieFile.loadedFrom(url: url, session: session) {
+        if let file = try? await DotLottieFile.loadedFrom(url: url, session: session, dotLottieCache: nil) {
             return (file.animationSource, nil)
         }
-    } else if let animation = await LottieAnimation.loadedFrom(url: url, session: session) {
+    } else if let animation = await LottieAnimation.loadedFrom(url: url, session: session, animationCache: nil) {
         return (animation.animationSource, nil)
     }
     return (nil, mediaFailureCause(httpStatus: session.statusCode))
 }
 
-/// Lottie keeps parsed animations in memory only, so without a disk cache every file downloads again
-/// after the app restarts. This session's own `URLCache` keeps them on disk under the normal HTTP
-/// rules (`Cache-Control`, `Expires`, ETag revalidation), the same rules Android applies to images.
-/// It is separate from `URLCache.shared`, which belongs to the host app and is too small for most
-/// animations (a response is only stored when it is under about 5% of the disk capacity).
+/// Keeps remote animations on disk under the HTTP rules, separate from the host's `URLCache.shared`.
 private let lottieDownloadSession: URLSession = {
     let configuration = URLSessionConfiguration.default
+    configuration.requestCachePolicy = .useProtocolCachePolicy
     let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
         .appendingPathComponent("DigiaEngageLottie", isDirectory: true)
     configuration.urlCache = URLCache(
         memoryCapacity: 0,
-        diskCapacity: 100 * 1024 * 1024,
+        // URLCache accepts responses up to about 5% of capacity, or about 10 MiB here.
+        diskCapacity: 200 * 1024 * 1024,
         directory: directory
     )
     return URLSession(configuration: configuration)
