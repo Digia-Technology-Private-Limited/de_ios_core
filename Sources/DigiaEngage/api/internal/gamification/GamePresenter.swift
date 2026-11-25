@@ -46,7 +46,7 @@ final class GamePresentation: Identifiable, ObservableObject {
     private(set) var request: GameOpenRequest
     let entryFile: URL
     let bundleRoot: URL
-    let bridge = GameBridge()
+    let bridge: GameBridge
 
     /// Set when `ready` arrives; the game is presented only after this.
     private(set) var isReady = false
@@ -105,7 +105,12 @@ final class GamePresentation: Identifiable, ObservableObject {
             method: method, path: path, body: body)
     }
 
-    init?(request: GameOpenRequest) {
+    init?(
+        request: GameOpenRequest,
+        messageMaxBytes: Int = SDKInstance.shared.gameSkinLimits.bridgeMessageMaxBytes,
+        storageValueMaxBytes: Int = SDKInstance.shared.gameStorageLimits.valueMaxBytes,
+        storageNamespaceMaxBytes: Int = SDKInstance.shared.gameStorageLimits.namespaceMaxBytes
+    ) {
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(
             atPath: request.entryFile.path, isDirectory: &isDirectory), !isDirectory.boolValue
@@ -114,10 +119,16 @@ final class GamePresentation: Identifiable, ObservableObject {
         self.id = request.campaignKey
         self.entryFile = request.entryFile
         self.bundleRoot = request.bundleRoot
+        // The SDK config caps ride per session: the bridge drops messages past
+        // `bridgeMessageMaxBytes`, and storage refuses writes past its quotas.
+        // Tests that never apply a config read the burned defaults here.
+        self.bridge = GameBridge(messageMaxBytes: messageMaxBytes)
         self.storage = GameBridgeStorage(
             defaults: Self.storageDefaults,
             namespace: GameBridgeStorage.namespaceFor(
-                projectId: request.projectId, skinId: request.skinId, identity: request.userId))
+                projectId: request.projectId, skinId: request.skinId, identity: request.userId),
+            valueMaxBytes: storageValueMaxBytes,
+            namespaceMaxBytes: storageNamespaceMaxBytes)
         self.initMessage = Self.initMessage(for: request)
         bridge.onReady = { [weak self] version in
             // Every `ready` gets `init`, the first included (Android parity): a

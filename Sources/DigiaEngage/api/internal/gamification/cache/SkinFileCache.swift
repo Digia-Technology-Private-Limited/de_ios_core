@@ -28,6 +28,10 @@ struct SkinFileCache: Sendable {
 
     private let cachesDirectory: URL?
     private let networkClient: any NetworkClient
+    /// The configured per-file and whole-cache budgets (see `init`). The
+    /// static caps below are the defaults when no config arrived.
+    private let fileMaxBytes: Int
+    private let cacheMaxBytes: Int64
     /// The serial guard around every file read, write, touch and eviction —
     /// Android's `synchronized(lock)` in `SkinFileCache`. One box per cache, so
     /// copies of the same cache still exclude each other. Callers hop off the
@@ -39,12 +43,20 @@ struct SkinFileCache: Sendable {
     ///   - cachesDirectory: The app's `Caches` directory. Tests pass a
     ///     temporary directory, so they never touch the real one.
     ///   - networkClient: The SDK's network client, carrying its auth.
+    ///   - fileMaxBytes: One entry may hold this many bytes. Defaults to the
+    ///     static cap; the SDK passes its configured limit.
+    ///   - cacheMaxBytes: The whole cache budget. Defaults to the static cap;
+    ///     the SDK passes its configured limit.
     init(
         cachesDirectory: URL? = SkinFileCache.defaultCachesDirectory,
-        networkClient: any NetworkClient
+        networkClient: any NetworkClient,
+        fileMaxBytes: Int = SkinFileCache.singleFileMaxBytes,
+        cacheMaxBytes: Int64 = SkinFileCache.totalMaxBytes
     ) {
         self.cachesDirectory = cachesDirectory
         self.networkClient = networkClient
+        self.fileMaxBytes = fileMaxBytes
+        self.cacheMaxBytes = cacheMaxBytes
     }
 
     /// The app's caches directory, where the skins live. Tests pass a
@@ -104,7 +116,7 @@ struct SkinFileCache: Sendable {
               let size = try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? NSNumber
         else { return false }
         let bytes = size.int64Value
-        return bytes > 0 && bytes <= Self.singleFileMaxBytes
+        return bytes > 0 && bytes <= fileMaxBytes
     }
 
     /// The fixed `Content-Security-Policy` applied to every cached skin.
@@ -128,12 +140,12 @@ struct SkinFileCache: Sendable {
         guard let file = fileURL(skinId: skinId, version: version) else {
             throw SkinFileCacheError.noCachesDirectory
         }
-        guard !data.isEmpty, data.count <= Self.singleFileMaxBytes else {
+        guard !data.isEmpty, data.count <= fileMaxBytes else {
             throw SkinFileCacheError.invalidFile
         }
         return try lock.withLock {
             let stored = Self.withCspMetaTag(data)
-            guard stored.count <= Self.singleFileMaxBytes else {
+            guard stored.count <= fileMaxBytes else {
                 throw SkinFileCacheError.invalidFile
             }
             let directory = file.deletingLastPathComponent()
@@ -180,12 +192,12 @@ struct SkinFileCache: Sendable {
         let response = try await networkClient.executeCapped(
             request: NetworkRequest(
                 url: url, method: .get, connectTimeout: 30, readTimeout: 30),
-            maxBytes: Self.singleFileMaxBytes)
+            maxBytes: fileMaxBytes)
         guard response.isSuccessful else {
             throw SkinFileCacheError.badResponse
         }
         guard let data = response.body, !data.isEmpty,
-              data.count <= Self.singleFileMaxBytes,
+              data.count <= fileMaxBytes,
               data.range(of: Self.bridgeMarker) != nil
         else {
             throw SkinFileCacheError.invalidFile
@@ -287,7 +299,7 @@ struct SkinFileCache: Sendable {
         }
         var total = files.reduce(Int64(0)) { $0 + $1.size }
         files.sort { $0.modified < $1.modified }
-        for file in files where total > Self.totalMaxBytes {
+        for file in files where total > cacheMaxBytes {
             guard (try? fileManager.removeItem(at: file.url)) != nil else { continue }
             total -= file.size
             var directory = file.url.deletingLastPathComponent()

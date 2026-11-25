@@ -23,6 +23,8 @@ struct GamificationLauncherTests {
     private func request(
         chanceId: String = "ch-1",
         entry: String = GamificationEntryKind.direct.rawValue,
+        skinId: String = "wheel",
+        userId: String = "u_123",
         onFailure: (@MainActor (GameFailureReason) -> Void)? = nil
     ) throws -> GameOpenRequest {
         let (file, dir) = try tempFile()
@@ -31,12 +33,12 @@ struct GamificationLauncherTests {
         return GameOpenRequest(
             campaignKey: "bill_pay_spin",
             campaignId: "c1",
-            skinId: "wheel",
+            skinId: skinId,
             skinVersion: 2,
             chanceId: chanceId,
             testInvocationId: nil,
             projectId: "test_key",
-            userId: "u_123",
+            userId: userId,
             entryFile: file,
             bundleRoot: dir,
             showMute: false,
@@ -212,6 +214,44 @@ struct GamificationLauncherTests {
         }
         #expect(!failed)
         cleanup()
+    }
+
+    // Fails if a configured session stops honoring its caps: the
+    // `messageMaxBytes` and storage quotas the SDK config hands the session.
+    // Mirrors Android's `GameRuntimeLimits` wiring through `applyGameLimits`.
+    @Test("a configured session caps the bridge intake and the storage quotas")
+    func sessionHonorsConfiguredCaps() throws {
+        defer { cleanup() }
+        let unique = UUID().uuidString
+        let game = try #require(GamePresentation(
+            request: try request(skinId: "wheel-\(unique)", userId: "u-\(unique)"),
+            messageMaxBytes: 1024,
+            storageValueMaxBytes: 8,
+            storageNamespaceMaxBytes: 16))
+
+        // Guards the init wiring: the session's bridge and storage run on the
+        // passed caps, not the burned defaults.
+        #expect(game.bridge.messageMaxBytes == 1024)
+        var scripts: [String] = []
+        game.bridge.onSend = { scripts.append($0) }
+
+        // One byte past the value quota answers bad_request.
+        game.bridge.receive(
+            #"{"id":"s1","type":"storage","payload":{"op":"set","key":"k","value":"123456789"}}"#)
+        #expect(scripts.count == 1)
+        #expect(scripts[0].contains("bad_request"))
+
+        // Two 8-byte values fill the 16-byte namespace; a third refuses.
+        game.bridge.receive(
+            #"{"id":"s2","type":"storage","payload":{"op":"set","key":"a","value":"12345678"}}"#)
+        game.bridge.receive(
+            #"{"id":"s3","type":"storage","payload":{"op":"set","key":"b","value":"12345678"}}"#)
+        game.bridge.receive(
+            #"{"id":"s4","type":"storage","payload":{"op":"set","key":"c","value":"x"}}"#)
+        #expect(scripts.count == 4)
+        #expect(scripts[1].contains("result"))
+        #expect(scripts[2].contains("result"))
+        #expect(scripts[3].contains("bad_request"))
     }
 
     // Fails if a stale watchdog from an earlier game can fail the game that

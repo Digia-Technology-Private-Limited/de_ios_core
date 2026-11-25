@@ -70,8 +70,12 @@ final class GameBridge {
     /// (`GAME_HTTP_WATCHDOG_MS`); the stuck game closes instead of freezing.
     nonisolated static let httpWatchdogSeconds: TimeInterval = 30.0
     /// Skin messages above this many UTF-8 bytes are dropped, never parsed. Fits a
-    /// full 16 KB `storage` value or `http` body plus its envelope.
+    /// full 16 KB `storage` value or `http` body plus its envelope. The static is
+    /// the default; the SDK passes its configured `bridgeMessageMaxBytes` per session.
     nonisolated static let maxMessageBytes = 64 * 1024
+
+    /// The configured intake cap for this session (see `init`).
+    private(set) var messageMaxBytes: Int
 
     /// How often an open game re-collects device facts so thermal, power-save
     /// and reduced-motion changes push without a viewport change (B21). Pushes
@@ -117,6 +121,12 @@ final class GameBridge {
         "motion", "storage", "action",
     ]
 
+    /// Creates a bridge capped at `messageMaxBytes` UTF-8 bytes per intake
+    /// message; the SDK passes its configured `bridgeMessageMaxBytes`.
+    init(messageMaxBytes: Int = GameBridge.maxMessageBytes) {
+        self.messageMaxBytes = messageMaxBytes
+    }
+
     /// (Re)enters `loading`. Returns a generation token so the one-shot ready
     /// timer fires only for the load that armed it.
     private var generation = 0
@@ -140,13 +150,13 @@ final class GameBridge {
     func receive(_ body: Any?) {
         guard state != .closed else { return }
         guard let text = body as? String,
-              text.utf8.count <= Self.maxMessageBytes,
+              text.utf8.count <= messageMaxBytes,
               let data = text.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else {
             let reason: String = {
                 guard let text = body as? String else { return "malformed" }
-                return text.utf8.count > Self.maxMessageBytes ? "oversize" : "malformed"
+                return text.utf8.count > messageMaxBytes ? "oversize" : "malformed"
             }()
             recordDrop(reason: reason)
             return
@@ -295,10 +305,10 @@ final class GameBridge {
     private func recordDrop(reason: String = "malformed", type: String? = nil) {
         if !dropNoted {
             dropNoted = true
-            log.w("Game bridge message dropped (unknown, malformed, or over 64 KB)")
+            log.w("Game bridge message dropped (unknown, malformed, or over the message cap)")
             onDropped?(reason, type)
         } else if log.isEnabled(.debug) {
-            log.d("Game bridge message dropped (unknown, malformed, or over 64 KB)")
+            log.d("Game bridge message dropped (unknown, malformed, or over the message cap)")
         }
     }
 

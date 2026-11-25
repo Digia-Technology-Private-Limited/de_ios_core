@@ -42,6 +42,22 @@ struct SkinFileCacheTests {
             "img-src 'self' https: data:")
     }
 
+    @Test("configured caps gate the stored file")
+    func configuredCaps() throws {
+        // Guards the fileMaxBytes init: a session with a configured
+        // skinFileMaxBytes refuses a file past it, like Android's cache.
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("test-skins-\(UUID().uuidString)", isDirectory: true)
+        let cache = SkinFileCache(
+            cachesDirectory: directory, networkClient: MockNetworkClient(), fileMaxBytes: 10)
+
+        #expect(throws: SkinFileCacheError.self) {
+            try cache.store(skinId: "wheel", version: 3, data: Data(repeating: 0, count: 11))
+        }
+        let stored = try cache.store(skinId: "wheel", version: 3, data: Data(repeating: 0, count: 9))
+        #expect(stored.lastPathComponent == SkinFileCache.fileName)
+    }
+
     @Test("misses read nil, stores hit")
     func storeAndHit() throws {
         let (cache, _, _) = makeCache()

@@ -519,6 +519,23 @@ struct GameBridgeTests {
         }
     }
 
+    @Test("the configured intake cap drops what the default would accept")
+    func configuredIntakeCap() {
+        // Guards the messageMaxBytes init: a session with a configured
+        // bridgeMessageMaxBytes drops past it, never parsing.
+        let bridge = GameBridge(messageMaxBytes: 32)
+        var drops: [(reason: String, type: String?)] = []
+        var requests: [GameBridgeRequest] = []
+        bridge.onDropped = { drops.append(($0, $1)) }
+        bridge.onRequest = { requests.append($0) }
+
+        bridge.receive(String(repeating: "x", count: 33))
+
+        #expect(requests.isEmpty)
+        #expect(drops.count == 1)
+        #expect(drops.first?.reason == "oversize")
+    }
+
     @Test("answer and fail shape the result and error replies")
     func replyShapes() throws {
         let bridge = makeBridge()

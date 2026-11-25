@@ -66,6 +66,23 @@ struct GameBridgeStorageTests {
         #expect(storage.set("k5", value: "b") == nil)
     }
 
+    @Test("configured quotas gate the value and the namespace")
+    func configuredQuotas() {
+        // Guards the valueMaxBytes/namespaceMaxBytes init: a session with a
+        // configured gamification.storage section refuses past it.
+        let defaults = UserDefaults(suiteName: "test-game-\(UUID().uuidString)")!
+        let storage = GameBridgeStorage(
+            defaults: defaults,
+            namespace: GameBridgeStorage.namespaceFor(projectId: "p", skinId: "w", identity: "u"),
+            valueMaxBytes: 8,
+            namespaceMaxBytes: 16)
+
+        #expect(storage.set("a", value: "12345678") == nil)
+        #expect(storage.set("b", value: "123456789") == "storage quota exceeded")
+        #expect(storage.set("c", value: "12345678") == nil)
+        #expect(storage.set("d", value: "x") == "storage quota exceeded")
+    }
+
     @Test("namespaces are isolated per project, skin and user")
     func namespaceIsolation() {
         let defaults = UserDefaults(suiteName: "test-game-\(UUID().uuidString)")!
