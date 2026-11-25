@@ -402,13 +402,13 @@ final class GameBridge {
         case "openLink", "openUrl":
             guard let raw = payload.nonBlankString("url"),
                   let url = URL(string: raw),
-                  isOpenableLink(url)
+                  GameLinkPolicy.isOpenableLink(url)
             else { return .malformed }
             return .request(.actionOpenLink(id: id, op: op, url: url))
         case "deeplink":
             guard let raw = payload.nonBlankString("url"),
                   let url = URL(string: raw),
-                  isOpenableLink(url)
+                  GameLinkPolicy.isOpenableLink(url)
             else { return .malformed }
             return .request(.actionOpenDeeplink(id: id, url: url))
         case "customKV":
@@ -528,18 +528,6 @@ final class GameBridge {
 
     private static func isMotionSensor(_ sensor: String) -> Bool {
         GameMotionSource.allSensorNames.contains(sensor)
-    }
-
-    /// Schemes that would run code, read local data or bypass the host's link routing.
-    private static let blockedLinkSchemes: Set<String> = [
-        "javascript", "vbscript", "data", "blob", "file", "about",
-    ]
-
-    /// Web links need a host; app deep links (`medihub://cart`) only a safe scheme.
-    private static func isOpenableLink(_ url: URL) -> Bool {
-        guard let scheme = url.scheme?.lowercased() else { return false }
-        if scheme == "http" || scheme == "https" { return !(url.host ?? "").isEmpty }
-        return !blockedLinkSchemes.contains(scheme)
     }
 
     /// A JSON number as a Double: `hz` may arrive as either. Non-numbers and

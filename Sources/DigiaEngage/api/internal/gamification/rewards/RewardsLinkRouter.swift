@@ -12,24 +12,21 @@ enum RewardsLinkRoute: Equatable {
 
 /// Decides internal, external or refused, by scheme. An http(s) link is external,
 /// so the system can hand the app's own universal links back to the app. Any
-/// other allowed scheme goes to the app's deep-link handler.
+/// other openable scheme goes to the app's deep-link handler. The openability
+/// rule is `GameLinkPolicy.isOpenableLink`, so script-like schemes, `about`,
+/// a link with no scheme and a web link with no host are refused — `about`
+/// too, like on the game bridge. Pure logic.
 enum RewardsLinkRouter {
-    private static let refusedSchemes: Set<String> = [
-        "javascript", "data", "file", "blob", "vbscript", "intent", "content",
-    ]
-
     static func route(_ raw: String) -> RewardsLinkRoute {
         // Browsers drop tabs and newlines inside a scheme ("java\nscript:"); so do we:
         // strip ISO controls (U+0000–U+001F, U+007F), then trim, then parse.
         let stripped = String(raw.unicodeScalars.filter { !($0.value <= 0x1F || $0.value == 0x7F) })
         let trimmed = stripped.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = URL(string: trimmed), let scheme = url.scheme?.lowercased(),
-              !refusedSchemes.contains(scheme)
+        guard let url = URL(string: trimmed),
+              let scheme = url.scheme?.lowercased(),
+              GameLinkPolicy.isOpenableLink(url)
         else { return .refused }
         guard scheme == "http" || scheme == "https" else { return .internal(url) }
-        guard let host = URLComponents(url: url, resolvingAgainstBaseURL: false)?
-            .percentEncodedHost, !host.isEmpty
-        else { return .refused }
         return .external(url)
     }
 }

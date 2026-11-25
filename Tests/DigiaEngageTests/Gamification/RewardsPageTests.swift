@@ -39,6 +39,16 @@ struct RewardsPageTests {
         }
     }
 
+    // Fails if an `about` link stops being refused like the other blocked
+    // schemes: `about:blank` is a blank page, never a destination the host
+    // can route. Mirrors Android's `about links are refused`.
+    @Test("about links are refused like the other blocked schemes")
+    func aboutLinksRefused() {
+        for raw in ["about:blank", "ABOUT:blank", "  about:blank"] {
+            #expect(RewardsLinkRouter.route(raw) == .refused, "\(raw)")
+        }
+    }
+
     @Test("any other allowed scheme is internal: custom, partner, tel, mailto")
     func otherSchemesInternal() {
         for raw in ["myapp://offers/12", "MyApp://offers/12", "ridenow://trip/1", "tel:+911234567890",
