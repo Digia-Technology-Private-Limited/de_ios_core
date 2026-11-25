@@ -3,8 +3,8 @@ import Foundation
 private let log = DigiaLogger()
 
 /// The flags and limits the backend can change without an SDK release.
-/// `sdkHealth`, `appEvents`, `gamification.prewarm`, `gamification.deviceTier`,
-/// `gamification.measurement`, `gamification.limits` and `gamification.storage`
+/// `sdkHealth`, `appEvents`, `gamification.prewarm`, `gamification.deviceTier`
+/// (with `thresholds`), `gamification.limits` and `gamification.storage`
 /// are read here; the saved response is kept whole.
 /// `gamification.limits`: caps for skin downloads, the skin cache and the
 /// bridge intake. The ranges mirror the backend's `LIMIT_RANGES` in
@@ -94,14 +94,14 @@ struct GameStorageLimits: Equatable, Sendable {
     }
 }
 
-/// `gamification.measurement`: the cutoffs the device-tier level math reads.
-/// Mirrors the `gamification.measurement` section the backend sends (see
+/// `gamification.deviceTier.thresholds`: the cutoffs the device-tier level math reads.
+/// Mirrors the `thresholds` nested under `deviceTier` the backend sends (see
 /// `backend/src/services/digia-engage/sdk/gamificationConfig.ts`, the source
-/// of truth); until the backend ships it, every install runs on these
-/// defaults, which equal the long-standing hardcoded cutoffs. Absent keys
-/// take their default; a malformed or out-of-range value falls the whole
-/// section back to the defaults (like `deviceTier`), never half-applies, and
-/// never throws.
+/// of truth); a missing section runs on these defaults, which equal the
+/// long-standing hardcoded cutoffs. Absent keys take their default; a malformed
+/// or out-of-range value falls the whole section back to the defaults
+/// (like `deviceTier`), never half-applies, and never throws, independent of
+/// the tier rules.
 ///
 /// Only some fields drive iOS math: the RAM bands, the battery bands and the
 /// RAM CPU caps feed `GameDeviceInfo`'s approximations, and `lowRamDeviceMb`
@@ -145,8 +145,8 @@ struct GameMeasurementThresholds: Equatable, Sendable {
     static let maxBattery = 100
     static let minCpuScore = 1.0
     static let maxCpuScore = 200.0
-    static let minLowRamDeviceMb = 256
-    static let maxLowRamDeviceMb = 32768
+    static let minLowRamDeviceMb = 512
+    static let maxLowRamDeviceMb = 8192
 
     static let defaults = GameMeasurementThresholds(
         ramLowGb: 2.8, ramMidGb: 6.9, ramHighGb: 10.5,
@@ -239,7 +239,7 @@ struct GameMeasurementThresholds: Equatable, Sendable {
 
     /// Absent, null or blank reads as unset (nil), keeping `isLowRamDevice`
     /// missing. A present number must be a finite whole number of megabytes
-    /// inside 256…32768; anything else is nil, failing the whole section.
+    /// inside 512…8192; anything else is nil, failing the whole section.
     private static func lowRamMb(_ raw: Any?) -> Int?? {
         guard let raw else { return .some(nil) }
         if raw is NSNull { return .some(nil) }
@@ -265,7 +265,7 @@ struct SdkConfig: Equatable, Sendable {
     let gamePrewarm: GamePrewarmConfig
     /// How a device is placed in a game tier; the built-in default unless the backend sends one.
     let deviceTier: DeviceTierConfig
-    /// The cutoffs the device-tier level math reads; today's hardcoded numbers until the backend sends them.
+    /// The cutoffs the device-tier level math reads (`deviceTier.thresholds`).
     let gameMeasurement: GameMeasurementThresholds
     /// Skin download, skin cache and bridge intake caps.
     let gameSkinLimits: GameSkinLimits
@@ -346,7 +346,7 @@ struct SdkConfig: Equatable, Sendable {
             ),
             deviceTier: DeviceTierConfig.parse(section(primary, ["gamification", "deviceTier"]) as? [String: Any]),
             gameMeasurement: GameMeasurementThresholds.parse(
-                section(primary, ["gamification", "measurement"]) as? [String: Any]),
+                section(primary, ["gamification", "deviceTier", "thresholds"]) as? [String: Any]),
             gameSkinLimits: GameSkinLimits.parse(
                 section(primary, ["gamification", "limits"]) as? [String: Any]),
             gameStorageLimits: GameStorageLimits.parse(

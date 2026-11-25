@@ -219,11 +219,11 @@ struct SDKInstanceSdkConfigTests {
         network.answer("{}")
     }
 
-    @Test("a cached gamification measurement section applies at launch")
+    @Test("a cached gamification thresholds section applies at launch")
     func cachedMeasurementAtLaunch() async throws {
         defer { GameDeviceInfo.applyMeasurementThresholds(.defaults) }
         let defaults = makeDefaults()
-        seedCache(defaults, #"{"gamification":{"measurement":{"ramLowGb":3.0,"lowRamDeviceMb":2048}}}"#)
+        seedCache(defaults, #"{"gamification":{"deviceTier":{"thresholds":{"ramLowGb":3.0,"lowRamDeviceMb":2048}}}}"#)
         let network = ConfigNetworkClient()
         let sdk = makeInstance(defaults: defaults, network: network, sink: HealthSink())
 

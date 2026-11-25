@@ -294,7 +294,7 @@ struct SdkConfigGameLimitsTests {
     }
 }
 
-@Suite("SdkConfig game measurement")
+@Suite("SdkConfig game thresholds")
 struct SdkConfigGameMeasurementTests {
     private func measurement(_ json: String) -> GameMeasurementThresholds {
         SdkConfig.resolve(fetched: object(json)).gameMeasurement
@@ -302,7 +302,7 @@ struct SdkConfigGameMeasurementTests {
 
     /// The cross-stack parity vector: every field off-default but in range.
     /// Android resolves the same input to the same thresholds.
-    private static let parityJson = #"{"gamification":{"measurement":{"ramLowGb":3.0,"ramMidGb":7.0,"ramHighGb":11.0,"heapLowMb":100,"heapMidMb":180,"heapHighMb":300,"heapPressureRatio":0.8,"availThresholdFactor":2.0,"batteryHigh":85,"batteryHighCharging":75,"batteryMid":60,"batteryMidCharging":55,"batteryLow":45,"batteryLowCharging":40,"cpuScoreLow":25,"cpuScoreMid":40,"cpuScoreHigh":60,"cpuCapRamLowGb":3.0,"cpuCapRamMidGb":4.0,"cpuCapHeapLow":110,"cpuCapHeapMid":170,"lowRamDeviceMb":2048}}}"#
+    private static let parityJson = #"{"gamification":{"deviceTier":{"thresholds":{"ramLowGb":3.0,"ramMidGb":7.0,"ramHighGb":11.0,"heapLowMb":100,"heapMidMb":180,"heapHighMb":300,"heapPressureRatio":0.8,"availThresholdFactor":2.0,"batteryHigh":85,"batteryHighCharging":75,"batteryMid":60,"batteryMidCharging":55,"batteryLow":45,"batteryLowCharging":40,"cpuScoreLow":25,"cpuScoreMid":40,"cpuScoreHigh":60,"cpuCapRamLowGb":3.0,"cpuCapRamMidGb":4.0,"cpuCapHeapLow":110,"cpuCapHeapMid":170,"lowRamDeviceMb":2048}}}}"#
     private static let parity = GameMeasurementThresholds(
         ramLowGb: 3.0, ramMidGb: 7.0, ramHighGb: 11.0,
         heapLowMb: 100, heapMidMb: 180, heapHighMb: 300,
@@ -355,7 +355,7 @@ struct SdkConfigGameMeasurementTests {
     @Test("absent keys take their defaults")
     func absentKeysDefault() {
         // Guards the per-key fallback: only the sent keys move.
-        let m = measurement(#"{"gamification":{"measurement":{"ramLowGb":3.0,"batteryHigh":85}}}"#)
+        let m = measurement(#"{"gamification":{"deviceTier":{"thresholds":{"ramLowGb":3.0,"batteryHigh":85}}}}"#)
         #expect(m.ramLowGb == 3.0)
         #expect(m.batteryHigh == 85)
         #expect(m.ramMidGb == GameMeasurementThresholds.defaults.ramMidGb)
@@ -368,25 +368,30 @@ struct SdkConfigGameMeasurementTests {
         // Guards the whole-fallback rule: one bad value costs the section,
         // even beside valid ones. The base holds keys no bad entry touches,
         // so each payload has one value per key.
-        let base = #"{"gamification":{"measurement":{"heapMidMb":180,"cpuCapRamLowGb":3.0"#
+        let base = #"{"gamification":{"deviceTier":{"thresholds":{"heapMidMb":180,"cpuCapRamLowGb":3.0"#
         for bad in [
-            #","ramMidGb":"much"}}}"#, // string
-            #","ramMidGb":true}}}"#, // boolean
-            #","heapLowMb":128.5}}}"#, // fractional Mb
-            #","ramLowGb":0.4}}}"#, // Gb below range
-            #","ramHighGb":33}}}"#, // Gb above range
-            #","heapHighMb":1025}}}"#, // Mb above range
-            #","heapPressureRatio":5.1}}}"#, // ratio above range
-            #","availThresholdFactor":-0.1}}}"#, // ratio below range
-            #","batteryHigh":101}}}"#, // battery above range
-            #","batteryLowCharging":-1}}}"#, // battery below range
-            #","cpuScoreLow":0.9}}}"#, // score below range
-            #","cpuScoreHigh":201}}}"#, // score above range
-            #","cpuCapHeapLow":15}}}"#, // heap cap below range
-            #","lowRamDeviceMb":100}}}"#, // lowRam below range
-            #","lowRamDeviceMb":40000}}}"#, // lowRam above range
-            #","lowRamDeviceMb":"2048"}}}"#, // a numeric string is still malformed
-            #","batteryHigh":null}}}"#, // explicit null is malformed
+            #","ramMidGb":"much"}}}}"#, // string
+            #","ramMidGb":true}}}}"#, // boolean
+            #","heapLowMb":128.5}}}}"#, // fractional Mb
+            #","ramLowGb":0.4}}}}"#, // Gb below range
+            #","ramHighGb":33}}}}"#, // Gb above range
+            #","heapHighMb":1025}}}}"#, // Mb above range
+            #","heapPressureRatio":5.1}}}}"#, // ratio above range
+            #","availThresholdFactor":-0.1}}}}"#, // ratio below range
+            #","batteryHigh":101}}}}"#, // battery above range
+            #","batteryLowCharging":-1}}}}"#, // battery below range
+            #","cpuScoreLow":0.9}}}}"#, // score below range
+            #","cpuScoreHigh":201}}}}"#, // score above range
+            #","cpuCapHeapLow":15}}}}"#, // heap cap below range
+            #","lowRamDeviceMb":100}}}}"#, // hatch below 512
+            #","lowRamDeviceMb":256}}}}"#, // hatch below 512
+            #","lowRamDeviceMb":511}}}}"#, // hatch below 512
+            #","lowRamDeviceMb":512.5}}}}"#, // hatch must be whole
+            #","lowRamDeviceMb":8193}}}}"#, // hatch above 8192
+            #","lowRamDeviceMb":32768}}}}"#, // hatch above 8192
+            #","lowRamDeviceMb":40000}}}}"#, // hatch above range
+            #","lowRamDeviceMb":"2048"}}}}"#, // a numeric string is still malformed
+            #","batteryHigh":null}}}}"#, // explicit null is malformed
         ] {
             #expect(measurement(base + bad) == .defaults, "\(bad)")
         }
@@ -395,19 +400,19 @@ struct SdkConfigGameMeasurementTests {
     @Test("blank lowRamDeviceMb is unset, a set value wins")
     func blankLowRamIsUnset() {
         // Guards the lowRam tri-state: absent, null and blank stay missing.
-        #expect(measurement(#"{"gamification":{"measurement":{"ramLowGb":3.0}}}"#).lowRamDeviceMb == nil)
-        #expect(measurement(#"{"gamification":{"measurement":{"lowRamDeviceMb":null}}}"#).lowRamDeviceMb == nil)
-        #expect(measurement(#"{"gamification":{"measurement":{"lowRamDeviceMb":""}}}"#).lowRamDeviceMb == nil)
-        #expect(measurement(#"{"gamification":{"measurement":{"lowRamDeviceMb":"   "}}}"#).lowRamDeviceMb == nil)
-        #expect(measurement(#"{"gamification":{"measurement":{"lowRamDeviceMb":2048}}}"#).lowRamDeviceMb == 2048)
-        #expect(measurement(#"{"gamification":{"measurement":{"lowRamDeviceMb":256}}}"#).lowRamDeviceMb == 256)
-        #expect(measurement(#"{"gamification":{"measurement":{"lowRamDeviceMb":32768}}}"#).lowRamDeviceMb == 32768)
+        #expect(measurement(#"{"gamification":{"deviceTier":{"thresholds":{"ramLowGb":3.0}}}}"#).lowRamDeviceMb == nil)
+        #expect(measurement(#"{"gamification":{"deviceTier":{"thresholds":{"lowRamDeviceMb":null}}}}"#).lowRamDeviceMb == nil)
+        #expect(measurement(#"{"gamification":{"deviceTier":{"thresholds":{"lowRamDeviceMb":""}}}}"#).lowRamDeviceMb == nil)
+        #expect(measurement(#"{"gamification":{"deviceTier":{"thresholds":{"lowRamDeviceMb":"   "}}}}"#).lowRamDeviceMb == nil)
+        #expect(measurement(#"{"gamification":{"deviceTier":{"thresholds":{"lowRamDeviceMb":2048}}}}"#).lowRamDeviceMb == 2048)
+        #expect(measurement(#"{"gamification":{"deviceTier":{"thresholds":{"lowRamDeviceMb":512}}}}"#).lowRamDeviceMb == 512)
+        #expect(measurement(#"{"gamification":{"deviceTier":{"thresholds":{"lowRamDeviceMb":8192}}}}"#).lowRamDeviceMb == 8192)
     }
 
     @Test("the fetched section wins whole over the cached one")
     func fetchedWinsWholeOverCached() {
-        let cached = object(#"{"gamification":{"measurement":{"ramLowGb":3.0,"batteryHigh":85}}}"#)
-        let fetched = object(#"{"gamification":{"measurement":{"batteryMid":60}}}"#)
+        let cached = object(#"{"gamification":{"deviceTier":{"thresholds":{"ramLowGb":3.0,"batteryHigh":85}}}}"#)
+        let fetched = object(#"{"gamification":{"deviceTier":{"thresholds":{"batteryMid":60}}}}"#)
         let resolved = SdkConfig.resolve(fetched: fetched, cached: cached).gameMeasurement
         // Guards the whole-section rule: the fetched section decides alone,
         // so the cached cutoffs don't leak in beside the fetched one.
@@ -419,10 +424,39 @@ struct SdkConfigGameMeasurementTests {
 
     @Test("a malformed section costs only itself, not its neighbour")
     func malformedCostsOnlyItself() {
+        // Same input as Android's mixed thresholds payload: same resolved values.
         let resolved = SdkConfig.resolve(fetched: object(
-            #"{"gamification":{"measurement":{"ramLowGb":"big"},"limits":{"skinFileMaxBytes":2097152}}}"#))
+            #"{"gamification":{"limits":{"skinFileMaxBytes":4194304},"deviceTier":{"thresholds":{"ramLowGb":3.0,"heapLowMb":"huge"}},"storage":{"valueMaxBytes":8192}}}"#))
         #expect(resolved.gameMeasurement == .defaults)
-        #expect(resolved.gameSkinLimits.skinFileMaxBytes == 2 * 1024 * 1024)
+        #expect(resolved.gameSkinLimits.skinFileMaxBytes == 4194304)
+        #expect(resolved.gameStorageLimits.valueMaxBytes == 8192)
+    }
+
+    @Test("bad thresholds never nuke rules and bad rules never nuke thresholds")
+    func thresholdsIndependentOfRules() {
+        let goodRules = #""weights":{"cpuLevel":1},"rules":[{"tier":"mid","all":[{"fact":"a","gte":1}]}],"fallback":"low""#
+        let resolvedBadThresholds = SdkConfig.resolve(fetched: object(
+            #"{"gamification":{"deviceTier":{\#(goodRules),"thresholds":{"ramLowGb":"huge"}}}}"#))
+        #expect(resolvedBadThresholds.deviceTier.rules.first?.tier == "mid")
+        #expect(resolvedBadThresholds.gameMeasurement == .defaults)
+        let resolvedBadRules = SdkConfig.resolve(fetched: object(
+            #"{"gamification":{"deviceTier":{"weights":{"cpuLevel":-1},"rules":[],"fallback":"low","thresholds":{"ramLowGb":3.0,"lowRamDeviceMb":1024}}}}"#))
+        #expect(resolvedBadRules.deviceTier == .default)
+        #expect(resolvedBadRules.gameMeasurement.ramLowGb == 3.0)
+        #expect(resolvedBadRules.gameMeasurement.lowRamDeviceMb == 1024)
+    }
+
+    @Test("a mixed deviceTier payload resolves rules and thresholds together")
+    func mixedDeviceTierPayload() {
+        // Same input as Android: rules and thresholds land together.
+        let resolved = SdkConfig.resolve(fetched: object(
+            #"{"gamification":{"deviceTier":{"weights":{"cpuLevel":1},"rules":[{"tier":"mid","all":[{"fact":"a","gte":1}]}],"fallback":"mid","thresholds":{"ramLowGb":3.0,"heapLowMb":130,"batteryHigh":90,"cpuScoreLow":25,"cpuCapRamLowGb":3.0,"lowRamDeviceMb":1024}},"limits":{"skinFileMaxBytes":4194304},"storage":{"valueMaxBytes":8192}}}"#))
+        #expect(resolved.deviceTier.fallback == "mid")
+        #expect(resolved.deviceTier.rules.first?.tier == "mid")
+        #expect(resolved.gameMeasurement.ramLowGb == 3.0)
+        #expect(resolved.gameMeasurement.lowRamDeviceMb == 1024)
+        #expect(resolved.gameSkinLimits.skinFileMaxBytes == 4194304)
+        #expect(resolved.gameStorageLimits.valueMaxBytes == 8192)
     }
 }
 
