@@ -240,6 +240,21 @@ final class PipSurface: CampaignSurface {
             // cannot run.
             return request.invalidConfig(message, cause: "start_failed")
         }
+        // A sync media abandon (#245) accepted-then-ended inside `start`
+        // (state cleared, failure reason set) so the organic/host/DMC verdict
+        // stays dropped/cancelled via the dismissal callback. A live test must
+        // fail at once instead: returning accepted would arm the 5 s watchdog
+        // on a showing that already ended (whose never-displayed `dismissed`
+        // relay is suppressed above) into a `timeout`. Route dropped so the
+        // driver's policy posts `failed` now and `routeLiveTestCampaign`
+        // cleans up without arming the watchdog.
+        if request.driver.kind == .liveTest,
+           sdk.floaterOrchestrator.state == nil,
+           let abandonFailure = sdk.floaterOrchestrator.lastStartFailureReason,
+           !sdk.floaterOrchestrator.lastStartFailedBusy
+        {
+            return request.invalidConfig(abandonFailure, cause: "invalid_url")
+        }
         return .accepted(payload: payload, kind: .floating)
     }
 
