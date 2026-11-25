@@ -34,7 +34,7 @@ final class SurveyReporter {
             state.payload,
             campaignKey: state.payload.campaignKey,
             viewed: SurveyEvent.Viewed(
-                itemTotal: state.config.questionCount,
+                itemTotal: state.config.itemTotal,
                 hasWelcome: state.config.hasWelcome,
                 hasThanks: state.config.hasThanks,
                 hasBranching: state.config.hasBranching,
@@ -77,7 +77,7 @@ final class SurveyReporter {
                 questionTitle: Self.questionTitle(block),
                 questionType: typeWire,
                 itemIndex: itemIndex,
-                itemTotal: state.config.questionCount,
+                itemTotal: state.config.itemTotal,
                 blockType: typeWire,
                 blockId: block.id,
                 isRequired: block.required
@@ -173,7 +173,7 @@ final class SurveyReporter {
         let answeredCount = answers.isEmpty ? response.count : answers.count
         ctx.events.toDigia(
             SurveyEvent.Completed(
-                itemTotal: state.config.questionCount,
+                itemTotal: state.config.itemTotal,
                 answeredCount: answeredCount,
                 timeToCompleteMs: Int64(SurveyClock.now().timeIntervalSince(state.startedAt) * 1000),
                 response: Self.foundation(response)
@@ -269,7 +269,7 @@ final class SurveyReporter {
             SurveyEvent.Dismissed(
                 dismissReason: reason.wire,
                 abandonedAtItem: completed ? nil : abandonedAtItem,
-                itemTotal: state.config.questionCount,
+                itemTotal: state.config.itemTotal,
                 answeredCount: answeredCount,
                 dwellMs: ctx.dwell.consumeDwellMs(state.payload.cepCampaignId)
             ),

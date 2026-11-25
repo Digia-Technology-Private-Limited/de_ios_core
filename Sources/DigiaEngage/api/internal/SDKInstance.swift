@@ -2332,14 +2332,12 @@ struct CaptureDebugPage: Identifiable {
 // MARK: - Survey config metrics (Engage matrix props)
 
 extension SurveyConfigModel {
-    /// Configured questions = graph nodes whose block is an actual prompt (not
-    /// content chrome like welcome / text-media / result pages).
-    var questionCount: Int {
-        nodes.filter { node in
-            guard let block = blockFor(node) else { return false }
-            return !block.type.isContent
-        }.count
-    }
+    /// Every graph node, including content chrome (text-media / result pages).
+    /// Event `item_total` counts the whole showing, not just its prompts —
+    /// the submission's `totalCount` is the prompts-only count
+    /// (testkit/sdk-tests `SURVEY-COVERAGE-PLAN.md` B12; Flutter counts
+    /// `config.nodes.length`, Android tracks the same under F21).
+    var itemTotal: Int { nodes.count }
 
     var hasWelcome: Bool { welcomeBlock() != nil }
 
