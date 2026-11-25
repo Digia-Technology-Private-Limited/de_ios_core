@@ -2,6 +2,23 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
+## [4.6.0] - 2026-11-26
+
+### New Features
+
+- Added gamification campaigns, which play a game in a full-screen web view and need a user set with `Digia.setUserId`.
+- Added `Digia.openRewards()` and a `digia_rewards_widget` slot for rewards; `Digia.handleDeepLink(_:from:)` now opens rewards for the SDK's rewards link.
+
+### Improvements
+
+- Failed canvas and nudge images and Lottie animations no longer show a grey labelled box, and banner and survey pictures lose their grey backdrop.
+- Digia Engage images now load through their own loader and disk cache, separate from your app's image cache.`.
+- An anchorless guide step now ends when its picture has not drawn in time, instead of when the request idles too long.
+
+### Bug Fixes
+
+- Nudges and surveys now read safe areas from a visible window when no window is key, as in React Native hosts.
+
 ## [4.5.0] - 2026-11-23
 
 ### New Features
