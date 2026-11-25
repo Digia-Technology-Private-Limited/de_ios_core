@@ -29,11 +29,11 @@ struct DMCRuleRoutingTests {
     /// An SDK that has fetched the bundle below and is ready.
     private static func ready() async throws -> (SDKInstance, RoutingSink) {
         let network = HeldBundleNetworkClient()
-        let sdk = SDKInstance(
+        let sdk = { let instance = SDKInstance(
             defaults: UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!,
             legacyDefaults: UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!,
             makeNetworkClient: { _ in network }
-        )
+        ); instance.onHostMounted(SDKInstance.testHostId); return instance }()
         let sink = RoutingSink()
         DigiaLogger.registerSink(sink)
         network.release(.success(bundle))

@@ -303,6 +303,7 @@ extension SdkHarness {
         await SdkGate.shared.enter()
         do {
             let sdk = try await start(campaigns: [campaign.json])
+            sdk.sdk.onHostUnmounted(SDKInstance.testHostId)
             sdk.tearDownHooks.append { Task { await SdkGate.shared.leave() } }
             return sdk
         } catch {

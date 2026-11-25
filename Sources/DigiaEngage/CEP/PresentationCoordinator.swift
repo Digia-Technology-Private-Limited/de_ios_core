@@ -85,6 +85,11 @@ final class PresentationCoordinator {
     private let newId: () -> String
     private let onCancelSurface: (CEPTriggerPayload) -> Void
 
+    /// Whether no overlay host is on screen to draw anything. The acceptance window doubles as
+    /// the host's grace period (cold start, a root swap, a screen change), so a window that ends
+    /// in the foreground with no host settles `host_not_mounted`, not `timeout`.
+    var noHostAtTimeout: () -> Bool = { false }
+
     private var live: [String: LiveEntry] = [:]
 
     /// Bumped each time the app leaves the foreground. An acceptance window
@@ -183,11 +188,18 @@ final class PresentationCoordinator {
             // Settle first, then take it off the surface (R3-D1), as the anchor
             // watchdog does: the settle is the decision and can't be undone by
             // whatever the teardown emits.
+            // A backgrounded app has no host on screen by definition; it stays a `timeout`.
+            let noHost = self.isAppInForeground && self.noHostAtTimeout()
             controller.settle(
-                .dropped(
-                    reason: .timeout,
-                    detail: "never displayed within the acceptance window"
-                )
+                noHost
+                    ? .dropped(
+                        reason: .hostNotMounted,
+                        detail: "no Digia host was on screen within the acceptance window"
+                    )
+                    : .dropped(
+                        reason: .timeout,
+                        detail: "never displayed within the acceptance window"
+                    )
             )
             self.onCancelSurface(controller.trigger)
         }

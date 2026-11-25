@@ -197,6 +197,30 @@ extension DigiaEngageTests {
         second.removeFromSuperview()
     }
 
+    // Fails if: `endCampaignsForHostTeardown` stops ending a guide through `GuideSurface.end` (`dismissGuide`),
+    // e.g. back to cancelling its presentation: the guide would leave with no Digia Dismissed, an orphaned Viewed.
+    @Test("a guide on screen when the host is torn down ends cancelled, with Digia's step and experience dismissals")
+    func hostTeardownEndsAGuideWithItsDismissal() async throws {
+        let (sdk, _) = try await makeGuideInstance(stepCount: 2)
+        let recorder = PresentationRecorder(sdk.triggerCampaign("a40-guide", variables: nil))
+        sdk.guideOrchestrator.reportGuideShown()
+
+        sdk.endCampaignsForHostTeardown()
+        await nextTurn()
+
+        #expect(sdk.guideOrchestrator.state == nil)
+        #expect(recorder.outcome == .dismissed(reason: .cancelled, completed: false))
+        #expect(try await digiaEventNames(sdk) == [
+            "Digia Experience Viewed", "Digia Step Viewed",
+            "Digia Step Dismissed", "Digia Experience Dismissed",
+        ])
+        let entries = try await #require(sdk.services?.analyticsService).queue.peek(maxCount: 100)
+        let dismissed = entries.first {
+            $0.payload["event_name"] as? String == "Digia Experience Dismissed"
+        }?.payload["properties"] as? [String: Any]
+        #expect(dismissed?["dismiss_reason"] as? String == "cancelled")
+    }
+
     @Test("anchor leaves while its step shows: Digia step event, then target_lost to both (A40)")
     func removedAnchorWhileStepShowsMatchesFlutter() async throws {
         let (sdk, window) = try await makeGuideInstance(stepCount: 2)
@@ -318,9 +342,9 @@ private func makeGuideInstance(
 ) async throws -> (SDKInstance, UIWindow) {
     AnchorRegistry.shared.resetForTesting()
     let suite = { UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")! }
-    let sdk = SDKInstance(
+    let sdk = { let instance = SDKInstance(
         defaults: suite(), legacyDefaults: suite(), makeNetworkClient: { _ in MockNetworkClient() }
-    )
+    ); instance.onHostMounted(SDKInstance.testHostId); return instance }()
     try await sdk.initialize(DigiaConfig(apiKey: "test_key"))
     let steps: [[String: Any]] = (1...stepCount).map { index in
         var step: [String: Any] = [

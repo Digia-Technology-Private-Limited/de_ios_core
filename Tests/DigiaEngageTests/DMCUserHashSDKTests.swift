@@ -41,10 +41,10 @@ struct DMCUserHashSDKTests {
     private let network = UserContextRecorder()
 
     private func makeSDK() -> SDKInstance {
-        SDKInstance(
+        { let instance = SDKInstance(
             defaults: UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!,
             legacyDefaults: UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!,
-            makeNetworkClient: { [network] _ in network })
+            makeNetworkClient: { [network] _ in network }); instance.onHostMounted(SDKInstance.testHostId); return instance }()
     }
 
     private func initialize(_ sdk: SDKInstance) async throws {

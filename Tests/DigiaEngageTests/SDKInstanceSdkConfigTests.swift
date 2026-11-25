@@ -21,12 +21,12 @@ struct SDKInstanceSdkConfigTests {
     private func makeInstance(
         defaults: UserDefaults, network: ConfigNetworkClient, sink: HealthSink
     ) -> SDKInstance {
-        SDKInstance(
+        { let instance = SDKInstance(
             defaults: defaults,
             legacyDefaults: makeDefaults(),
             makeNetworkClient: { _ in network },
             healthSink: sink
-        )
+        ); instance.onHostMounted(SDKInstance.testHostId); return instance }()
     }
 
     private func seedCache(_ defaults: UserDefaults, _ json: String) {

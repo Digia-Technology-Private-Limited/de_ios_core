@@ -16,9 +16,9 @@ extension DigiaEngageTests {
             _ campaigns: [[String: Any]], wrapperBinding: String? = nil
         ) async throws -> SDKInstance {
             let suite = { UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")! }
-            let sdk = SDKInstance(
+            let sdk = { let instance = SDKInstance(
                 defaults: suite(), legacyDefaults: suite(), makeNetworkClient: { _ in MockNetworkClient() }
-            )
+            ); instance.onHostMounted(SDKInstance.testHostId); return instance }()
             try await sdk.initialize(DigiaConfig(apiKey: "test_key"))
             if let wrapperBinding {
                 sdk.markInitializedForTesting(

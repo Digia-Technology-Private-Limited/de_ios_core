@@ -256,6 +256,30 @@ struct GuideBehaviourTests {
         #expect(SDKInstance.shared.guideOrchestrator.state == nil)
     }
 
+    // Fails if: NudgeOverlayView.swift's `CoverAnchor` takes touches again (`isUserInteractionEnabled`).
+    // Under `Digia.attach(to:)` that full-size view sits above the guide layer and swallows the tap.
+    @Test("under attach, a tap outside ends a one-step spotlight guide")
+    func outsideTapEndsSpotlightUnderAttach() async throws {
+        let path = "\(Self.spotlights)outside_dismiss.json"
+        let sdk = try await SdkHarness.start(loadCampaign(path))
+        defer { sdk.tearDown() }
+        let window = ComponentTestHost.makeWindow(frame: CGRect(origin: .zero, size: SdkHarness.screen))
+        window.rootViewController = UIHostingController(rootView: GuideAnchorsScreenSG())
+        window.makeKeyAndVisible()
+        sdk.window = window
+        Digia.attach(to: window)
+        try await sdk.settle(0.5)
+        sdk.setCurrentScreen("home")
+        try sdk.deliver(keyOf(try loadCampaign(path)))
+        try await waitShowing(sdk, "Tap Outside to Dismiss Spotlight")
+        try await settleStep(sdk)
+
+        try tapScrim(sdk)
+
+        try await sdk.waitUntil("the spotlight is gone") { !sdk.isShowing("Tap Outside to Dismiss Spotlight") }
+        #expect(SDKInstance.shared.guideOrchestrator.state == nil)
+    }
+
     // Fails if: guide_overlay_view.swift's transparent background advances on any outside tap
     // (the `if config.outsideTapBehavior == .next` guard is dropped).
     @Test("is swallowed by a tooltip guide that authored `nothing`; only its button leaves")

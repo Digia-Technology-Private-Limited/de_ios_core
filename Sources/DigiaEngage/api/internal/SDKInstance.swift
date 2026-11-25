@@ -104,15 +104,19 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
 
     /// The single writer of presentation state. Every live presentation in the
     /// SDK is opened, indexed and settled here — see ``PresentationCoordinator``.
-    lazy var coordinator = PresentationCoordinator(
-        // Read through, not captured: the coordinator is built lazily on first
-        // delivery, and a test that sets `idGenerator` afterwards would
-        // otherwise be silently ignored.
-        idGenerator: { [weak self] in self?.idGenerator() ?? UUID().uuidString },
-        onCancelSurface: { [weak self] payload in
-            self?.dismissSurfaces(for: payload)
-        }
-    )
+    lazy var coordinator: PresentationCoordinator = {
+        let coordinator = PresentationCoordinator(
+            // Read through, not captured: the coordinator is built lazily on first
+            // delivery, and a test that sets `idGenerator` afterwards would
+            // otherwise be silently ignored.
+            idGenerator: { [weak self] in self?.idGenerator() ?? UUID().uuidString },
+            onCancelSurface: { [weak self] payload in
+                self?.dismissSurfaces(for: payload)
+            }
+        )
+        coordinator.noHostAtTimeout = { [weak self] in self?.noHostOnScreen() ?? false }
+        return coordinator
+    }()
     private let hostActionExecutor = HostActionExecutor()
     private lazy var actionExecutor = EngageActionExecutor(
         hostActionExecutor: hostActionExecutor
@@ -1389,12 +1393,71 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         debugOverlayController
     }
 
-    func onHostMounted() {
+    func onHostMounted(_ id: UUID) {
+        HostRegistry.shared.mount(id)
         isHostMounted = true
     }
 
-    func onHostUnmounted() {
-        isHostMounted = false
+    /// "Mounted" while any host is left, not just until the first one goes (`HostRegistry`).
+    func onHostUnmounted(_ id: UUID) {
+        HostRegistry.shared.unmount(id)
+        isHostMounted = !HostRegistry.shared.isEmpty
+        // Without attach, the last `DigiaHost` leaving (e.g. the app replaced its root) takes what it drew off
+        // the screen: end it now rather than leave it "displaying". Not when a host mounts again within the
+        // same turn, nor when the app's own modal only covers the host. Attach has its own path
+        // (`DigiaHostAttachment.hostLeftWindow`).
+        guard !DigiaHostAttachment.isInUse, HostRegistry.shared.isEmpty else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard HostRegistry.shared.isEmpty,
+                DigiaHostAttachment.appPresentation(in: ViewControllerUtil.keyWindow()) == nil
+            else { return }
+            self?.endCampaignsForHostTeardown()
+        }
+    }
+
+    /// The app replaced its window's root under the host `Digia.attach(to:)` added, so the host, and every
+    /// overlay it was drawing, left the screen with the old root. Ends those campaigns rather than leaving
+    /// them showing to nobody, as Flutter does on a host teardown: floaters as `host_teardown`, nudges,
+    /// surveys and guides cancelled. Inline slots live in the app's own screens and are not affected.
+    func endCampaignsForHostTeardown() {
+        endOverlayCampaigns(because: "the app replaced its root view controller, which removed Digia's layer")
+    }
+
+    /// The React Native JS bundle reloaded: the new JS session knows nothing of what the last one left on
+    /// screen, so those campaigns end exactly as on a host teardown.
+    func endCampaignsForJsReload() {
+        endOverlayCampaigns(because: "the React Native JS bundle reloaded")
+    }
+
+    private func endOverlayCampaigns(because cause: String) {
+        // An open story went with the old root too; left set, it would keep every touch.
+        if controller.activeStoryOverlay != nil { controller.dismissStoryOverlay() }
+        let ended = surfaceOccupants().filter {
+            if case .inline = $0.kind { return false }
+            return true
+        }
+        guard !ended.isEmpty else { return }
+        for occupant in ended {
+            log.w(
+                "Ended — \(cause)",
+                campaign: occupant.campaignKey,
+                stage: .render,
+                reason: TimelineReason.hostTeardown,
+                presentationId: occupant.presentationId
+            )
+        }
+        floaterOrchestrator.dismiss(.hostTeardown)
+        floaterStoryOrchestrator.dismiss(.hostTeardown)
+        // Each ends as a close would, cancelled: Digia's Dismissed for one on screen, the CEP's outcome, and a
+        // live test's dashboard row, which has no presentation to cancel.
+        for occupant in ended {
+            switch occupant.kind {
+            case .nudge: nudgeSurface.end(occupant, reason: .cancelled)
+            case .survey: surveySurface.end(occupant, reason: .cancelled)
+            case .guide: guideSurface.end(occupant, reason: .cancelled)
+            case .floaterExpanded, .floaterCollapsed, .inline: continue
+            }
+        }
     }
 
     /// Routes an organically delivered trigger and answers what happened to it.
@@ -1502,6 +1565,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         payload: CEPTriggerPayload,
         driver: CampaignDriver
     ) -> RoutingVerdict {
+        // `Digia.attach(to:)`: the app may have replaced its root since; put the host back before drawing.
+        DigiaHostAttachment.ensure()
         let router = CampaignRouter(
             occupants: { [unowned self] in surfaceOccupants() },
             supersede: { [unowned self] occupant, incoming, request in
@@ -1517,10 +1582,40 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             campaignsSuppressed: { [unowned self] in campaignsSuppressed },
             campaignId: { [unowned self] in campaignStore.find($0)?.id },
             reportMissing: { [unowned self] in reportMissingCampaignVariables($0.campaign, payload: $0.payload) },
-            configCheck: { [unowned self] in checkGuideCanvasContent($0) }
+            configCheck: { [unowned self] in checkGuideCanvasContent($0) },
+            hostUnavailable: { [unowned self] in hostUnavailable($0) }
         )
         logVerbose("routeByCampaignKey key='\(campaign.campaignKey)' type='\(campaign.campaignType)'")
         return router.route(CampaignRequest(driver: driver, campaign: campaign, payload: payload))
+    }
+
+    /// Whether no Digia host is on screen to draw an overlay. Not checked on arrival: a campaign
+    /// waits out the acceptance window like any delivery (a host may mount meanwhile, as at cold
+    /// start), and the watchdog reads this to settle `host_not_mounted` instead of `timeout`.
+    private func noHostOnScreen() -> Bool {
+        if DigiaHostAttachment.isInUse {
+            return !DigiaHostAttachment.hasHost && HostRegistry.shared.isEmpty
+        }
+        // The app's own full-screen modal also makes `DigiaHost` disappear: that is not "no host".
+        return HostRegistry.shared.isEmpty
+            && DigiaHostAttachment.appPresentation(in: ViewControllerUtil.keyWindow()) == nil
+    }
+
+    /// Why the host cannot draw this nudge or survey now, dropped at once: a modal of the app's own
+    /// in front of it is `host_modal_open`. A modal of Digia's own is left to the surface rule. A
+    /// missing host is not decided here (see ``noHostOnScreen()``).
+    private func hostUnavailable(_ request: CampaignRequest) -> (reason: DropReason, detail: String)? {
+        let attached = DigiaHostAttachment.isInUse
+        switch request.campaign.config {
+        case .nudge, .survey: break
+        default: return nil
+        }
+        // An open story is not a surface occupant, so the surface rule would not turn the nudge away.
+        if controller.activeStoryOverlay != nil { return (.surfaceBusy, "a story is on screen") }
+        let digiaPresents = controller.activeNudge != nil || surveyOrchestrator.state != nil
+        let window = attached ? DigiaHostAttachment.window : ViewControllerUtil.keyWindow()
+        guard !digiaPresents, let modal = DigiaHostAttachment.appPresentation(in: window) else { return nil }
+        return (.hostModalOpen, "the app is presenting \(type(of: modal))")
     }
 
     private func reportMissingCampaignVariables(_ campaign: CampaignModel, payload: CEPTriggerPayload) {
@@ -2231,6 +2326,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         return nil
     }
 
+    /// The stand-in host ``resetForTesting()`` registers.
+    static let testHostId = UUID()
+
     func resetForTesting() {
         DigiaEndpoints.resetForTest()
         ActionPlatform.current = .live
@@ -2259,7 +2357,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         config = nil
         hostActionExecutor.clearHandlers()
         sdkState = .notInitialized
-        isHostMounted = false
+        HostRegistry.shared.reset()
+        // Tests drive the SDK without drawing a host view; routing drops an overlay as `host_not_mounted`
+        // when no host is registered. A test of the no-host path unmounts `testHostId`.
+        onHostMounted(Self.testHostId)
         font = DigiaFont()
         currentDesignTokens = .empty
         currentTimeAnchor = nil
