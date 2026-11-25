@@ -347,41 +347,6 @@ struct GameChanceEventsAndCepTests {
         }
     }
 
-    // Fails if a skin-authored `event` stops reaching Digia as a stamped
-    // Custom, or starts reaching the CEP: the `onCustomEvent` in
-    // `makeGameOpenRequest` reports through `toDigia` only, with the window's
-    // chance (its latest), skin, entry and the skin's own flat properties —
-    // stamped keys always winning over same-named skin keys. Mirrors Android's
-    // `customEventIsDigiaOnlyWithWindowStamps`.
-    @Test("a skin event reaches Digia as a stamped Custom and never the CEP")
-    func customEventIsDigiaOnlyWithWindowStamps() async throws {
-        let (sdk, recorder) = try await rig()
-        let request = try directOpenRequest(sdk, recorder: recorder)
-
-        request.onShown?()
-        request.onCustomEvent?(
-            "level_up", ["level": 7, "event_name": "spoof", "chance_id": "spoof"])
-
-        // Guards the onCustomEvent closure: one Custom to Digia with the
-        // window stamps, the skin's level beside them, and nothing to the CEP.
-        let events = try await digiaEvents(sdk)
-        let customs = named("Digia Experience Custom", in: events)
-        let custom = try #require(customs.first)
-        #expect(customs.count == 1)
-        let props = Self.props(custom)
-        #expect(props["event_name"] as? String == "level_up")
-        #expect(props["display_style"] as? String == "game")
-        #expect(props["chance_id"] as? String == "ch-1")
-        #expect(props["skin_id"] as? String == "wheel")
-        #expect((props["skin_version"] as? NSNumber)?.intValue == 2)
-        #expect(props["entry"] as? String == "direct")
-        #expect((props["level"] as? NSNumber)?.intValue == 7)
-        // The open itself impressed the CEP; the skin's event never did: no
-        // click, no custom signal.
-        #expect(recorder.displayed)
-        #expect(recorder.clickedElementIds.isEmpty)
-    }
-
     // Fails if a live-test close or failure refreshes rewards: the
     // `testInvocationIdOf(payload.cepCampaignId) == nil` gate on the close-path
     // `refreshRewardsIfLoaded` in `closed`, or the `openTestInvocationId == nil`

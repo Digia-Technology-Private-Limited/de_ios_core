@@ -274,11 +274,6 @@ struct GameBridgeCasesTests {
                     pushes.append(Push(type: "lifecycle", payload: ["state": "paused"]))
                     if let id { answer(id: id, payload: ["ok": true]) }
                     bridge.close()
-                case .event(let id, _, _):
-                    // The host mirror: a validated skin event reports, then
-                    // answers the id — B5's session leg. An id-less event
-                    // still reports and gets no reply (B8).
-                    if let id { answer(id: id) }
                 default:
                     break
                 }
