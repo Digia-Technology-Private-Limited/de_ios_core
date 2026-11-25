@@ -537,7 +537,7 @@ final class RecordingPlatform {
 
     var actionPlatform: ActionPlatform {
         ActionPlatform(
-            open: { [weak self] in self?.opened.append($0.absoluteString) },
+            open: { [weak self] in self?.opened.append($0) },
             copy: { [weak self] in self?.copied.append($0) },
             share: { [weak self] in self?.shared.append($0) },
             requestReview: { [weak self] in self?.reviewRequests += 1 }
