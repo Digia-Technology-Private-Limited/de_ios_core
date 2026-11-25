@@ -288,7 +288,8 @@ private struct FloaterSessionView: View {
                     FloaterMediaView(
                         media: config.media, player: orchestrator.player,
                         cover: !expanded || config.expanded.cover,
-                        resolvedUrl: state.resolvedMediaUrl
+                        resolvedUrl: state.resolvedMediaUrl,
+                        lottieSource: orchestrator.lottieSource
                     )
                     .allowsHitTesting(false)
                     .zIndex(0)

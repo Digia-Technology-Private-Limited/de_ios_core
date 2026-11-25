@@ -24,6 +24,8 @@ struct MediaLottie: View {
     var loop: Bool = true
     var autoplay: Bool = true
     var freezeAt: CGFloat? = nil
+    /// A floater owns its prepared source until dismissal, so reveal does not fetch again.
+    var preloadedSource: LottieAnimationSource? = nil
 
     @Environment(\.digiaCampaignKey) private var campaignKey
     @Environment(\.mediaServices) private var services
@@ -33,7 +35,7 @@ struct MediaLottie: View {
 
     var body: some View {
         ZStack {
-            if let source {
+            if let source = preloadedSource ?? source {
                 animation(source)
             } else {
                 MediaStill(fit: fit, blurHash: blurHash)
@@ -62,6 +64,7 @@ struct MediaLottie: View {
     }
 
     private func load() async {
+        if preloadedSource != nil { return }
         // `.task(id:)` runs again each time the view appears: an animation already loaded for this
         // URL stays, so one scrolled off and back keeps playing instead of blinking to its still.
         if source != nil, loadedURL == url { return }

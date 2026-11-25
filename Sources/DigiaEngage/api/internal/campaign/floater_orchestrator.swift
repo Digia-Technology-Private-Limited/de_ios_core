@@ -148,6 +148,7 @@ final class FloaterOrchestrator: ObservableObject {
     @Published var activeRect: CGRect?
 
     private(set) var player: AVPlayer?
+    private(set) var lottieSource: LottieAnimationSource?
 
     /// `true` while another campaign or a host modal covers the window. Playback
     /// pauses (if configured) and visible-time accounting stops, but the floater is
@@ -457,7 +458,8 @@ final class FloaterOrchestrator: ObservableObject {
         Task { [weak self] in
             let loaded = await MediaServices.current.loadLottie(parsed)
             guard let self, self.state?.token == token else { return }
-            if loaded.source != nil {
+            if let source = loaded.source {
+                self.lottieSource = source
                 self.markVisible(token: token)
             } else {
                 self.abandonMedia(token: token, reason: "lottie failed to load", cause: loaded.failureCause)
@@ -675,6 +677,7 @@ final class FloaterOrchestrator: ObservableObject {
         endTimeObserverToken = nil
         player?.pause()
         player = nil
+        lottieSource = nil
     }
 
     /// Called when the host reports a new current screen. A floater belongs to one
@@ -736,6 +739,7 @@ final class FloaterOrchestrator: ObservableObject {
         endTimeObserverToken = nil
         player?.pause()
         player = nil
+        lottieSource = nil
         state = nil
         surface = .collapsed
         dragFraction = nil

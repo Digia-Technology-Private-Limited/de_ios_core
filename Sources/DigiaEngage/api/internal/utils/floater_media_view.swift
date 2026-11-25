@@ -1,6 +1,8 @@
 import AVFoundation
 import SwiftUI
 
+internal import Lottie
+
 /// The media surface, shared by both states. Reads the orchestrator's own `player` —
 /// created once by `FloaterOrchestrator`, never by this view — so playback is
 /// continuous across the collapsed/expanded grow transition. This view is only ever
@@ -19,6 +21,7 @@ struct FloaterMediaView: View {
     let player: AVPlayer?
     let cover: Bool
     let resolvedUrl: String
+    var lottieSource: LottieAnimationSource? = nil
 
     var body: some View {
         switch media.kind {
@@ -38,7 +41,8 @@ struct FloaterMediaView: View {
             url: resolvedUrl,
             fit: cover ? .cover : .contain,
             loop: media.loop,
-            autoplay: media.autoplay
+            autoplay: media.autoplay,
+            preloadedSource: lottieSource
         )
     }
 
