@@ -15,18 +15,10 @@ enum GameBridgeRequest {
     case storageGet(id: String, key: String)
     case storageSet(id: String, key: String, value: String)
     case storageRemove(id: String?, key: String)
-    case actionCopy(id: String?, text: String)
-    case actionOpenLink(id: String?, op: String, url: URL)
-    case actionOpenDeeplink(id: String?, url: URL)
-    case actionShare(id: String?, text: String)
-    case actionCustomKV(id: String?, payload: [String: String])
+    case actionSteps(id: String?, actions: [EngageAction])
     case actionClose(id: String?, reason: String?)
     case motionSubscribe(id: String, sensors: [String], hz: Double)
     case motionUnsubscribe(id: String, sensors: [String])
-    /// An `action` op with no named case, parsed by the canvas action parser
-    /// as `{type: op, data: payload}` (e.g. `requestReview`). Canvas-only
-    /// actions never reach here — the intake answers them as `unsupported`.
-    case actionPassthrough(id: String?, op: String, action: EngageAction)
 }
 
 /// Owns the bridge intake: the `{id?, type, payload}` envelope, the ready
@@ -70,6 +62,20 @@ final class GameBridge: GameBridgeProtocol {
     /// fire only when the pushed subset changed, so the tick is one cheap
     /// collect. Mirrors Android's `DEVICE_FACTS_POLL_MS`.
     nonisolated static let deviceFactsPollSeconds: TimeInterval = 5.0
+
+    /// Canvas step types the bridge accepts. Anything else answers `unsupported`.
+    nonisolated static let KNOWN_STEP_TYPES: Set<String> = [
+        "Action.openUrl", "open_url", "deep_link",
+        "Action.copyToClipBoard", "copy",
+        "Action.share", "share",
+        "Action.customKV",
+        "Action.requestReview", "requestReview", "request_review",
+        "Action.dismiss", "dismiss", "hide",
+        "Action.hideBottomSheet", "Action.hideInline", "Action.dismissDialog",
+        "Action.next", "next",
+        "Action.previous", "previous", "back", "prev",
+        "Action.showStory", "Action.openGame",
+    ]
 
     enum State: Equatable {
         case loading
@@ -354,12 +360,12 @@ final class GameBridge: GameBridgeProtocol {
         }
     }
 
-    /// The `action` intake: `{op, ...}` → `{ok:true}`. Named ops map to the
-    /// generic executor's actions; any other op goes through the canvas action
-    /// parser as `{type: op, data: payload}`, so a campaign action the SDK
-    /// already runs reaches skins with no bridge change. A missing op or a
-    /// named op with bad fields answers `bad_request`; an op the SDK cannot
-    /// run answers `unsupported` (both drop with the health event without an id).
+    /// The `action` intake: `{steps:[{type,data}]}` → `{ok:true}`. Same JSON the
+    /// canvas sends, parsed by the same action parser, run through the same
+    /// executor. A pure dismiss closes through the session (keeps the
+    /// before-ready fail handling), never the executor. Stage-only actions
+    /// (`next`, `previous`, `openGame`, `showStory`) never run in a game.
+    /// Links are policy-gated, close the game after they run, and count a click.
     /// A request the skin cannot be answered for (no usable id) is dropped —
     /// an id-less action still runs, it just gets no reply.
     private func handleAction(id: String?, payload: [String: Any]) {
@@ -382,53 +388,53 @@ final class GameBridge: GameBridgeProtocol {
     }
 
     private static func parseActionResult(id: String?, payload: [String: Any]) -> ActionParseOutcome {
-        guard let op = payload.nonBlankString("op") else { return .malformed }
-        switch op {
-        case "copy":
-            guard let text = payload.nonBlankString("text") else { return .malformed }
-            return .request(.actionCopy(id: id, text: text))
-        case "openLink", "openUrl":
-            // The policy decides on the control-stripped string and hands back
-            // that same canonical URL, so a scheme break can neither smuggle a
-            // blocked scheme past the check nor ride along into the open.
-            guard let raw = payload.nonBlankString("url"),
-                  let url = GameLinkPolicy.openableURL(raw)
-            else { return .malformed }
-            return .request(.actionOpenLink(id: id, op: op, url: url))
-        case "deeplink":
-            guard let raw = payload.nonBlankString("url"),
-                  let url = GameLinkPolicy.openableURL(raw)
-            else { return .malformed }
-            return .request(.actionOpenDeeplink(id: id, url: url))
-        case "customKV":
-            guard let raw = payload["payload"] as? [String: Any],
-                  case .customKV(let kv) = EngageActionParser.customKV(from: raw)
-            else { return .malformed }
-            return .request(.actionCustomKV(id: id, payload: kv))
-        case "share":
-            guard let text = payload.nonBlankString("text") else { return .malformed }
-            return .request(.actionShare(id: id, text: text))
-        case "close":
-            return .request(.actionClose(id: id, reason: payload["reason"] as? String))
-        default:
-            guard let action = passthroughAction(op: op, payload: payload) else { return .unknown }
-            return .request(.actionPassthrough(id: id, op: op, action: action))
+        // Old version-mismatch signal only: a newer skin on an older SDK sends
+        // close with a reason before ready. Normal closes now come as dismiss steps.
+        guard payload["steps"] != nil else {
+            if (payload["op"] as? String) == "close" {
+                return .request(.actionClose(id: id, reason: payload["reason"] as? String))
+            }
+            return .malformed
         }
+        let parsed = EngageActionParser().parseReportingUnknown(payload)
+        let dismisses = parsed.actions.filter { if case .dismiss = $0 { return true }; return false }
+        let runnable = parsed.actions.filter {
+            switch $0 {
+            case .dismiss, .next, .previous, .openGame, .showStory: return false
+            default: return true
+            }
+        }
+        if !dismisses.isEmpty && runnable.isEmpty {
+            return .request(.actionClose(id: id, reason: nil))
+        }
+        if runnable.isEmpty {
+            // Stage-only steps parsed but never run in a game: unsupported, not malformed.
+            if !parsed.actions.isEmpty { return .unknown }
+            return hasKnownStepType(payload) ? .malformed : .unknown
+        }
+        var canonical: [EngageAction] = []
+        canonical.reserveCapacity(runnable.count)
+        for action in runnable {
+            switch action {
+            case .openUrl(let raw):
+                // The policy decides on the control-stripped string and hands back
+                // that same canonical URL, so a scheme break can neither smuggle a
+                // blocked scheme past the check nor ride along into the open.
+                guard let url = GameLinkPolicy.openableURL(raw) else { return .malformed }
+                canonical.append(.openUrl(url.absoluteString))
+            case .openDeeplink(let raw):
+                guard let url = GameLinkPolicy.openableURL(raw) else { return .malformed }
+                canonical.append(.openDeeplink(url.absoluteString))
+            default: canonical.append(action)
+            }
+        }
+        return .request(.actionSteps(id: id, actions: canonical))
     }
 
-    /// One canvas action for an op the bridge has no case for, or nil. Actions
-    /// that only mean something on a canvas stage (dismiss, story paging,
-    /// opening a game) stay out.
-    private static func passthroughAction(op: String, payload: [String: Any]) -> EngageAction? {
-        let parsed = EngageActionParser().parseReportingUnknown(
-            ["steps": [["type": op, "data": payload]]])
-        guard !parsed.hasUnknown, parsed.actions.count == 1, let action = parsed.actions.first else {
-            return nil
-        }
-        switch action {
-        case .dismiss, .next, .previous, .openGame, .showStory: return nil
-        default: return action
-        }
+    /// Known canvas step types: a steps batch with only these but nothing parsed is malformed.
+    private static func hasKnownStepType(_ payload: [String: Any]) -> Bool {
+        guard let steps = payload["steps"] as? [[String: Any]] else { return false }
+        return steps.contains { KNOWN_STEP_TYPES.contains($0["type"] as? String ?? "") }
     }
 
     /// `motion`: one subscribe starts every listed sensor at the same rate, one

@@ -362,23 +362,27 @@ final class GamePresentation: Identifiable, ObservableObject {
             }
             storage.remove(key)
             if let id { bridge.answer(id: id) }
-        case .actionCopy(let id, let text):
-            runSkinAction(id: id, action: .copyToClipboard(text), op: "copy")
-        case .actionOpenLink(let id, let op, let url):
-            // The container closes first, then the host opens the link.
-            if let id { bridge.answer(id: id, payload: ["ok": true]) }
-            request.onCta?(op, url.absoluteString)
-            dismiss(reason: "cta")
-            runSkinActionAfterClose(action: .openUrl(url.absoluteString))
-        case .actionOpenDeeplink(let id, let url):
-            if let id { bridge.answer(id: id, payload: ["ok": true]) }
-            request.onCta?("deeplink", nil)
-            dismiss(reason: "cta")
-            runSkinActionAfterClose(action: .openDeeplink(url.absoluteString))
-        case .actionShare(let id, let text):
-            runSkinAction(id: id, action: .share(text), op: "share")
-        case .actionCustomKV(let id, let payload):
-            runSkinAction(id: id, action: .customKV(payload), op: "customKV")
+        case .actionSteps(let id, let actions):
+            // Same JSON the canvas sends. Links leave the game: answer now,
+            // close first, then run after close (the container must not block
+            // the handoff). Everything else runs through the shared executor.
+            let links = actions.filter {
+                if case .openUrl = $0 { return true }
+                if case .openDeeplink = $0 { return true }
+                return false
+            }
+            if links.isEmpty {
+                runSkinActions(id: id, actions: actions)
+            } else {
+                if let id { bridge.answer(id: id, payload: ["ok": true]) }
+                for action in actions {
+                    if let op = Self.actionOp(action) {
+                        request.onCta?(op, Self.actionUrl(action))
+                    }
+                }
+                dismiss(reason: "cta")
+                runSkinActionsAfterClose(actions: actions)
+            }
         case .actionClose(let id, let reason):
             if let reason, !reason.isEmpty {
                 log.d("Game closed by skin (reason=\(reason))", campaign: self.request.campaignKey)
@@ -407,49 +411,61 @@ final class GamePresentation: Identifiable, ObservableObject {
         case .motionUnsubscribe(let id, let sensors):
             for sensor in sensors { motion.stop(sensor: sensor) }
             bridge.answer(id: id)
-        case .actionPassthrough(let id, let op, let action):
-            // Any campaign action the canvas parser knows (e.g. requestReview)
-            // runs through the same executor. One that leaves the game closes
-            // the container first, like the named link ops.
-            switch action {
-            case .openUrl, .openDeeplink:
-                if let id { bridge.answer(id: id, payload: ["ok": true]) }
-                request.onCta?(op, nil)
-                dismiss(reason: "cta")
-                runSkinActionAfterClose(action: action)
-            default:
-                runSkinAction(id: id, action: action, op: op)
-            }
         }
     }
 
-    /// Runs one skin `action` op through the same executor the canvas uses, so
+    /// The click-analytics op for a bridge step. Web links report as `openLink`.
+    private static func actionOp(_ action: EngageAction) -> String? {
+        switch action {
+        case .openUrl: return "openLink"
+        case .openDeeplink: return "deeplink"
+        case .copyToClipboard: return "copy"
+        case .share: return "share"
+        case .customKV: return "customKV"
+        case .requestReview: return "requestReview"
+        case .dismiss, .next, .previous, .openGame, .showStory: return nil
+        }
+    }
+
+    private static func actionUrl(_ action: EngageAction) -> String? {
+        switch action {
+        case .openUrl(let url): return url
+        case .openDeeplink: return nil
+        default: return nil
+        }
+    }
+
+    /// Runs bridge steps through the same executor the canvas uses, so
     /// host handlers behave exactly as for any other campaign action. Answered
-    /// only once the action has run — or not at all, when the skin sent no id
-    /// or the game closed mid-execution. A run fires `onCta`, like Android's,
-    /// including id-less runs, which still tapped.
-    private func runSkinAction(id: String?, action: EngageAction, op: String) {
+    /// only once the actions have run — or not at all, when the skin sent no id
+    /// or the game closed mid-execution. A run fires `onCta` per step, like
+    /// Android's, including id-less runs, which still tapped.
+    private func runSkinActions(id: String?, actions: [EngageAction]) {
         Task { @MainActor [weak self] in
             guard let self, self.bridge.state != .closed else { return }
             await SDKInstance.shared.executeActionFlow(
-                [action], variables: nil, campaignKey: self.request.campaignKey,
+                actions, variables: nil, campaignKey: self.request.campaignKey,
                 localActionExecutor: LocalActionExecutor(
                     dismiss: { [weak self] in self?.dismiss(reason: "skin") }))
             guard self.bridge.state != .closed else { return }
             if let id { self.bridge.answer(id: id, payload: ["ok": true]) }
-            self.request.onCta?(op, nil)
+            for action in actions {
+                if let op = Self.actionOp(action) {
+                    self.request.onCta?(op, Self.actionUrl(action))
+                }
+            }
         }
     }
 
-    /// Runs one skin `action` after the surface already closed (the openLink /
-    /// openDeeplink path): no reply is owed, and the closed bridge must not
-    /// swallow the host-ward side effect. Captures the request, not the
-    /// session, so teardown cannot cancel the open.
-    private func runSkinActionAfterClose(action: EngageAction) {
+    /// Runs bridge steps after the surface already closed (the link path):
+    /// no reply is owed, and the closed bridge must not swallow the host-ward
+    /// side effect. Captures the request, not the session, so teardown cannot
+    /// cancel the open.
+    private func runSkinActionsAfterClose(actions: [EngageAction]) {
         let campaignKey = self.request.campaignKey
         Task { @MainActor in
             await SDKInstance.shared.executeActionFlow(
-                [action], variables: nil, campaignKey: campaignKey,
+                actions, variables: nil, campaignKey: campaignKey,
                 localActionExecutor: LocalActionExecutor(
                     dismiss: { GamePresenter.dismiss() }))
         }
