@@ -39,3 +39,8 @@ struct ImagePlaceholder: Equatable {
         return ImagePlaceholder(type: type, blurHash: hash)
     }
 }
+
+extension ImagePlaceholder {
+    /// The hash a media wrapper draws as its still: only a `blurhash` placeholder carries one.
+    var stillBlurHash: String? { type == .blurhash ? blurHash : nil }
+}

@@ -7,8 +7,9 @@ import Testing
 /// and a failure with no response at all is the network's, which is not reported. The PiP waits on
 /// this load before it shows, so the cause decides whether a dropped campaign is diagnosable.
 ///
-/// Lottie downloads through `URLSession.shared`, so the origin is a `URLProtocol` registered for
-/// one host name of its own. The Flutter counterpart is the media half of
+/// Lottie downloads through the SDK's dedicated session, so the origin is routed into that
+/// session's protocols (not only the global registry) for each load. The Flutter counterpart
+/// is the media half of
 /// `flutter/core/test/fixture_behaviour/degradation_pip_test.dart`, which drives images; the image
 /// cases are already ported in `FixtureBehaviour/Floater/PipMediaDegradationBehaviourTests.swift`.
 @Suite("Media floater: Lottie load health", .serialized, .tags(.integration, .media, .floater))
@@ -24,7 +25,11 @@ struct MediaFloaterLottieHealthTests {
 
     private func load(_ name: String, reply: MediaFloaterLottieProtocol.Reply) async -> (loaded: Bool, cause: String?) {
         URLProtocol.registerClass(MediaFloaterLottieProtocol.self)
-        defer { URLProtocol.unregisterClass(MediaFloaterLottieProtocol.self) }
+        setLottieExtraProtocolClassesForTests([MediaFloaterLottieProtocol.self])
+        defer {
+            URLProtocol.unregisterClass(MediaFloaterLottieProtocol.self)
+            setLottieExtraProtocolClassesForTests([])
+        }
         let target = url(name)
         MediaFloaterLottieProtocol.set(reply, for: target)
         let result = await loadLottieSource(target)

@@ -299,8 +299,8 @@ public enum ComponentTestHost {
         let urlString = "\(cleanOrigin)/assets/\(fileName)"
 
         guard let image = UIImage(contentsOfFile: assetFile.path) else { return false }
-        SDImageCache.shared.store(image, forKey: urlString, toDisk: false)
-        return SDImageCache.shared.imageFromMemoryCache(forKey: urlString) != nil
+        DigiaImagePipeline.imageCache.store(image, forKey: urlString, toDisk: false)
+        return DigiaImagePipeline.imageCache.imageFromMemoryCache(forKey: urlString) != nil
     }
 
     /// Pre-warms the one-pixel PNG served virtually by the Test Kit for image-1/2/3.png.
@@ -314,8 +314,8 @@ public enum ComponentTestHost {
         let assetOrigin = workspaceUrl.appendingPathComponent("testkit/mock-server").absoluteString
         let cleanOrigin = assetOrigin.hasSuffix("/") ? String(assetOrigin.dropLast()) : assetOrigin
         let urlString = "\(cleanOrigin)/assets/\(fileName)"
-        SDImageCache.shared.store(image, forKey: urlString, toDisk: false)
-        return SDImageCache.shared.imageFromMemoryCache(forKey: urlString) != nil
+        DigiaImagePipeline.imageCache.store(image, forKey: urlString, toDisk: false)
+        return DigiaImagePipeline.imageCache.imageFromMemoryCache(forKey: urlString) != nil
     }
 
     /// Renders the complete production overlay and presents its bottom sheet through the SDK controller.

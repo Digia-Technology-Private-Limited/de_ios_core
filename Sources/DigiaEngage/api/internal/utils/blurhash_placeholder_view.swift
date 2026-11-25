@@ -1,60 +1,11 @@
 import SwiftUI
 
-/// Renders the decoded BlurHash for an `ImagePlaceholder` filling the available
-/// space, or nothing when there is no hash. For use in an image view's
-/// `placeholder:` slot (WebImage / AsyncImage).
-///
-/// Loader/shimmer types are recognised but not yet rendered — the dashboard
-/// only authors `blurhash` today.
-struct BlurHashPlaceholderView: View {
-    let placeholder: ImagePlaceholder?
-    /// `nil` stretches the decoded image to the proposed frame.
-    let contentMode: ContentMode?
-
-    init(placeholder: ImagePlaceholder?, contentMode: ContentMode? = .fill) {
-        self.placeholder = placeholder
-        self.contentMode = contentMode
-    }
-
-    /// Follows the image's fit (cover → fill, contain → fit, fill → stretch);
-    /// unknown values fall back to cover.
-    init(placeholder: ImagePlaceholder?, fit: String) {
-        let mode: ContentMode? = switch fit {
-        case "contain": .fit
-        case "fill": nil
-        default: .fill
-        }
-        self.init(placeholder: placeholder, contentMode: mode)
-    }
-
-    /// Size the hash is decoded at; the upscale to the image box is the blur.
-    private static let decodeSize = 32
-
-    private var decoded: UIImage? {
-        guard let placeholder,
-              placeholder.type == .blurhash,
-              let hash = placeholder.blurHash
-        else { return nil }
-        return BlurHashCache.image(for: hash, size: Self.decodeSize)
-    }
-
-    var body: some View {
-        if let image = decoded {
-            if let contentMode {
-                Image(uiImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: contentMode)
-            } else {
-                Image(uiImage: image)
-                    .resizable()
-            }
-        }
-    }
-}
-
 /// Tiny decode cache so recomposition doesn't re-run the inverse DCT — hashes
 /// are stable per campaign payload, so this stays small.
-private enum BlurHashCache {
+enum BlurHashCache {
+    /// Size a hash is decoded at; the upscale to the image box is the blur.
+    static let decodeSize = 32
+
     // NSCache is documented thread-safe, so unsynchronised shared access is fine.
     nonisolated(unsafe) private static let cache = NSCache<NSString, UIImage>()
 

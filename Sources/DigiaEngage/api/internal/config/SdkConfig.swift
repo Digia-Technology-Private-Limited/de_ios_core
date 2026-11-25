@@ -261,6 +261,15 @@ struct SdkConfig: Equatable, Sendable {
     let healthSessionCap: Int
     /// The app-event upload switch, rate, burst, blocklist and limits.
     let appEvents: AppEventUploadPolicy
+    /// The image disk cap the owned `DigiaImagePipeline.imageCache` runs with.
+    let imageDiskCacheBytes: Int
+    /// The Lottie HTTP disk cap the download session's `URLCache` runs with.
+    let lottieDiskCacheBytes: Int
+
+    /// The single default max for both media disk caches: 100 MiB. The backend
+    /// sends a plain byte count per cache; `URLCache` only stores a response
+    /// under about 5% of its capacity, so this keeps typical Lottie files cacheable.
+    static let defaultMediaDiskCacheBytes = 100 * 1024 * 1024
     /// The game prewarm switches. Off unless the response turns them on.
     let gamePrewarm: GamePrewarmConfig
     /// How a device is placed in a game tier; the built-in default unless the backend sends one.
@@ -273,7 +282,11 @@ struct SdkConfig: Equatable, Sendable {
     let gameStorageLimits: GameStorageLimits
 
     init(
-        healthEnabled: Bool, healthSessionCap: Int, appEvents: AppEventUploadPolicy = .unlimited,
+        healthEnabled: Bool,
+        healthSessionCap: Int,
+        appEvents: AppEventUploadPolicy = .unlimited,
+        imageDiskCacheBytes: Int = defaultMediaDiskCacheBytes,
+        lottieDiskCacheBytes: Int = defaultMediaDiskCacheBytes,
         gamePrewarm: GamePrewarmConfig = .off, deviceTier: DeviceTierConfig = .default,
         gameMeasurement: GameMeasurementThresholds = .defaults,
         gameSkinLimits: GameSkinLimits = .defaults, gameStorageLimits: GameStorageLimits = .defaults
@@ -281,6 +294,8 @@ struct SdkConfig: Equatable, Sendable {
         self.healthEnabled = healthEnabled
         self.healthSessionCap = healthSessionCap
         self.appEvents = appEvents
+        self.imageDiskCacheBytes = imageDiskCacheBytes
+        self.lottieDiskCacheBytes = lottieDiskCacheBytes
         self.gamePrewarm = gamePrewarm
         self.deviceTier = deviceTier
         self.gameMeasurement = gameMeasurement
@@ -339,6 +354,8 @@ struct SdkConfig: Equatable, Sendable {
                     listMaxItems: number(limits + ["listMaxItems"], min: 1, fallback: defaults.listMaxItems)
                 )
             ),
+            imageDiskCacheBytes: number(["media", "imageDiskCacheBytes"], min: 1, fallback: Self.defaultMediaDiskCacheBytes),
+            lottieDiskCacheBytes: number(["media", "lottieDiskCacheBytes"], min: 1, fallback: Self.defaultMediaDiskCacheBytes),
             gamePrewarm: GamePrewarmConfig(
                 engine: optIn(prewarm + ["engine"]),
                 game: optIn(prewarm + ["game"]),

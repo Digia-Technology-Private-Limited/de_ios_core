@@ -132,7 +132,9 @@ struct LegacyGoldenTests {
     @MainActor
     private func clearImageCaches() async {
         SDImageCache.shared.clearMemory()
+        DigiaImagePipeline.imageCache.clearMemory()
         await withCheckedContinuation { done in SDImageCache.shared.clearDisk { done.resume() } }
+        await withCheckedContinuation { done in DigiaImagePipeline.imageCache.clearDisk { done.resume() } }
     }
 
     /// A key window with the survey layer over a plain host, as `DigiaHost` stacks them. Sized to

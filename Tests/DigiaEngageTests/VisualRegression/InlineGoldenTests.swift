@@ -203,7 +203,7 @@ struct InlineGoldenTests {
     private func awaitImagesLoaded(_ urls: [String]) async {
         let deadline = Date().addingTimeInterval(5)
         while Date() < deadline,
-              urls.contains(where: { SDImageCache.shared.imageFromMemoryCache(forKey: $0) == nil }) {
+              urls.contains(where: { DigiaImagePipeline.imageCache.imageFromMemoryCache(forKey: $0) == nil }) {
             try? await Task.sleep(nanoseconds: 20_000_000)
         }
     }
