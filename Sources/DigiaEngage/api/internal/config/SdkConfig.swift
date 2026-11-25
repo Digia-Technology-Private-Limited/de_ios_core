@@ -3,8 +3,94 @@ import Foundation
 private let log = DigiaLogger()
 
 /// The flags and limits the backend can change without an SDK release.
-/// `sdkHealth`, `appEvents`, `gamification.prewarm` and `gamification.deviceTier` are read here;
+/// `sdkHealth`, `appEvents`, `gamification.prewarm`, `gamification.deviceTier`,
+/// `gamification.limits` and `gamification.storage` are read here;
 /// the saved response is kept whole.
+/// `gamification.limits`: caps for skin downloads, the skin cache and the
+/// bridge intake. Every present value clamps into its range; absent keys take
+/// their default. A non-numeric value falls the whole section back to the
+/// defaults (like `deviceTier`), never half-applies, and never throws.
+struct GameSkinLimits: Equatable, Sendable {
+    /// One self-contained skin file. Default is the old whole-bundle budget
+    /// (3 MB + 10%); clamps 1…20 MB.
+    var skinFileMaxBytes: Int
+    /// The whole skin cache across entries. Default 16 MB; clamps 8…64 MB.
+    var skinCacheMaxBytes: Int
+    /// One skin bridge message. Default 64 KB; clamps 16…256 KB.
+    var bridgeMessageMaxBytes: Int
+
+    static let minSkinFileBytes = 1 * 1024 * 1024
+    static let maxSkinFileBytes = 20 * 1024 * 1024
+    static let minSkinCacheBytes = 8 * 1024 * 1024
+    static let maxSkinCacheBytes = 64 * 1024 * 1024
+    static let minBridgeMessageBytes = 16 * 1024
+    static let maxBridgeMessageBytes = 256 * 1024
+
+    static let defaults = GameSkinLimits(
+        skinFileMaxBytes: 3 * 1024 * 1024 + (3 * 1024 * 1024) / 10,
+        skinCacheMaxBytes: 16 * 1024 * 1024,
+        bridgeMessageMaxBytes: 64 * 1024
+    )
+
+    static func parse(_ json: [String: Any]?) -> GameSkinLimits {
+        guard let json else { return .defaults }
+        guard let file = clampedBytes(
+            json["skinFileMaxBytes"], default: defaults.skinFileMaxBytes,
+            min: minSkinFileBytes, max: maxSkinFileBytes),
+            let cache = clampedBytes(
+                json["skinCacheMaxBytes"], default: defaults.skinCacheMaxBytes,
+                min: minSkinCacheBytes, max: maxSkinCacheBytes),
+            let message = clampedBytes(
+                json["bridgeMessageMaxBytes"], default: defaults.bridgeMessageMaxBytes,
+                min: minBridgeMessageBytes, max: maxBridgeMessageBytes)
+        else { return .defaults }
+        return GameSkinLimits(
+            skinFileMaxBytes: file, skinCacheMaxBytes: cache, bridgeMessageMaxBytes: message)
+    }
+
+    /// Absent reads as the default; a finite whole number clamps; anything else
+    /// is nil, failing the whole section. The range check runs on the double
+    /// before converting, so a huge value clamps instead of trapping `Int`.
+    static func clampedBytes(_ raw: Any?, default fallback: Int, min: Int, max: Int) -> Int? {
+        guard let raw else { return fallback }
+        guard let number = raw as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+        let value = number.doubleValue
+        guard value.isFinite, value == floor(value) else { return nil }
+        if value <= Double(min) { return min }
+        if value >= Double(max) { return max }
+        return Int(value)
+    }
+}
+
+/// `gamification.storage`: the per-skin key-value quotas. Same whole-fallback
+/// rule as `limits`: absent keys take their default, a non-numeric value
+/// falls the whole section back to the defaults.
+struct GameStorageLimits: Equatable, Sendable {
+    /// One storage value. Default 16 KB; clamps 4…256 KB.
+    var valueMaxBytes: Int
+    /// One skin namespace across keys. Default 64 KB; clamps 16 KB…1 MB.
+    var namespaceMaxBytes: Int
+
+    static let minValueBytes = 4 * 1024
+    static let maxValueBytes = 256 * 1024
+    static let minNamespaceBytes = 16 * 1024
+    static let maxNamespaceBytes = 1024 * 1024
+
+    static let defaults = GameStorageLimits(valueMaxBytes: 16 * 1024, namespaceMaxBytes: 64 * 1024)
+
+    static func parse(_ json: [String: Any]?) -> GameStorageLimits {
+        guard let json else { return .defaults }
+        guard let value = GameSkinLimits.clampedBytes(
+            json["valueMaxBytes"], default: defaults.valueMaxBytes,
+            min: minValueBytes, max: maxValueBytes),
+            let namespace = GameSkinLimits.clampedBytes(
+                json["namespaceMaxBytes"], default: defaults.namespaceMaxBytes,
+                min: minNamespaceBytes, max: maxNamespaceBytes)
+        else { return .defaults }
+        return GameStorageLimits(valueMaxBytes: value, namespaceMaxBytes: namespace)
+    }
+}
+
 struct SdkConfig: Equatable, Sendable {
     let healthEnabled: Bool
     let healthSessionCap: Int
@@ -14,16 +100,23 @@ struct SdkConfig: Equatable, Sendable {
     let gamePrewarm: GamePrewarmConfig
     /// How a device is placed in a game tier; the built-in default unless the backend sends one.
     let deviceTier: DeviceTierConfig
+    /// Skin download, skin cache and bridge intake caps.
+    let gameSkinLimits: GameSkinLimits
+    /// Per-skin storage quotas.
+    let gameStorageLimits: GameStorageLimits
 
     init(
         healthEnabled: Bool, healthSessionCap: Int, appEvents: AppEventUploadPolicy = .unlimited,
-        gamePrewarm: GamePrewarmConfig = .off, deviceTier: DeviceTierConfig = .default
+        gamePrewarm: GamePrewarmConfig = .off, deviceTier: DeviceTierConfig = .default,
+        gameSkinLimits: GameSkinLimits = .defaults, gameStorageLimits: GameStorageLimits = .defaults
     ) {
         self.healthEnabled = healthEnabled
         self.healthSessionCap = healthSessionCap
         self.appEvents = appEvents
         self.gamePrewarm = gamePrewarm
         self.deviceTier = deviceTier
+        self.gameSkinLimits = gameSkinLimits
+        self.gameStorageLimits = gameStorageLimits
     }
 
     /// What the SDK runs on with no cache and no answer. A test pins it to the shared fixture.
@@ -82,7 +175,11 @@ struct SdkConfig: Equatable, Sendable {
                 game: optIn(prewarm + ["game"]),
                 tiers: tiers(section(primary, prewarm + ["tiers"]))
             ),
-            deviceTier: DeviceTierConfig.parse(section(primary, ["gamification", "deviceTier"]) as? [String: Any])
+            deviceTier: DeviceTierConfig.parse(section(primary, ["gamification", "deviceTier"]) as? [String: Any]),
+            gameSkinLimits: GameSkinLimits.parse(
+                section(primary, ["gamification", "limits"]) as? [String: Any]),
+            gameStorageLimits: GameStorageLimits.parse(
+                section(primary, ["gamification", "storage"]) as? [String: Any])
         )
     }
 

@@ -598,6 +598,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     var appEventLimits = AppEventLimits.defaults
     /// The SDK config's game prewarm switches; off until a config turns them on.
     var gamePrewarm = GamePrewarmConfig.off
+    /// The SDK config's skin, cache, bridge and storage caps; defaults until a config arrives.
+    var gameSkinLimits = GameSkinLimits.defaults
+    var gameStorageLimits = GameStorageLimits.defaults
 
     /// Not awaited. A failed call changes nothing, except that a first install with no
     /// cached config runs on the defaults from here, which also sends the held health events.
@@ -619,6 +622,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         services?.appEventsService?.applyPolicy(config.appEvents)
         GameDeviceTier.applyConfig(config.deviceTier)
         gamePrewarm = config.gamePrewarm
+        gameSkinLimits = config.gameSkinLimits
+        gameStorageLimits = config.gameStorageLimits
+        gamification.applySkinLimits(config.gameSkinLimits)
         GamePrewarmer.refreshEngine()
     }
 
@@ -2423,6 +2429,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         sdkConfigFetchTask?.cancel()
         sdkConfigFetchTask = nil
         gamePrewarm = .off
+        gameSkinLimits = .defaults
+        gameStorageLimits = .defaults
         services?.tearDown()
         services = nil
         currentSession.set(nil, requestHeaders: [:])
