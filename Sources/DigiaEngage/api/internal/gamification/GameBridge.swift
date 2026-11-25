@@ -3,18 +3,6 @@ import Foundation
 /// The SDK's one logging style — see ``DigiaLogger``.
 private let log = DigiaLogger()
 
-/// Wire error codes for `{id, type:"error"}` replies — the whole set. A skin
-/// feature-detects by sending a request and handling `unsupported`.
-enum GameBridgeError: String, Sendable, Error {
-    case unsupported
-    case badRequest = "bad_request"
-    case network
-    case timeout
-    case server
-    /// The session closed before the request was answered.
-    case closed
-}
-
 /// One typed skin→native message the presentation handles. `log` and
 /// `haptics` never get a reply, even with an id; `ready` never reaches
 /// here — the bridge answers nothing for it; the first one fires the init
@@ -51,7 +39,7 @@ enum GameBridgeRequest {
 /// id is ignored + logged. A request-shaped message the bridge cannot answer
 /// (no usable id) is dropped.
 @MainActor
-final class GameBridge {
+final class GameBridge: GameBridgeProtocol {
     /// The SDK's bridge version, sent in `init`. A skin declaring a higher
     /// version is refused by the presentation.
     nonisolated static let bridgeVersion = 2
@@ -400,15 +388,16 @@ final class GameBridge {
             guard let text = payload.nonBlankString("text") else { return .malformed }
             return .request(.actionCopy(id: id, text: text))
         case "openLink", "openUrl":
+            // The policy decides on the control-stripped string and hands back
+            // that same canonical URL, so a scheme break can neither smuggle a
+            // blocked scheme past the check nor ride along into the open.
             guard let raw = payload.nonBlankString("url"),
-                  let url = URL(string: raw),
-                  GameLinkPolicy.isOpenableLink(url)
+                  let url = GameLinkPolicy.openableURL(raw)
             else { return .malformed }
             return .request(.actionOpenLink(id: id, op: op, url: url))
         case "deeplink":
             guard let raw = payload.nonBlankString("url"),
-                  let url = URL(string: raw),
-                  GameLinkPolicy.isOpenableLink(url)
+                  let url = GameLinkPolicy.openableURL(raw)
             else { return .malformed }
             return .request(.actionOpenDeeplink(id: id, url: url))
         case "customKV":

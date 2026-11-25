@@ -47,6 +47,10 @@ final class GamePresentation: Identifiable, ObservableObject {
     let entryFile: URL
     let bundleRoot: URL
     let bridge: GameBridge
+    /// The one open/load/ready watchdog for this session: the single 15 s
+    /// wall plus the foreground-only load/ready phase timers. The per-skin-
+    /// `http` ceiling (`httpWatchdogs`) stays separate, per in-flight call.
+    private let watchdog: GameOpenWatchdog
 
     /// Set when `ready` arrives; the game is presented only after this.
     private(set) var isReady = false
@@ -123,6 +127,7 @@ final class GamePresentation: Identifiable, ObservableObject {
         // `bridgeMessageMaxBytes`, and storage refuses writes past its quotas.
         // Tests that never apply a config read the burned defaults here.
         self.bridge = GameBridge(messageMaxBytes: messageMaxBytes)
+        self.watchdog = GameOpenWatchdog(bridge: bridge)
         self.storage = GameBridgeStorage(
             defaults: Self.storageDefaults,
             namespace: GameBridgeStorage.namespaceFor(
@@ -148,6 +153,23 @@ final class GamePresentation: Identifiable, ObservableObject {
         bridge.onClosed = { [weak self] in self?.didClose() }
         bridge.onFailed = { [weak self] reason in self?.didFail(reason) }
         bridge.onDropped = { [weak self] reason, type in self?.reportBridgeDrop(reason: reason, type: type) }
+        watchdog.onOpenTimeout = { [weak self] in
+            // The overall deadline for an open that is not a direct campaign:
+            // the presentation coordinator's acceptance window (15 s, the same
+            // watchdog that takes a stuck nudge off), counted in wall clock
+            // from the open to `ready` across every phase and across
+            // background time. A direct game is already watched by the
+            // coordinator, whose timeout closes it through
+            // `GamificationSurface.dismiss`, so it arms nothing here. Entry and
+            // rewards opens have no coordinator presentation, so this is
+            // theirs. A game that is ready, finished or held is left alone.
+            guard let self, !self.didFinish, !self.isReady, !self.isHeld else { return }
+            let seconds = PresentationCoordinator.defaultAcceptanceTimeout
+            log.w("Game not shown within \(Int(seconds)) s — cancelled",
+                  campaign: self.request.campaignKey)
+            self.finish(report: { [request = self.request] in request.onFailure?(.openTimeout) })
+            self.bridge.close()
+        }
         observeDeviceSignals()
     }
 
@@ -202,74 +224,19 @@ final class GamePresentation: Identifiable, ObservableObject {
         }
         if !didCommitPage { request.timing.stage = GameOpenTiming.stageCommit }
         coordinator.start()
-        if !held { armOpenWatchdog() }
-    }
-
-    /// The overall deadline for an open that is not a direct campaign: the
-    /// presentation coordinator's acceptance window (15 s, the same watchdog
-    /// that takes a stuck nudge off), counted in wall clock from the open to
-    /// `ready` across every phase and across background time. A direct game
-    /// is already watched by the coordinator, whose timeout closes it through
-    /// `GamificationSurface.dismiss`, so it arms nothing here. Entry and
-    /// rewards opens have no coordinator presentation, so this is theirs. A
-    /// game that is ready, finished or held is left alone.
-    private func armOpenWatchdog() {
-        guard request.entry != GamificationEntryKind.direct.rawValue else { return }
-        let seconds = PresentationCoordinator.defaultAcceptanceTimeout
-        DispatchQueue.main.asyncAfter(wallDeadline: .now() + seconds) { [weak self] in
-            Task { @MainActor [weak self] in
-                guard let self, !self.didFinish, !self.isReady, !self.isHeld else { return }
-                log.w("Game not shown within \(Int(seconds)) s — cancelled",
-                      campaign: self.request.campaignKey)
-                self.finish(report: { [request = self.request] in request.onFailure?(.openTimeout) })
-                self.bridge.close()
-            }
-        }
+        if !held { watchdog.arm(request: request) }
     }
 
     /// True once the page committed: the load timer is done and the ready
     /// timer owns the wait for `ready`.
     private var didCommitPage = false
-    /// Foreground seconds left in the current phase's budget; nil until the
-    /// phase first arms.
-    private var phaseRemaining: TimeInterval?
-    /// Uptime when the running timer was armed; nil while none runs.
-    private var phaseArmedAt: TimeInterval?
 
-    /// Charges the running timer's foreground time to the phase budget.
-    private func spendPhaseBudget() {
-        guard let armedAt = phaseArmedAt, let remaining = phaseRemaining else { return }
-        phaseRemaining = max(0, remaining - (MonotonicClock.nowSeconds() - armedAt))
-        phaseArmedAt = nil
-    }
-
-    /// Arms the timer for the phase the load is in: 15 s to the page commit,
-    /// then 5 s to `ready`. The budgets count foreground time only, like
-    /// Android: a re-arm after the app returns gets what is left, never a full
-    /// budget, so repeated backgrounding cannot keep a load (and the busy slot)
-    /// alive forever. Each arm carries a fresh bridge generation, so re-arming
-    /// (or `cancelReadyTimer`) makes any earlier timer a stale no-op. Runs only
-    /// while loading and in the foreground.
+    /// The web view's load seam: (re)arms the watchdog's phase timer for the
+    /// phase the load is in. The host recreation path funnels here, and the
+    /// arm is idempotent per request — it replaces the phase task, never
+    /// stacks a second wall.
     func armLoadTimer() {
-        guard !didFinish, !isHeld, bridge.state == .loading,
-              UIApplication.shared.applicationState == .active
-        else { return }
-        spendPhaseBudget()
-        let committed = didCommitPage
-        let seconds = phaseRemaining
-            ?? (committed ? GameBridge.readyTimeoutSeconds : GameBridge.loadTimeoutSeconds)
-        phaseRemaining = seconds
-        phaseArmedAt = MonotonicClock.nowSeconds()
-        let generation = bridge.beginLoading()
-        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
-            Task { @MainActor [weak self] in
-                if committed {
-                    self?.bridge.readyTimeoutFired(generation: generation)
-                } else {
-                    self?.bridge.loadTimeoutFired(generation: generation)
-                }
-            }
-        }
+        watchdog.signal(.hostRecreated)
     }
 
     /// The page committed: the load timer gives way to the 5 s ready timer.
@@ -277,10 +244,7 @@ final class GamePresentation: Identifiable, ObservableObject {
         guard !didCommitPage else { return }
         didCommitPage = true
         request.timing.stage = GameOpenTiming.stageReady
-        // The ready phase starts with its own full budget.
-        phaseRemaining = nil
-        phaseArmedAt = nil
-        armLoadTimer()
+        watchdog.signal(.pageCommitted)
     }
 
     /// Sends the session's `init`: once after the page loads, and again on
@@ -313,10 +277,12 @@ final class GamePresentation: Identifiable, ObservableObject {
         initMessage = Self.initMessage(for: request)
         lastDevicePush = GameDeviceInfo.current(sdkVersion: sdkVersion).pushPayload
         isHeld = false
-        armOpenWatchdog()
+        // The adopt is this open's first arm: a held game never armed, so the
+        // wall starts here and the phase timer with it, the page having
+        // committed.
+        watchdog.arm(request: request)
         // A held `ready` is replayed below and answered with `init` there.
         if pageFinished, heldReady == nil { sendInit() }
-        armLoadTimer()
         // A skin that booted while held already sent its one `ready`.
         if let ready = heldReady {
             heldReady = nil
@@ -852,10 +818,7 @@ final class GamePresentation: Identifiable, ObservableObject {
     private func appDidResignActive() {
         guard !didFinish, !isHeld else { return }
         request.onForeground?(false)
-        if bridge.state == .loading {
-            spendPhaseBudget()
-            bridge.cancelReadyTimer()
-        }
+        watchdog.signal(.resignedActive)
         pushLifecycle("paused")
         motion.suspend()
     }
@@ -863,7 +826,7 @@ final class GamePresentation: Identifiable, ObservableObject {
     private func appDidBecomeActive() {
         guard !didFinish, !isHeld else { return }
         request.onForeground?(true)
-        armLoadTimer()
+        watchdog.signal(.becameActive)
         pushLifecycle("resumed")
         motion.resume()
     }
@@ -928,6 +891,8 @@ final class GamePresentation: Identifiable, ObservableObject {
     private func didBecomeReady(version _: Int) {
         guard !didFinish, !isReady else { return }
         isReady = true
+        // Ready disarms the watchdog: the wall and the phase timer stop here.
+        watchdog.signal(.ready)
         // Hand the loaded web view to the container; it is never reloaded.
         webCoordinator?.view.removeFromSuperview()
         webCoordinator?.view.alpha = 1
@@ -944,6 +909,9 @@ final class GamePresentation: Identifiable, ObservableObject {
     private func finish(report: @MainActor () -> Void) {
         guard !didFinish else { return }
         didFinish = true
+        // Terminal for the watchdog: `failed` and `closed` both settle here,
+        // so the wall and the phase timer never outlive the session.
+        watchdog.cancel()
         cancelAllHttpWatchdogs()
         for task in httpTasks.values { task.cancel() }
         httpTasks.removeAll()

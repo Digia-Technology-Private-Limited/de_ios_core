@@ -1,6 +1,6 @@
 import Foundation
 
-/// Bridge v1 `storage`: string values namespaced by project + skin + user,
+/// Bridge storage: string values namespaced by project + skin + user,
 /// persisted in UserDefaults and cleared on SDK logout/reset.
 ///
 /// The namespace is one UserDefaults key prefix, so every version of a skin

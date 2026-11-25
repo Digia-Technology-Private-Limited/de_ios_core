@@ -28,9 +28,16 @@ enum GameLinkPolicy {
     /// characters first, so a scheme break (`java\nscript:`) cannot smuggle a
     /// blocked scheme past the check. Never throws.
     static func isOpenableLink(_ raw: String) -> Bool {
+        openableURL(raw) != nil
+    }
+
+    /// The validated URL for `raw`, or nil. The one policy entry point that
+    /// strips control characters before parsing, so the bridge and every
+    /// surface decide on the same canonical string they then open. Never throws.
+    static func openableURL(_ raw: String) -> URL? {
         let stripped = String(raw.unicodeScalars.filter { !($0.value <= 0x1F || $0.value == 0x7F) })
         let trimmed = stripped.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = URL(string: trimmed) else { return false }
-        return isOpenableLink(url)
+        guard let url = URL(string: trimmed), isOpenableLink(url) else { return nil }
+        return url
     }
 }

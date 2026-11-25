@@ -436,7 +436,7 @@ final class GameSurface {
         var shown = false
         // What this window did, for `Dismissed`: one per open, so play again
         // and play next keep counting into the same window.
-        let stats = GameWindowStats(chanceId: chanceId)
+        let stats = GameFunnelStats(chanceId: chanceId)
         // The live-test invocation the trigger carried, if any: the grant was asked
         // with it, and both the skin's `state` call and the close-time `state` call
         // need it back so a draft campaign answers. Derived here — never stored —
