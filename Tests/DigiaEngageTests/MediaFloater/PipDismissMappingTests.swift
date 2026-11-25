@@ -27,6 +27,7 @@ struct PipDismissMappingTests {
             #expect(reason.completed == false, "\(reason.wire) must not complete")
         }
         #expect(FloaterDismissReason.autoTimeout.presentationReason == .autoTimeout)
+        #expect(FloaterDismissReason.sessionEnd.presentationReason == .autoTimeout)
         #expect(FloaterDismissReason.userClose.presentationReason == .userClose)
         #expect(FloaterDismissReason.ctaTaken.presentationReason == .ctaAction)
     }
