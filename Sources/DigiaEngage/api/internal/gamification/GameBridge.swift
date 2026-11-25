@@ -527,7 +527,7 @@ final class GameBridge {
     }
 
     private static func isMotionSensor(_ sensor: String) -> Bool {
-        sensor == GameMotionSource.gyroscopeName || sensor == GameMotionSource.accelerometerName
+        GameMotionSource.allSensorNames.contains(sensor)
     }
 
     /// Schemes that would run code, read local data or bypass the host's link routing.

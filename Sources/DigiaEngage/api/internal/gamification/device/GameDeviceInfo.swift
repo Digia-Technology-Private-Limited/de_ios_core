@@ -147,8 +147,10 @@ struct GameDeviceInfo: Equatable, Sendable {
         let lowPower = process.isLowPowerModeEnabled
         let reducedMotion = UIAccessibility.isReduceMotionEnabled
         var sensors: [String] = []
-        if GameMotionSource.gyroscopeAvailable { sensors.append(GameMotionSource.gyroscopeName) }
-        if GameMotionSource.accelerometerAvailable { sensors.append(GameMotionSource.accelerometerName) }
+        for name in GameMotionSource.orderedSensorNames
+        where GameMotionSource.hardwareAvailable(sensor: name) {
+            sensors.append(name)
+        }
         let facts = GameDeviceTier.scored(
             readFacts(process: process, ramMb: ramMb, cores: cores, lowPower: lowPower, reducedMotion: reducedMotion))
         return GameDeviceInfo(

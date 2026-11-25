@@ -174,6 +174,9 @@ struct GameOpenRequest {
     /// The folder holding `entryFile`, for `loadFileURL` read access.
     var bundleRoot: URL
     var showMute: Bool = false
+    /// Whether the native X shows once the skin is ready; true unless the
+    /// campaign hides it. Mirrors Android's `GameOpenRequest.showClose`.
+    var showClose: Bool = true
     /// Fires on close with why: `user` for the close button and back, `skin`
     /// for the skin's own `close`, `cta` for a handoff op. Mirrors Android's
     /// `GameOpenRequest.onClose`.

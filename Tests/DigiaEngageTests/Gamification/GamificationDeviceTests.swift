@@ -250,6 +250,27 @@ struct GameMotionSourceTests {
         #expect(GameMotionSource.clampedHz(Double.nan) == 30)
     }
 
+    @Test("the wire names match Android's GAME_SENSOR_TYPES")
+    func wireNamesMatchAndroid() {
+        // Guards orderedSensorNames: the intake, the init sensors and the
+        // sampler read one name list, character-identical to Android.
+        #expect(GameMotionSource.orderedSensorNames == [
+            "gyroscope", "accelerometer", "gravity", "linear_acceleration",
+            "rotation_vector", "magnetic_field", "pressure", "light", "proximity",
+        ])
+        #expect(GameMotionSource.allSensorNames == Set(GameMotionSource.orderedSensorNames))
+    }
+
+    @Test("unknown names and light are never available")
+    func unknownAndLightUnavailable() {
+        // Guards the default and light arms of hardwareAvailable: unknown
+        // names never start, and light has no public iOS API — both answer
+        // `unsupported` at subscribe, never a crash.
+        #expect(!GameMotionSource.hardwareAvailable(sensor: "lidar"))
+        #expect(!GameMotionSource.hardwareAvailable(sensor: ""))
+        #expect(!GameMotionSource.hardwareAvailable(sensor: "light"))
+    }
+
     @Test("unknown sensors never start")
     func unknownSensorUnsupported() {
         let source = GameMotionSource()
@@ -306,18 +327,21 @@ struct GameMotionSourceTests {
         // Android clamps the skin's 120 Hz to 60; the iOS clamp is the same
         // `clampedHz` line the subscribe path runs through.
         #expect(GameMotionSource.clampedHz(120) == 60)
-        #expect(source.startAll(
-            sensors: [GameMotionSource.gyroscopeName, GameMotionSource.accelerometerName],
-            hz: 120) { events.append($0) })
+        #expect(source.startAll(sensors: GameMotionSource.orderedSensorNames, hz: 120) {
+            events.append($0)
+        })
         // Guards the start loop in startAll: every named sensor streams, with
         // no error result — an empty reply, like Android's empty result.
-        #expect(source.activeSensorNames == [
-            GameMotionSource.gyroscopeName, GameMotionSource.accelerometerName])
+        #expect(source.activeSensorNames == GameMotionSource.allSensorNames)
         #expect(events.isEmpty)
 
         source.stop(sensor: GameMotionSource.gyroscopeName)
-        #expect(source.activeSensorNames == [GameMotionSource.accelerometerName])
+        #expect(source.activeSensorNames == GameMotionSource.allSensorNames.subtracting([
+            GameMotionSource.gyroscopeName]))
         source.stop(sensor: GameMotionSource.accelerometerName)
+        #expect(source.activeSensorNames == GameMotionSource.allSensorNames.subtracting([
+            GameMotionSource.gyroscopeName, GameMotionSource.accelerometerName]))
+        source.stopAll()
         #expect(source.activeSensorNames.isEmpty)
         #expect(events.isEmpty)
     }

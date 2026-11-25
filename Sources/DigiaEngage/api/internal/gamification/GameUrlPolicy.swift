@@ -47,32 +47,33 @@ enum GameUrlPolicy {
     }
 
     /// Off-folder https subresources a skin may load: images (config values
-    /// and the reward `imageUrl`), web fonts (`init.theme.fonts` URLs) and
-    /// sound cues. Mirrors Android `REMOTE_ASSET_EXTENSIONS`, kept in step
-    /// with the `img-src`, `font-src` and `media-src` directives of the skin
-    /// CSP header.
+    /// and the reward `imageUrl`), web fonts (`init.theme.fonts` URLs),
+    /// sound cues and video. Mirrors Android `REMOTE_ASSET_EXTENSIONS`,
+    /// kept in step with the `img-src`, `font-src` and `media-src`
+    /// directives of the skin CSP header.
     private static let remoteAssetExtensions: Set<String> = [
         "png", "jpg", "jpeg", "webp", "gif", "svg", "avif", "ico", "bmp",
         "woff", "woff2", "ttf", "otf",
         "mp3", "ogg", "wav", "m4a", "aac",
+        "mp4", "webm", "m4v", "mov",
     ]
 
-    /// Subresource rule (Android-strict): an off-folder https image, font or
-    /// audio extension loads; anything else cancels. An extensionless https
-    /// URL loads only as an image request carrying `Accept: image/...`,
-    /// because image CDNs often serve extensionless URLs (e.g. Cloudinary
+    /// Subresource rule (Android-strict): an off-folder https image, font,
+    /// audio or video extension loads; anything else cancels. An
+    /// extensionless https URL loads only as an image or video request
+    /// carrying `Accept: image/...` or `video/...`, because media CDNs often
+    /// serve extensionless URLs (e.g. Cloudinary
     /// `.../f_auto,q_auto/<publicId>`). A URL with a non-media extension
     /// (e.g. `.js`) never passes on Accept alone. The web view sends
-    /// `Accept: image/...` only for image loads; `fetch`/XHR default to a
-    /// wildcard. Http never passes, even with an image Accept. Never throws.
+    /// `Accept: image/...` only for image loads and `video/...` only for
+    /// video loads; `fetch`/XHR default to a wildcard. Http never passes,
+    /// even with a media Accept. Never throws.
     static func allowsRemoteAsset(url: URL, accept: String? = nil) -> Bool {
         guard url.scheme?.lowercased() == "https" else { return false }
         if remoteAssetExtensions.contains(url.pathExtension.lowercased()) { return true }
-        guard url.pathExtension.isEmpty,
-              let accept,
-              accept.drop(while: \.isWhitespace).lowercased().hasPrefix("image/")
-        else { return false }
-        return true
+        guard url.pathExtension.isEmpty, let accept else { return false }
+        let prefix = accept.drop(while: \.isWhitespace).lowercased()
+        return prefix.hasPrefix("image/") || prefix.hasPrefix("video/")
     }
 
     /// `scheme://host[:port]`, lowercased, default port dropped; nil unless http(s) with a host.
