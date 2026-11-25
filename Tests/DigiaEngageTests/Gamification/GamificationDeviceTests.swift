@@ -233,6 +233,100 @@ struct GameDeviceTierTests {
     }
 }
 
+/// Guards the server-driven measurement cutoffs: mirrors the Android
+/// `GameDeviceFacts` level math over the same thresholds.
+@Suite("Game measurement thresholds", .tags(.unit, .game))
+struct GameMeasurementThresholdsTests {
+    /// The cross-stack parity thresholds (see `SdkConfigGameMeasurementTests`).
+    private static let parity = GameMeasurementThresholds(
+        ramLowGb: 3.0, ramMidGb: 7.0, ramHighGb: 11.0,
+        heapLowMb: 100, heapMidMb: 180, heapHighMb: 300,
+        heapPressureRatio: 0.8, availThresholdFactor: 2.0,
+        batteryHigh: 85, batteryHighCharging: 75,
+        batteryMid: 60, batteryMidCharging: 55,
+        batteryLow: 45, batteryLowCharging: 40,
+        cpuScoreLow: 25, cpuScoreMid: 40, cpuScoreHigh: 60,
+        cpuCapRamLowGb: 3.0, cpuCapRamMidGb: 4.0,
+        cpuCapHeapLow: 110, cpuCapHeapMid: 170,
+        lowRamDeviceMb: 2048
+    )
+
+    private func custom(_ mutate: (inout GameMeasurementThresholds) -> Void) -> GameMeasurementThresholds {
+        var t = GameMeasurementThresholds.defaults
+        mutate(&t)
+        return t
+    }
+
+    @Test("the RAM bands follow the server cutoffs")
+    func ramBands() {
+        // Guards the switch bounds in memoryLevel: moving ramLowGb moves the 1/2 line.
+        let t = custom { $0.ramLowGb = 4.0 }
+        #expect(GameDeviceInfo.memoryLevel(totalMb: 3_072, availableMb: nil, thresholds: t) == 1)
+        #expect(GameDeviceInfo.memoryLevel(totalMb: 3_072, availableMb: nil) == 2)
+        let u = custom { $0.ramHighGb = 8.0 }
+        #expect(GameDeviceInfo.memoryLevel(totalMb: 9_216, availableMb: nil, thresholds: u) == 4)
+        #expect(GameDeviceInfo.memoryLevel(totalMb: 9_216, availableMb: nil) == 3)
+    }
+
+    @Test("the battery bands follow the server cutoffs")
+    func batteryBands() {
+        // Guards the comparisons in batteryLevel, charging and not.
+        let t = custom { $0.batteryHigh = 90; $0.batteryHighCharging = 80 }
+        #expect(GameDeviceInfo.batteryLevel(percentage: 85, charging: false, thresholds: t) == 3)
+        #expect(GameDeviceInfo.batteryLevel(percentage: 85, charging: false) == 4)
+        #expect(GameDeviceInfo.batteryLevel(percentage: 78, charging: true, thresholds: t) == 3)
+        #expect(GameDeviceInfo.batteryLevel(percentage: 78, charging: true) == 4)
+    }
+
+    @Test("the CPU RAM caps follow the server cutoffs")
+    func cpuCaps() {
+        // Guards the comparisons in cpuLevel: moving the caps moves the 1/2 and 2/3 lines.
+        let t = custom { $0.cpuCapRamLowGb = 4.0 }
+        #expect(GameDeviceInfo.cpuLevel(cores: 6, ramMb: 3_072, thresholds: t) == 1)
+        #expect(GameDeviceInfo.cpuLevel(cores: 6, ramMb: 3_072) == 2)
+        let u = custom { $0.cpuCapRamMidGb = 5.0 }
+        #expect(GameDeviceInfo.cpuLevel(cores: 6, ramMb: 4_608, thresholds: u) == 2)
+        #expect(GameDeviceInfo.cpuLevel(cores: 6, ramMb: 4_608) == 3)
+    }
+
+    @Test("lowRamDeviceMb compares against total RAM, absent stays missing")
+    func lowRamMath() {
+        // Guards the comparison in lowRamDevice: strict <, nil when unset.
+        let t = custom { $0.lowRamDeviceMb = 2048 }
+        #expect(GameDeviceInfo.lowRamDevice(totalRamMb: 1_024, thresholds: t) == true)
+        #expect(GameDeviceInfo.lowRamDevice(totalRamMb: 4_096, thresholds: t) == false)
+        #expect(GameDeviceInfo.lowRamDevice(totalRamMb: 2_048, thresholds: t) == false)
+        #expect(GameDeviceInfo.lowRamDevice(totalRamMb: 1_024) == nil)
+    }
+
+    @Test("the parity thresholds place one device the same way on both stacks")
+    func parityVectorLevels() {
+        // 12 GiB, half free, 6 cores, 75% unplugged: the RAM, battery and CPU
+        // bands Android's GameDeviceFacts reads give 4/3/4, and so does iOS.
+        #expect(GameDeviceInfo.memoryLevel(
+            totalMb: 12 * 1024, availableMb: 6 * 1024, thresholds: Self.parity) == 4)
+        #expect(GameDeviceInfo.batteryLevel(percentage: 75, charging: false, thresholds: Self.parity) == 3)
+        #expect(GameDeviceInfo.cpuLevel(cores: 6, ramMb: 8 * 1024, thresholds: Self.parity) == 4)
+    }
+
+    @Test("the iOS-only lines ignore the server fields with no iOS API")
+    func iosOnlyLinesStay() {
+        // Guards the pressure fraction and the top CPU band: extreme server
+        // values that would move Android's heap/score math don't move iOS,
+        // which has no heap class or per-core tables.
+        var t = Self.parity
+        t.heapPressureRatio = 0.1
+        t.availThresholdFactor = 4.0
+        t.cpuScoreLow = 199
+        t.cpuScoreMid = 199
+        t.cpuScoreHigh = 200
+        t.cpuCapHeapLow = 16
+        t.cpuCapHeapMid = 16
+        #expect(GameDeviceInfo.memoryLevel(totalMb: 12_288, availableMb: 1_024, thresholds: t) == 3)
+        #expect(GameDeviceInfo.cpuLevel(cores: 6, ramMb: 8_192, thresholds: t) == 4)
+    }
+}
+
 /// Guards the motion unit math and rate clamp: the production lines are
 /// `clampedHz` and `accelerometerMS2`.
 @Suite("Game motion source", .tags(.unit, .game))

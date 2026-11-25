@@ -219,6 +219,25 @@ struct SDKInstanceSdkConfigTests {
         network.answer("{}")
     }
 
+    @Test("a cached gamification measurement section applies at launch")
+    func cachedMeasurementAtLaunch() async throws {
+        defer { GameDeviceInfo.applyMeasurementThresholds(.defaults) }
+        let defaults = makeDefaults()
+        seedCache(defaults, #"{"gamification":{"measurement":{"ramLowGb":3.0,"lowRamDeviceMb":2048}}}"#)
+        let network = ConfigNetworkClient()
+        let sdk = makeInstance(defaults: defaults, network: network, sink: HealthSink())
+
+        try await sdk.initialize(DigiaConfig(apiKey: apiKey))
+
+        // Guards the applySdkConfig lines: the cached thresholds land on the
+        // instance and on the facts reader; the rest stay default.
+        #expect(sdk.gameMeasurement.ramLowGb == 3.0)
+        #expect(sdk.gameMeasurement.lowRamDeviceMb == 2048)
+        #expect(sdk.gameMeasurement.batteryHigh == GameMeasurementThresholds.defaults.batteryHigh)
+        #expect(GameDeviceInfo.measurementThresholds == sdk.gameMeasurement)
+        network.answer("{}")
+    }
+
     @Test("a cached upload switch-off drops an event tracked before the call answers")
     func cachedUploadOffAtLaunch() async throws {
         let defaults = makeDefaults()

@@ -4,8 +4,8 @@ private let log = DigiaLogger()
 
 /// The flags and limits the backend can change without an SDK release.
 /// `sdkHealth`, `appEvents`, `gamification.prewarm`, `gamification.deviceTier`,
-/// `gamification.limits` and `gamification.storage` are read here;
-/// the saved response is kept whole.
+/// `gamification.measurement`, `gamification.limits` and `gamification.storage`
+/// are read here; the saved response is kept whole.
 /// `gamification.limits`: caps for skin downloads, the skin cache and the
 /// bridge intake. The ranges mirror the backend's `LIMIT_RANGES` in
 /// `gamificationConfig.ts`, the source of truth. A present value must be a
@@ -94,6 +94,168 @@ struct GameStorageLimits: Equatable, Sendable {
     }
 }
 
+/// `gamification.measurement`: the cutoffs the device-tier level math reads.
+/// Mirrors the `gamification.measurement` section the backend sends (see
+/// `backend/src/services/digia-engage/sdk/gamificationConfig.ts`, the source
+/// of truth); until the backend ships it, every install runs on these
+/// defaults, which equal the long-standing hardcoded cutoffs. Absent keys
+/// take their default; a malformed or out-of-range value falls the whole
+/// section back to the defaults (like `deviceTier`), never half-applies, and
+/// never throws.
+///
+/// Only some fields drive iOS math: the RAM bands, the battery bands and the
+/// RAM CPU caps feed `GameDeviceInfo`'s approximations, and `lowRamDeviceMb`
+/// synthesizes `isLowRamDevice`. The heap bands, pressure ratios, CPU score
+/// bands and heap CPU caps have no iOS API behind them (no heap class, no
+/// per-core tables); they are parsed for cross-stack parity and ignored here.
+/// Adding a field is additive: old SDKs ignore keys they don't know.
+struct GameMeasurementThresholds: Equatable, Sendable {
+    var ramLowGb: Double
+    var ramMidGb: Double
+    var ramHighGb: Double
+    var heapLowMb: Int
+    var heapMidMb: Int
+    var heapHighMb: Int
+    var heapPressureRatio: Double
+    var availThresholdFactor: Double
+    var batteryHigh: Int
+    var batteryHighCharging: Int
+    var batteryMid: Int
+    var batteryMidCharging: Int
+    var batteryLow: Int
+    var batteryLowCharging: Int
+    var cpuScoreLow: Double
+    var cpuScoreMid: Double
+    var cpuScoreHigh: Double
+    var cpuCapRamLowGb: Double
+    var cpuCapRamMidGb: Double
+    var cpuCapHeapLow: Int
+    var cpuCapHeapMid: Int
+    /// When set, `isLowRamDevice` is `totalRamInMb < lowRamDeviceMb`. Absent
+    /// (nil) leaves the fact missing, today's iOS behavior.
+    var lowRamDeviceMb: Int?
+
+    static let minGb = 0.5
+    static let maxGb = 32.0
+    static let minMb = 16
+    static let maxMb = 1024
+    static let minRatio = 0.0
+    static let maxRatio = 5.0
+    static let minBattery = 0
+    static let maxBattery = 100
+    static let minCpuScore = 1.0
+    static let maxCpuScore = 200.0
+    static let minLowRamDeviceMb = 256
+    static let maxLowRamDeviceMb = 32768
+
+    static let defaults = GameMeasurementThresholds(
+        ramLowGb: 2.8, ramMidGb: 6.9, ramHighGb: 10.5,
+        heapLowMb: 128, heapMidMb: 160, heapHighMb: 256,
+        heapPressureRatio: 0.75, availThresholdFactor: 1.5,
+        batteryHigh: 80, batteryHighCharging: 70,
+        batteryMid: 55, batteryMidCharging: 50,
+        batteryLow: 40, batteryLowCharging: 35,
+        cpuScoreLow: 20, cpuScoreMid: 34, cpuScoreHigh: 56,
+        cpuCapRamLowGb: 2.8, cpuCapRamMidGb: 3.6,
+        cpuCapHeapLow: 100, cpuCapHeapMid: 160,
+        lowRamDeviceMb: nil
+    )
+
+    static func parse(_ json: [String: Any]?) -> GameMeasurementThresholds {
+        guard let json else { return .defaults }
+        guard let lowRamDeviceMb = lowRamMb(json["lowRamDeviceMb"]),
+            let ramLowGb = ratio(json["ramLowGb"], default: defaults.ramLowGb, min: minGb, max: maxGb),
+            let ramMidGb = ratio(json["ramMidGb"], default: defaults.ramMidGb, min: minGb, max: maxGb),
+            let ramHighGb = ratio(json["ramHighGb"], default: defaults.ramHighGb, min: minGb, max: maxGb),
+            let heapLowMb = whole(json["heapLowMb"], default: defaults.heapLowMb, min: minMb, max: maxMb),
+            let heapMidMb = whole(json["heapMidMb"], default: defaults.heapMidMb, min: minMb, max: maxMb),
+            let heapHighMb = whole(json["heapHighMb"], default: defaults.heapHighMb, min: minMb, max: maxMb),
+            let heapPressureRatio = ratio(
+                json["heapPressureRatio"], default: defaults.heapPressureRatio, min: minRatio, max: maxRatio),
+            let availThresholdFactor = ratio(
+                json["availThresholdFactor"], default: defaults.availThresholdFactor,
+                min: minRatio, max: maxRatio),
+            let batteryHigh = whole(
+                json["batteryHigh"], default: defaults.batteryHigh, min: minBattery, max: maxBattery),
+            let batteryHighCharging = whole(
+                json["batteryHighCharging"], default: defaults.batteryHighCharging,
+                min: minBattery, max: maxBattery),
+            let batteryMid = whole(
+                json["batteryMid"], default: defaults.batteryMid, min: minBattery, max: maxBattery),
+            let batteryMidCharging = whole(
+                json["batteryMidCharging"], default: defaults.batteryMidCharging,
+                min: minBattery, max: maxBattery),
+            let batteryLow = whole(
+                json["batteryLow"], default: defaults.batteryLow, min: minBattery, max: maxBattery),
+            let batteryLowCharging = whole(
+                json["batteryLowCharging"], default: defaults.batteryLowCharging,
+                min: minBattery, max: maxBattery),
+            let cpuScoreLow = ratio(
+                json["cpuScoreLow"], default: defaults.cpuScoreLow, min: minCpuScore, max: maxCpuScore),
+            let cpuScoreMid = ratio(
+                json["cpuScoreMid"], default: defaults.cpuScoreMid, min: minCpuScore, max: maxCpuScore),
+            let cpuScoreHigh = ratio(
+                json["cpuScoreHigh"], default: defaults.cpuScoreHigh, min: minCpuScore, max: maxCpuScore),
+            let cpuCapRamLowGb = ratio(
+                json["cpuCapRamLowGb"], default: defaults.cpuCapRamLowGb, min: minGb, max: maxGb),
+            let cpuCapRamMidGb = ratio(
+                json["cpuCapRamMidGb"], default: defaults.cpuCapRamMidGb, min: minGb, max: maxGb),
+            let cpuCapHeapLow = whole(
+                json["cpuCapHeapLow"], default: defaults.cpuCapHeapLow, min: minMb, max: maxMb),
+            let cpuCapHeapMid = whole(
+                json["cpuCapHeapMid"], default: defaults.cpuCapHeapMid, min: minMb, max: maxMb)
+        else { return .defaults }
+        return GameMeasurementThresholds(
+            ramLowGb: ramLowGb, ramMidGb: ramMidGb, ramHighGb: ramHighGb,
+            heapLowMb: heapLowMb, heapMidMb: heapMidMb, heapHighMb: heapHighMb,
+            heapPressureRatio: heapPressureRatio, availThresholdFactor: availThresholdFactor,
+            batteryHigh: batteryHigh, batteryHighCharging: batteryHighCharging,
+            batteryMid: batteryMid, batteryMidCharging: batteryMidCharging,
+            batteryLow: batteryLow, batteryLowCharging: batteryLowCharging,
+            cpuScoreLow: cpuScoreLow, cpuScoreMid: cpuScoreMid, cpuScoreHigh: cpuScoreHigh,
+            cpuCapRamLowGb: cpuCapRamLowGb, cpuCapRamMidGb: cpuCapRamMidGb,
+            cpuCapHeapLow: cpuCapHeapLow, cpuCapHeapMid: cpuCapHeapMid,
+            lowRamDeviceMb: lowRamDeviceMb
+        )
+    }
+
+    /// Absent reads as the default; a present value must be a finite number
+    /// inside `[min, max]` — the backend's typo guards. Anything else is nil,
+    /// failing the whole section.
+    private static func ratio(_ raw: Any?, default fallback: Double, min: Double, max: Double) -> Double? {
+        guard let raw else { return fallback }
+        guard let number = raw as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+        let value = number.doubleValue
+        guard value.isFinite, value >= min, value <= max else { return nil }
+        return value
+    }
+
+    /// Absent reads as the default; a present value must be a finite whole
+    /// number inside `[min, max]`. Anything else is nil, failing the whole
+    /// section.
+    private static func whole(_ raw: Any?, default fallback: Int, min: Int, max: Int) -> Int? {
+        GameSkinLimits.rangedBytes(raw, default: fallback, min: min, max: max)
+    }
+
+    /// Absent, null or blank reads as unset (nil), keeping `isLowRamDevice`
+    /// missing. A present number must be a finite whole number of megabytes
+    /// inside 256…32768; anything else is nil, failing the whole section.
+    private static func lowRamMb(_ raw: Any?) -> Int?? {
+        guard let raw else { return .some(nil) }
+        if raw is NSNull { return .some(nil) }
+        if let text = raw as? String {
+            guard text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+            return .some(nil)
+        }
+        guard let number = raw as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+        let value = number.doubleValue
+        guard value.isFinite, value == floor(value),
+            value >= Double(minLowRamDeviceMb), value <= Double(maxLowRamDeviceMb)
+        else { return nil }
+        return .some(Int(value))
+    }
+}
+
 struct SdkConfig: Equatable, Sendable {
     let healthEnabled: Bool
     let healthSessionCap: Int
@@ -103,6 +265,8 @@ struct SdkConfig: Equatable, Sendable {
     let gamePrewarm: GamePrewarmConfig
     /// How a device is placed in a game tier; the built-in default unless the backend sends one.
     let deviceTier: DeviceTierConfig
+    /// The cutoffs the device-tier level math reads; today's hardcoded numbers until the backend sends them.
+    let gameMeasurement: GameMeasurementThresholds
     /// Skin download, skin cache and bridge intake caps.
     let gameSkinLimits: GameSkinLimits
     /// Per-skin storage quotas.
@@ -111,6 +275,7 @@ struct SdkConfig: Equatable, Sendable {
     init(
         healthEnabled: Bool, healthSessionCap: Int, appEvents: AppEventUploadPolicy = .unlimited,
         gamePrewarm: GamePrewarmConfig = .off, deviceTier: DeviceTierConfig = .default,
+        gameMeasurement: GameMeasurementThresholds = .defaults,
         gameSkinLimits: GameSkinLimits = .defaults, gameStorageLimits: GameStorageLimits = .defaults
     ) {
         self.healthEnabled = healthEnabled
@@ -118,6 +283,7 @@ struct SdkConfig: Equatable, Sendable {
         self.appEvents = appEvents
         self.gamePrewarm = gamePrewarm
         self.deviceTier = deviceTier
+        self.gameMeasurement = gameMeasurement
         self.gameSkinLimits = gameSkinLimits
         self.gameStorageLimits = gameStorageLimits
     }
@@ -179,6 +345,8 @@ struct SdkConfig: Equatable, Sendable {
                 tiers: tiers(section(primary, prewarm + ["tiers"]))
             ),
             deviceTier: DeviceTierConfig.parse(section(primary, ["gamification", "deviceTier"]) as? [String: Any]),
+            gameMeasurement: GameMeasurementThresholds.parse(
+                section(primary, ["gamification", "measurement"]) as? [String: Any]),
             gameSkinLimits: GameSkinLimits.parse(
                 section(primary, ["gamification", "limits"]) as? [String: Any]),
             gameStorageLimits: GameStorageLimits.parse(
