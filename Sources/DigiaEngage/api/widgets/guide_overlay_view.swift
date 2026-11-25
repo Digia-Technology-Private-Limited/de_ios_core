@@ -252,10 +252,14 @@ private struct GuideStepOverlay: View {
                 if let imageURL {
                     // Hidden with the rest of the layer until the picture has drawn, so the
                     // placeholder it shows while loading or after a failure is never seen.
+                    // `onSuccess` runs inside this view's own update when the image library
+                    // already holds the picture in memory (an SVG or animated one shown a second
+                    // time, or the next step's, warmed by the prefetch); a state write there is
+                    // dropped, the layer would stay hidden and the step be dropped at its limit.
                     MediaImage(
                         url: imageURL.absoluteString,
                         fit: .cover,
-                        onSuccess: { imageLoaded = true },
+                        onSuccess: { DispatchQueue.main.async { imageLoaded = true } },
                         onFailure: reportImageFailure
                     )
                     .frame(width: anchorRect.width, height: anchorRect.height)
