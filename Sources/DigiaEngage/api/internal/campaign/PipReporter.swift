@@ -85,6 +85,23 @@ final class PipReporter {
     ) {
         let completed = reason.completed
         if !wasVisible {
+            // A live test that never displayed must fail, never relay
+            // `dismissed` — a sync media abandon ends the showing before
+            // routing returns, so relaying it would send `dismissed(completed)`
+            // for a campaign nobody saw while the accepted verdict armed the
+            // 5 s watchdog into a `timeout`. Organic/host/DMC keep the `toCep`
+            // path below so the coordinator settles dropped/cancelled with
+            // `cancel_cause` completed. Single-fire: a superseded test already
+            // reported `superseded` before its teardown reaches here.
+            if isLiveTestCepId(state.payload.cepCampaignId) {
+                if reason != .superseded {
+                    ctx.sdk.liveTestContexts[state.payload.cepCampaignId]?.reportFailed(
+                        DropReason.invalidConfig,
+                        message: ctx.sdk.floaterOrchestrator.lastStartFailureReason
+                            ?? "media could not be loaded (never displayed)")
+                }
+                return
+            }
             ctx.events.toCep(.dismissed(reason: reason.presentationReason, completed: completed), payload: state.payload)
             return
         }
