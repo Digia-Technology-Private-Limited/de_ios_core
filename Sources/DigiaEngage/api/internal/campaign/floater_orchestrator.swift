@@ -46,6 +46,10 @@ enum FloaterDismissReason: Equatable {
     case sessionEnd
     case superseded
     case hostTeardown
+    /// The campaign ran to its authored end without a user close — a gamification
+    /// floating entry hidden by the after-close state check. Never fires the
+    /// user-close hook.
+    case completed
 
     var wire: String {
         switch self {
@@ -58,6 +62,7 @@ enum FloaterDismissReason: Equatable {
         case .sessionEnd: return "session_end"
         case .superseded: return "superseded"
         case .hostTeardown: return "host_teardown"
+        case .completed: return "completed"
         }
     }
 
@@ -76,6 +81,7 @@ enum FloaterDismissReason: Equatable {
         case .invalidated, .hostTeardown: return .cancelled
         case .sessionEnd: return .screenExit
         case .superseded: return .superseded
+        case .completed: return .completed
         }
     }
 }

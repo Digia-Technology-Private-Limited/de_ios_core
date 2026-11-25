@@ -53,10 +53,17 @@ struct DigiaFont {
     /// the rest of the label.
     private func weightedDescriptor(family: String, size: Double, weight: Int, uiWeight: UIFont.Weight) -> UIFontDescriptor {
         if let face = Self.nearestFace(family: family, weight: weight) {
-            return UIFontDescriptor(fontAttributes: [
-                .name: face,
+            var attributes: [UIFontDescriptor.AttributeName: Any] = [
+                .name: face.name,
                 .cascadeList: [cascadeDescriptor(size: size, uiWeight: uiWeight)],
-            ])
+            ]
+            // A variable font registers as one face (e.g. Inter-Regular, 400), so every weight
+            // picks it; move its wght axis instead, as Android does via FontVariation.Settings.
+            if face.hasWeightAxis {
+                attributes[UIFontDescriptor.AttributeName(rawValue: kCTFontVariationAttribute as String)] =
+                    [Self.weightAxisTag: weight.clamped(to: 100...900)]
+            }
+            return UIFontDescriptor(fontAttributes: attributes)
         }
         return UIFontDescriptor(fontAttributes: [
             .family: family,
@@ -76,31 +83,45 @@ struct DigiaFont {
     /// PostScript name of the upright face in `family` whose OS/2 `usWeightClass` is
     /// nearest `weight` by CSS font-matching. UIFont.Weight and CoreText weight traits
     /// are on different scales, so matching on traits picks the wrong face (600 -> Bold).
-    private static func nearestFace(family: String, weight: Int) -> String? {
+    private static func nearestFace(family: String, weight: Int) -> Face? {
         let faces = uprightFaces(family: family)
         guard let target = nearestWeight(to: weight, in: faces.map(\.weight)) else { return nil }
-        return faces.first { $0.weight == target }?.name
+        return faces.first { $0.weight == target }
     }
+
+    private struct Face {
+        let name: String
+        let weight: Int
+        let hasWeightAxis: Bool
+    }
+
+    /// OpenType `wght` variation axis tag.
+    private static let weightAxisTag = 0x7767_6874
 
     /// Guards ``faceCache``: fonts resolve on the main actor and on TextKit layout threads.
     private static let faceCacheLock = NSLock()
-    nonisolated(unsafe) private static var faceCache: [String: [(name: String, weight: Int)]] = [:]
+    nonisolated(unsafe) private static var faceCache: [String: [Face]] = [:]
 
     /// Upright faces of `family` with their `usWeightClass`, read once per family.
-    private static func uprightFaces(family: String) -> [(name: String, weight: Int)] {
+    private static func uprightFaces(family: String) -> [Face] {
         faceCacheLock.lock()
         defer { faceCacheLock.unlock() }
         if let cached = faceCache[family] { return cached }
-        var faces: [(name: String, weight: Int)] = []
+        var faces: [Face] = []
         for name in UIFont.fontNames(forFamilyName: family) {
             let font = UIFont(name: name, size: 12) ?? UIFont.systemFont(ofSize: 12)
             guard font.fontName == name,
                   !font.fontDescriptor.symbolicTraits.contains(.traitItalic),
                   let weightClass = usWeightClass(of: font) else { continue }
-            faces.append((name, weightClass))
+            faces.append(Face(name: name, weight: weightClass, hasWeightAxis: hasWeightAxis(font)))
         }
         faceCache[family] = faces
         return faces
+    }
+
+    private static func hasWeightAxis(_ font: UIFont) -> Bool {
+        guard let axes = CTFontCopyVariationAxes(font as CTFont) as? [[CFString: Any]] else { return false }
+        return axes.contains { ($0[kCTFontVariationAxisIdentifierKey] as? Int) == weightAxisTag }
     }
 
     /// OS/2 table `usWeightClass` (big-endian UInt16 at byte offset 4), or nil if absent.
