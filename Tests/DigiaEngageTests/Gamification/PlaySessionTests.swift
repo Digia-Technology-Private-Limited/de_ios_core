@@ -256,6 +256,25 @@ struct PlaySessionTests {
         #expect(PlaySession.decideAfterClose(.failed(.transport("offline"))) == .keep(nil))
     }
 
+    // Fails if `dismissAfterPlayed: false` stops keeping a played entry: only
+    // the `.played` arm is gated — `expired`, `none` and `refused` still hide,
+    // and `playable`/`failed` still keep, regardless of the flag.
+    @Test("a played chance keeps the entry when dismissAfterPlayed is false")
+    func playedKeepsEntryWhenDismissAfterPlayedFalse() {
+        #expect(PlaySession.decideAfterClose(.played(chanceId: "ch-1"), dismissAfterPlayed: false) == .keep(nil))
+        #expect(PlaySession.decideAfterClose(.played(chanceId: "ch-1"), dismissAfterPlayed: true) == .hide)
+        #expect(
+            PlaySession.decideAfterClose(.failed(.transport("offline")), dismissAfterPlayed: false) == .keep(nil))
+        #expect(
+            PlaySession.decideAfterClose(
+                .playable(chanceId: "ch-2", expiresAt: nil), dismissAfterPlayed: false)
+                == .keep(GrantedChance(chanceId: "ch-2", expiresAt: nil, show: true)))
+        #expect(PlaySession.decideAfterClose(.expired, dismissAfterPlayed: false) == .hide)
+        #expect(PlaySession.decideAfterClose(.none, dismissAfterPlayed: false) == .hide)
+        #expect(
+            PlaySession.decideAfterClose(.refused(reason: "cap"), dismissAfterPlayed: false) == .hide)
+    }
+
     // Fails if the busy gate stops exempting a live test, or exempts a live
     // campaign: the `gameVisible && !isLiveTest` line in `decideTap`.
     @Test("a live-test tap opens over a visible game; a live tap stays busy")

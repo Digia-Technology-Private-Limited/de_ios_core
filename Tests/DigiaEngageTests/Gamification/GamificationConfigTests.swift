@@ -81,6 +81,27 @@ struct GamificationConfigTests {
         #expect(GamificationConfig.fromJson(topWins)?.showClose == true)
     }
 
+    @Test("dismissAfterPlayed defaults true, the top level winning over surface")
+    func dismissAfterPlayedDefaultsTrue() {
+        // Guards the dismissAfterPlayed line in fromJson, mirroring Android:
+        // absent means the entry dismisses after play; only an explicit false
+        // keeps it.
+        #expect(GamificationConfig.fromJson(template())?.dismissAfterPlayed == true)
+
+        var kept = template()
+        kept["dismissAfterPlayed"] = false
+        #expect(GamificationConfig.fromJson(kept)?.dismissAfterPlayed == false)
+
+        var surfaceKept = template()
+        surfaceKept["surface"] = ["dismissAfterPlayed": false]
+        #expect(GamificationConfig.fromJson(surfaceKept)?.dismissAfterPlayed == false)
+
+        var topWins = template()
+        topWins["dismissAfterPlayed"] = true
+        topWins["surface"] = ["dismissAfterPlayed": false]
+        #expect(GamificationConfig.fromJson(topWins)?.dismissAfterPlayed == true)
+    }
+
     @Test("the Android sensor wire names parse, unknown names skip")
     func sensorsParse() {
         // Guards the sensors loop in fromJson: every Android wire name

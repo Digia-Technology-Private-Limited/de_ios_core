@@ -628,7 +628,8 @@ final class GameSurface {
     /// closes, then keeps or hides the floater on the main thread. The floater
     /// stays on screen through the round-trip — hiding it there flickers it
     /// when the chance stays. With no user the call is skipped and the floater
-    /// hides.
+    /// hides. A `played` answer keeps the floater only when
+    /// `dismissAfterPlayed` is false; otherwise the floater comes down.
     private func refreshFloatingEntryAfterClose(
         campaignKey: String, payload: CEPTriggerPayload, chanceId: String
     ) {
@@ -656,17 +657,27 @@ final class GameSurface {
         }
     }
 
-    /// After a game opened from an inline entry closes: the card always
-    /// stays. `state` only refreshes its stored chance (a `playable` answer
-    /// stores that chance). A spent chance stays stored too, so a tap reopens the
-    /// skin, whose own `state` call answers `played` and shows the reward
-    /// already won.
+    /// After a game opened from an inline entry closes: the card stays only
+    /// when the close decision keeps it (`playable` with a fresh chance, a
+    /// failed `state` call, or `played` with `dismissAfterPlayed: false` — a
+    /// spent chance stays stored too, so a tap reopens the skin, whose own
+    /// `state` call answers `played` and shows the reward already won).
+    /// Otherwise the card is hidden: its chance is forgotten and its slot
+    /// cleared as `.completed`, mirroring Android's `dismissInline`.
     private func refreshInlineEntryAfterClose(
         campaignKey: String, payload: CEPTriggerPayload, chanceId: String
     ) {
-        let rewarm: @MainActor () -> Void = { [weak self] in self?.rewarmEntry(payload) }
         refreshEntryAfterClose(
-            campaignKey: campaignKey, payload: payload, chanceId: chanceId, hide: rewarm, onKept: rewarm)
+            campaignKey: campaignKey, payload: payload, chanceId: chanceId,
+            hide: { [weak self] in self?.hideInlineEntry(payload) },
+            onKept: { [weak self] in self?.rewarmEntry(payload) })
+    }
+
+    /// Hides an inline entry after its game closed: forgets the spent chance
+    /// and clears its slot. The slot clear reports the CEP Dismissed through
+    /// the inline removal path, like `hideFloatingEntry` does for floaters.
+    private func hideInlineEntry(_ payload: CEPTriggerPayload) {
+        sdk.gamificationSurface.hideInlineEntry(payload)
     }
 
     /// The one entry-close round-trip both entries share: with no user the
@@ -674,7 +685,9 @@ final class GameSurface {
     /// chance the closed game was playing, decides. Not the stored chance: a
     /// re-trigger can replace it while the game is open, and play next moves
     /// the game to a newer chance. `played` and a failed call keep the stored chance (a
-    /// reopen shows the outcome); any other non-playable answer runs `hide`.
+    /// reopen shows the outcome) — unless `dismissAfterPlayed` (top-level
+    /// `templateConfig`, falling back to `surface`) says the entry dismisses
+    /// after play, which is the default; any other non-playable answer runs `hide`.
     private func refreshEntryAfterClose(
         campaignKey: String,
         payload: CEPTriggerPayload,
@@ -715,7 +728,13 @@ final class GameSurface {
                     payload: payload)
             }
             log.d("Gamification state after close (state=\(result))", campaign: campaignKey)
-            switch PlaySession.decideAfterClose(result) {
+            // The entry's own campaign resolves a live test to its test
+            // version; the store alone would read the published campaign.
+            let dismissAfterPlayed = self.sdk.gamificationSurface.entryCampaign(payload)?
+                .gamificationConfig?.dismissAfterPlayed
+                ?? self.sdk.campaignStore.find(campaignKey)?.gamificationConfig?.dismissAfterPlayed
+                ?? true
+            switch PlaySession.decideAfterClose(result, dismissAfterPlayed: dismissAfterPlayed) {
             case .keep(let replacement):
                 if let replacement {
                     self.sdk.gamificationSurface.chances[

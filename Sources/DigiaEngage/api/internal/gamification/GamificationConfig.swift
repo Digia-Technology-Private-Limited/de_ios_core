@@ -50,6 +50,11 @@ struct GamificationConfig: Equatable {
     /// campaign hides it. Back and the skin's own `close` still close a game
     /// whose X is hidden.
     let showClose: Bool
+    /// Whether the entry dismisses after its chance is played (`templateConfig.dismissAfterPlayed`,
+    /// falling back to `surface.dismissAfterPlayed`); absent means the entry
+    /// dismisses. When false, a `played` close keeps the entry so the player
+    /// can reopen the skin and see the reward already won — mirroring Android.
+    let dismissAfterPlayed: Bool = true
     let bundleUrl: String
     let sensors: [GamificationSkinSensor]
     /// The skin's minimum SDK version for this platform
@@ -161,6 +166,8 @@ struct GamificationConfig: Equatable {
                 ?? campaignLevel?.nonBlankString("rewardsPageTitle"),
             showMute: templateConfig.bool("showMute", default: surface?.bool("showMute", default: false) ?? false),
             showClose: templateConfig.bool("showClose", default: surface?.bool("showClose", default: true) ?? true),
+            dismissAfterPlayed: templateConfig.bool(
+                "dismissAfterPlayed", default: surface?.bool("dismissAfterPlayed", default: true) ?? true),
             bundleUrl: bundleUrl,
             sensors: sensors,
             minSdkVersion: minSdkVersionIos(templateConfig: templateConfig),
