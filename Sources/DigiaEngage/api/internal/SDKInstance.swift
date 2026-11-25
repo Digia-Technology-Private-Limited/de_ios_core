@@ -626,6 +626,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         gameStorageLimits = config.gameStorageLimits
         gamification.applySkinLimits(config.gameSkinLimits)
         GamePrewarmer.refreshEngine()
+        // Server-driven media caps. The image cache mutates in place; the Lottie session is
+        // rebuilt only when its cap changed (a no-op on the defaults path).
+        DigiaImagePipeline.imageCache.config.maxDiskSize = UInt(config.imageDiskCacheBytes)
+        setLottieDiskCacheBytes(config.lottieDiskCacheBytes)
     }
 
     private func applyFetchResult(_ fetched: Result<CampaignBundle, Error>) {

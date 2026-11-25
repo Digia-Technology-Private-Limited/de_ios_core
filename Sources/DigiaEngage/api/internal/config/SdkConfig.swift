@@ -104,11 +104,24 @@ struct SdkConfig: Equatable, Sendable {
     let gameSkinLimits: GameSkinLimits
     /// Per-skin storage quotas.
     let gameStorageLimits: GameStorageLimits
+    /// The image disk cap the owned `DigiaImagePipeline.imageCache` runs with.
+    let imageDiskCacheBytes: Int
+    /// The Lottie HTTP disk cap the download session's `URLCache` runs with.
+    let lottieDiskCacheBytes: Int
+
+    /// The single default max for both media disk caches: 100 MiB. The backend
+    /// sends a plain byte count per cache; `URLCache` only stores a response
+    /// under about 5% of its capacity, so this keeps typical Lottie files cacheable.
+    static let defaultMediaDiskCacheBytes = 100 * 1024 * 1024
 
     init(
-        healthEnabled: Bool, healthSessionCap: Int, appEvents: AppEventUploadPolicy = .unlimited,
+        healthEnabled: Bool,
+        healthSessionCap: Int,
+        appEvents: AppEventUploadPolicy = .unlimited,
         gamePrewarm: GamePrewarmConfig = .off, deviceTier: DeviceTierConfig = .default,
-        gameSkinLimits: GameSkinLimits = .defaults, gameStorageLimits: GameStorageLimits = .defaults
+        gameSkinLimits: GameSkinLimits = .defaults, gameStorageLimits: GameStorageLimits = .defaults,
+        imageDiskCacheBytes: Int = defaultMediaDiskCacheBytes,
+        lottieDiskCacheBytes: Int = defaultMediaDiskCacheBytes
     ) {
         self.healthEnabled = healthEnabled
         self.healthSessionCap = healthSessionCap
@@ -117,6 +130,8 @@ struct SdkConfig: Equatable, Sendable {
         self.deviceTier = deviceTier
         self.gameSkinLimits = gameSkinLimits
         self.gameStorageLimits = gameStorageLimits
+        self.imageDiskCacheBytes = imageDiskCacheBytes
+        self.lottieDiskCacheBytes = lottieDiskCacheBytes
     }
 
     /// What the SDK runs on with no cache and no answer. A test pins it to the shared fixture.
@@ -179,7 +194,9 @@ struct SdkConfig: Equatable, Sendable {
             gameSkinLimits: GameSkinLimits.parse(
                 section(primary, ["gamification", "limits"]) as? [String: Any]),
             gameStorageLimits: GameStorageLimits.parse(
-                section(primary, ["gamification", "storage"]) as? [String: Any])
+                section(primary, ["gamification", "storage"]) as? [String: Any]),
+            imageDiskCacheBytes: number(["media", "imageDiskCacheBytes"], min: 1, fallback: Self.defaultMediaDiskCacheBytes),
+            lottieDiskCacheBytes: number(["media", "lottieDiskCacheBytes"], min: 1, fallback: Self.defaultMediaDiskCacheBytes)
         )
     }
 

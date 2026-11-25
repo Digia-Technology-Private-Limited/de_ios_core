@@ -5,18 +5,20 @@ import Testing
 import UIKit
 @testable import DigiaEngage
 
-// Test modes. The seam is CanvasLottieRuntime { loadSource, playbackMode }; the real renderer and the
-// real LottieAnimationView run in every mounted test. Each test below is labelled with one mode:
+// The canvas Lottie widget runs the real renderer, the real `MediaLottie` and the production loader in
+// every mounted test. The only seams are `CanvasLottieRuntime.playbackMode` (`.frozen` pins a frame so
+// pixels do not race the display link) and the network: the fake origin (`MediaOrigin`) serves real
+// `.json` / `.lottie` bytes or a real status, and `file://` URLs read real local files. Each test below
+// is labelled with one mode:
 //
-//   Mode A  SPY LOADER     `loadSource` is a spy that records the requested URL and returns nil or throws,
-//                          so no animation is installed. Asserts which URL was (or was not) requested.
-//   Mode B  INJECTED REAL  `loadSource` returns a REAL animation read from a vendored file; the test then
-//           ANIMATION      reads the real LottieAnimationView (progress, loop mode, playing, content mode,
-//                          installed size). Playback is `.frozen(progress:)` or `.live`.
-//   Mode C  PRODUCTION     `loadSource` is nil: the production loader reads a real local .json / .lottie
-//           LOADER         file (or a missing one). Asserts the installed animation or its absence.
-//   Golden                 Pixels of a presentation-layer capture (see ai_docs/media-testing.md).
-//   No mode                Parsing, mapping or environment defaults only; nothing is mounted.
+//   Mode A  ORIGIN        the fake origin answers a status or a failure; the test reads which URL was
+//                         requested (or that none was) and that no animation installed.
+//   Mode B  SERVED REAL   the fake origin serves a REAL animation; the test then reads the real
+//           ANIMATION     LottieAnimationView (progress, loop mode, playing, content mode, installed
+//                         size). Playback is `.frozen(progress:)` or `.live`.
+//   Mode C  LOCAL FILE    a real local .json / .lottie file (or a missing one). Asserts the installed
+//                         animation or its absence.
+//   No mode               Parsing, mapping or environment defaults only; nothing is mounted.
 //
 // See also ai_docs/video-widget-testing.md for the equivalent video modes.
 
@@ -70,92 +72,70 @@ struct CanvasLottieRendererTests {
         #expect("unsupported".canvasUIContentMode == .scaleAspectFill)
     }
 
-    // Mode A (spy loader): the spy must receive the authored URL.
-    @Test("runtime custom loadSource intercepts URL and returns source")
-    func runtimeCustomLoadSource() async throws {
-        let probe = LottieRuntimeProbe()
-        let testURL = URL(string: "https://example.invalid/mock.json")!
+    // Mode A: the canvas asks for the authored URL.
+    @Test("the canvas requests the authored lottie url")
+    func requestsTheAuthoredURL() async throws {
+        MediaOrigin.install()
+        defer { MediaOrigin.end() }
+        let target = MediaOrigin.url("mock.json")
+        MediaOrigin.set(.status(404, Data("not found".utf8)), for: target)
 
-        let runtime = CanvasLottieRuntime(
-            loadSource: { url in
-                probe.record(url: url)
-                return nil // simulate failure or custom source
-            },
-            playbackMode: .frozen(progress: 0.5)
-        )
+        let window = mount(lottie: lottieWidget(url: target.absoluteString), runtime: .live)
+        defer { unmount(window) }
 
-        let widget = lottieWidget(url: testURL.absoluteString)
-        let window = mount(lottie: widget, runtime: runtime)
-        let matched = await waitUntil { probe.requestedURLs.contains(testURL) }
-
-        #expect(matched)
-        unmount(window)
+        #expect(await waitUntil { !MediaOrigin.requests(for: target).isEmpty })
     }
 
-    // Mode A (spy loader): the spy must receive the light URL, then the dark URL after the theme flip.
+    // Mode A: the light URL is requested, then the dark URL after the theme flip.
     @Test("theme changes switch between light url and darkUrl")
     func themeSwitching() async throws {
-        let probe = LottieRuntimeProbe()
-        let lightURL = URL(string: "https://example.invalid/light.json")!
-        let darkURL = URL(string: "https://example.invalid/dark.json")!
-
-        let runtime = CanvasLottieRuntime(
-            loadSource: { url in
-                probe.record(url: url)
-                return nil
-            },
-            playbackMode: .frozen(progress: 0.0)
-        )
+        MediaOrigin.install()
+        defer { MediaOrigin.end() }
+        let lightURL = MediaOrigin.url("light.json")
+        let darkURL = MediaOrigin.url("dark.json")
+        MediaOrigin.set(.status(404, Data("not found".utf8)), for: lightURL)
+        MediaOrigin.set(.status(404, Data("not found".utf8)), for: darkURL)
 
         let widget = lottieWidget(url: lightURL.absoluteString, darkURL: darkURL.absoluteString)
         let theme = LottieThemeDriver()
-        let harness = LottieThemeHarness(lottie: widget, theme: theme, runtime: runtime)
+        let harness = LottieThemeHarness(lottie: widget, theme: theme, runtime: .live)
         let window = mount(harness: harness)
+        defer { unmount(window) }
 
-        let matchedLight = await waitUntil { probe.requestedURLs.contains(lightURL) }
-        #expect(matchedLight)
+        #expect(await waitUntil { !MediaOrigin.requests(for: lightURL).isEmpty })
+        #expect(MediaOrigin.requests(for: darkURL).isEmpty)
 
         theme.isDark = true
-        let matchedDark = await waitUntil { probe.requestedURLs.contains(darkURL) }
-        #expect(matchedDark)
-
-        unmount(window)
+        #expect(await waitUntil { !MediaOrigin.requests(for: darkURL).isEmpty })
     }
 
-    // Mode A (spy loader): the spy must receive the URL after variable interpolation.
+    // Mode A: the URL that is requested is the one after variable interpolation.
     @Test("variable interpolation resolves template tokens in lottie url")
     func variableInterpolation() async throws {
-        let probe = LottieRuntimeProbe()
-        let runtime = CanvasLottieRuntime(
-            loadSource: { url in
-                probe.record(url: url)
-                return nil
-            },
-            playbackMode: .frozen(progress: 0.0)
-        )
+        MediaOrigin.install()
+        defer { MediaOrigin.end() }
+        let template = MediaOrigin.rawURL("{{asset_id}}.json")
+        let expectedURL = try #require(URL(string: template.replacingOccurrences(of: "{{asset_id}}", with: "resolved-celebration")))
+        MediaOrigin.set(.status(404, Data("not found".utf8)), for: expectedURL)
 
-        let widget = lottieWidget(url: "https://example.invalid/{{asset_id}}.json")
+        let widget = lottieWidget(url: template)
         let variables = VariableContext(values: ["asset_id": "resolved-celebration"], types: ["asset_id": "string"])
-        let window = mount(lottie: widget, variables: variables, runtime: runtime)
+        let window = mount(lottie: widget, variables: variables, runtime: .live)
+        defer { unmount(window) }
 
-        let expectedURL = URL(string: "https://example.invalid/resolved-celebration.json")!
-        let matched = await waitUntil { probe.requestedURLs.contains(expectedURL) }
-
-        #expect(matched)
-        unmount(window)
+        #expect(await waitUntil { !MediaOrigin.requests(for: expectedURL).isEmpty })
     }
 
     // MARK: - Playback, loading and failure oracles
 
-    // Mode B (injected real animation, frozen): real LottieAnimationView at progress 0.5, not playing.
+    // Mode B (served real animation, frozen): real LottieAnimationView at progress 0.5, not playing.
     @Test("frozen playback installs the animation at the requested progress without playing")
     func frozenPlaybackStopsAtProgress() async throws {
-        let animation = try await Self.animation(named: "static-lottie.json")
-        let runtime = CanvasLottieRuntime(
-            loadSource: { _ in animation.animationSource },
-            playbackMode: .frozen(progress: 0.5)
-        )
-        let window = mount(lottie: lottieWidget(autoplay: true, loop: true), runtime: runtime)
+        MediaOrigin.install()
+        defer { MediaOrigin.end() }
+        let runtime = CanvasLottieRuntime(playbackMode: .frozen(progress: 0.5))
+        let url = try Self.serve("static-lottie.json")
+        let window = mount(lottie: lottieWidget(url: url, autoplay: true, loop: true), runtime: runtime)
         defer { unmount(window) }
 
         let view = try #require(await waitForAnimation(in: window))
@@ -164,12 +144,13 @@ struct CanvasLottieRendererTests {
         #expect(!view.isAnimationPlaying)
     }
 
-    // Mode B (injected real animation, live): real LottieAnimationView playing state and loop mode for 4 option combinations.
+    // Mode B (served real animation, live): real LottieAnimationView playing state and loop mode for 4 option combinations.
     @Test("live playback follows the authored autoplay and loop options")
     func livePlaybackFollowsAutoplayAndLoop() async throws {
-        let animation = try await Self.animation(named: "static-lottie.json")
-        let runtime = CanvasLottieRuntime(
-            loadSource: { _ in animation.animationSource }, playbackMode: .live)
+        MediaOrigin.install()
+        defer { MediaOrigin.end() }
+        let runtime = CanvasLottieRuntime(playbackMode: .live)
+        let url = try Self.serve("static-lottie.json")
         let cases: [(autoplay: Bool, loop: Bool, playing: Bool, mode: LottieLoopMode)] = [
             (true, true, true, .loop),
             (true, false, true, .playOnce),
@@ -178,7 +159,7 @@ struct CanvasLottieRendererTests {
         ]
 
         for expected in cases {
-            let widget = lottieWidget(autoplay: expected.autoplay, loop: expected.loop)
+            let widget = lottieWidget(url: url, autoplay: expected.autoplay, loop: expected.loop)
             let window = mount(lottie: widget, runtime: runtime)
             let view = try #require(await waitForAnimation(in: window))
 
@@ -189,18 +170,19 @@ struct CanvasLottieRendererTests {
         }
     }
 
-    // Mode B (injected real animation): real LottieAnimationView.contentMode for contain, cover and fill.
+    // Mode B (served real animation): real LottieAnimationView.contentMode for contain, cover and fill.
     @Test("authored fit reaches the Lottie view content mode")
     func fitReachesContentMode() async throws {
-        let animation = try await Self.animation(named: "static-lottie.json")
-        let runtime = CanvasLottieRuntime(
-            loadSource: { _ in animation.animationSource }, playbackMode: .frozen(progress: 0))
+        MediaOrigin.install()
+        defer { MediaOrigin.end() }
+        let runtime = CanvasLottieRuntime(playbackMode: .frozen(progress: 0))
+        let url = try Self.serve("static-lottie.json")
         let expected: [String: UIView.ContentMode] = [
             "contain": .scaleAspectFit, "cover": .scaleAspectFill, "fill": .scaleToFill,
         ]
 
         for (fit, mode) in expected {
-            let window = mount(lottie: lottieWidget(fit: fit), runtime: runtime)
+            let window = mount(lottie: lottieWidget(url: url, fit: fit), runtime: runtime)
             let view = try #require(await waitForAnimation(in: window))
             #expect(view.contentMode == mode, "fit \(fit)")
             unmount(window)
@@ -225,25 +207,24 @@ struct CanvasLottieRendererTests {
         }
     }
 
-    // Mode A + C: spy loaders that return nil or throw (A), and missing files through the production loader (C); no animation may install.
+    // Mode A + C: a 404 and a lost connection from the origin (A), and missing files (C); no animation may install.
     @Test("a failed load installs no animation")
     func failedLoadInstallsNothing() async throws {
-        let missingJSON = Self.assetURL("missing.json").absoluteString
-        let missingDotLottie = Self.assetURL("missing.lottie").absoluteString
-        let cases: [(name: String, url: String, runtime: CanvasLottieRuntime)] = [
-            ("loader returns nil", "https://example.invalid/a.json",
-             CanvasLottieRuntime(loadSource: { _ in nil }, playbackMode: .frozen(progress: 0))),
-            ("loader throws", "https://example.invalid/a.json",
-             CanvasLottieRuntime(
-                loadSource: { _ in throw URLError(.cannotLoadFromNetwork) },
-                playbackMode: .frozen(progress: 0))),
-            ("missing json", missingJSON, CanvasLottieRuntime(playbackMode: .frozen(progress: 0))),
-            ("missing dotlottie", missingDotLottie,
-             CanvasLottieRuntime(playbackMode: .frozen(progress: 0))),
+        MediaOrigin.install()
+        defer { MediaOrigin.end() }
+        let notFound = MediaOrigin.url("gone.json")
+        MediaOrigin.set(.status(404, Data("not found".utf8)), for: notFound)
+        let offline = MediaOrigin.url("offline.json")
+        MediaOrigin.set(.fail(.notConnectedToInternet), for: offline)
+        let cases: [(name: String, url: String)] = [
+            ("404", notFound.absoluteString),
+            ("lost connection", offline.absoluteString),
+            ("missing json", Self.assetURL("missing.json").absoluteString),
+            ("missing dotlottie", Self.assetURL("missing.lottie").absoluteString),
         ]
 
         for failing in cases {
-            let window = mount(lottie: lottieWidget(url: failing.url), runtime: failing.runtime)
+            let window = mount(lottie: lottieWidget(url: failing.url), runtime: .init(playbackMode: .frozen(progress: 0)))
             // A real load that fails never produces a signal to wait on, so give the loader its turn.
             _ = await waitUntil(timeout: 0.5) { false }
             #expect(lottieViews(in: window).allSatisfy { $0.animation == nil }, "\(failing.name)")
@@ -251,42 +232,33 @@ struct CanvasLottieRendererTests {
         }
     }
 
-    // Mode A (spy loader): the spy must see no URL and no LottieAnimationView may be mounted.
-    @Test("empty and malformed URLs never reach a loader and mount no Lottie view")
+    // Mode A: nothing is requested and no LottieAnimationView is mounted.
+    @Test("empty and malformed URLs never reach the network and mount no Lottie view")
     func unusableURLsMountNothing() async {
+        MediaOrigin.install()
+        defer { MediaOrigin.end() }
         // A blank "   " is deliberately absent: `URL(string:)` percent-encodes it on current iOS, so it is
         // handed to the loader and fails there (see ai_docs/media-testing.md).
         for url in ["", "http://[invalid"] {
-            let probe = LottieRuntimeProbe()
-            let runtime = CanvasLottieRuntime(
-                loadSource: { requested in
-                    probe.record(url: requested)
-                    return nil
-                },
-                playbackMode: .frozen(progress: 0)
-            )
-            let window = mount(lottie: lottieWidget(url: url), runtime: runtime)
+            let window = mount(lottie: lottieWidget(url: url), runtime: .init(playbackMode: .frozen(progress: 0)))
             _ = await waitUntil(timeout: 0.3) { false }
 
-            #expect(probe.requestedURLs.isEmpty, "url \(url.debugDescription)")
+            #expect(MediaOrigin.totalRequestCount() == 0, "url \(url.debugDescription)")
             #expect(lottieViews(in: window).isEmpty, "url \(url.debugDescription)")
             unmount(window)
         }
     }
 
-    // Mode B (injected real animation): the loader returns a different real animation per URL; the installed size must change on the theme flip.
+    // Mode B (served real animation): a different real animation per URL; the installed size must change on the theme flip.
     @Test("switching to the dark URL installs the other animation")
     func themeSwitchInstallsOtherAnimation() async throws {
-        let light = try await Self.animation(named: "static-lottie.json")
-        let dark = try await Self.animation(named: "payday.lottie")
-        let lightURL = URL(string: "https://example.invalid/light.json")!
-        let darkURL = URL(string: "https://example.invalid/dark.json")!
-        let runtime = CanvasLottieRuntime(
-            loadSource: { url in url == darkURL ? dark.animationSource : light.animationSource },
-            playbackMode: .frozen(progress: 0)
-        )
+        MediaOrigin.install()
+        defer { MediaOrigin.end() }
+        let lightURL = try Self.serve("static-lottie.json", as: "light.json")
+        let darkURL = try Self.serve("payday.lottie", as: "dark.lottie")
+        let runtime = CanvasLottieRuntime(playbackMode: .frozen(progress: 0))
         let theme = LottieThemeDriver()
-        let widget = lottieWidget(url: lightURL.absoluteString, darkURL: darkURL.absoluteString)
+        let widget = lottieWidget(url: lightURL, darkURL: darkURL)
         let window = mount(harness: LottieThemeHarness(lottie: widget, theme: theme, runtime: runtime))
         defer { unmount(window) }
 
@@ -300,60 +272,10 @@ struct CanvasLottieRendererTests {
         #expect(switched)
     }
 
-    // No mode: environment default only (`.live` playback, no custom loader); nothing is mounted.
-    @Test("production starts from the live runtime, never a frozen or fake one")
+    // No mode: environment default only (`.live` playback); nothing is mounted.
+    @Test("production starts from the live runtime, never a frozen one")
     func defaultRuntimeIsLive() {
-        let runtime = EnvironmentValues().canvasLottieRuntime
-        #expect(runtime.playbackMode == .live)
-        #expect(runtime.loadSource == nil)
-    }
-
-    // Mode A (failing spy loader): the loader is asked, and the blank placeholder gives way to the labelled one.
-    @Test("a failed load shows the labelled placeholder")
-    func failedLoadShowsLabelledPlaceholder() async throws {
-        let probe = LottieRuntimeProbe()
-        let runtime = CanvasLottieRuntime(
-            loadSource: { url in
-                probe.record(url: url)
-                return nil
-            },
-            playbackMode: .frozen(progress: 0)
-        )
-        let controller = ComponentTestHost.makeComponentHost(
-            rootView: AnyView(lottieStage(lottieWidget(), runtime: runtime)),
-            size: CGSize(width: 320, height: 200),
-            backgroundColor: .white
-        )
-        let window = mount(controller)
-        defer { unmount(window) }
-        // The placeholder turns into the labelled one only after the loader has answered and SwiftUI has
-        // re-rendered, which can lag under load. Wait for the outcome itself: a capture that is no longer
-        // blank (the stage background is plain white).
-        #expect(await waitUntil { !probe.requestedURLs.isEmpty })
-        let rendered = await waitUntil {
-            Self.hasMoreThanOneColor(ComponentTestHost.renderImage(of: controller.view))
-        }
-        #expect(rendered, "the failed-load placeholder never rendered")
-    }
-
-    private func mount(
-        canvas: CampaignCanvas,
-        runtime: CanvasLottieRuntime
-    ) -> (UIWindow, UIHostingController<AnyView>) {
-        var stage = CampaignCanvasStage(
-            canvas: canvas,
-            authoredCornerRadius: 0,
-            isDark: false,
-            showBackground: true,
-            onAction: { _ in }
-        )
-        stage.animateWidgetsOnAppear = false
-        let rootView = stage.ignoresSafeArea().environment(\.canvasLottieRuntime, runtime)
-        return ComponentTestHost.mount(
-            rootView: AnyView(rootView),
-            size: CGSize(width: canvas.width, height: canvas.height),
-            backgroundColor: .white
-        )
+        #expect(EnvironmentValues().canvasLottieRuntime.playbackMode == .live)
     }
 
     // MARK: - Helpers
@@ -368,27 +290,12 @@ struct CanvasLottieRendererTests {
         return workspace.appendingPathComponent("testkit/mock-server/assets").appendingPathComponent(name)
     }
 
-    private static func animation(named name: String) async throws -> LottieAnimationBox {
-        let url = assetURL(name)
-        if url.pathExtension == "lottie" {
-            let file = try await DotLottieFile.loadedFrom(url: url)
-            return LottieAnimationBox(animationSource: try #require(file.animationSource))
-        }
-        let animation = try #require(await LottieAnimation.loadedFrom(url: url))
-        return LottieAnimationBox(animationSource: try #require(animation.animationSource))
-    }
-
-    private static func hasMoreThanOneColor(_ image: UIImage) -> Bool {
-        guard let cgImage = image.cgImage, let data = cgImage.dataProvider?.data,
-            let bytes = CFDataGetBytePtr(data)
-        else { return false }
-        let bytesPerPixel = max(cgImage.bitsPerPixel / 8, 3)
-        let first = (bytes[0], bytes[1], bytes[2])
-        for pixel in stride(from: 0, to: cgImage.width * cgImage.height, by: 97) {
-            let offset = pixel * bytesPerPixel
-            if (bytes[offset], bytes[offset + 1], bytes[offset + 2]) != first { return true }
-        }
-        return false
+    /// Serves the Test Kit file `file` from the fake origin as `name` (its extension picks the loader)
+    /// and returns the URL.
+    private static func serve(_ file: String, as name: String? = nil) throws -> String {
+        let target = MediaOrigin.url(name ?? file)
+        MediaOrigin.set(.status(200, try testkitAsset(file)), for: target)
+        return target.absoluteString
     }
 
     private func lottieViews(in window: UIWindow) -> [LottieAnimationView] {
@@ -406,32 +313,6 @@ struct CanvasLottieRendererTests {
         _ = await waitUntil { lottieViews(in: window).first?.animation != nil }
         ComponentTestHost.drainRunLoop(for: 0.1)
         return lottieViews(in: window).first(where: { $0.animation != nil })
-    }
-
-    private func lottieStage(
-        _ lottie: CampaignCanvasWidget, runtime: CanvasLottieRuntime
-    ) -> some View {
-        var stage = CampaignCanvasStage(
-            canvas: CampaignCanvas(
-                version: 2,
-                width: 320,
-                height: 200,
-                background: .solid(.literal("#FFFFFFFF")),
-                children: [
-                    .widget(
-                        id: "lottie",
-                        rect: CampaignCanvasRect(x: 0, y: 0, width: 320, height: 200),
-                        widget: lottie
-                    )
-                ]
-            ),
-            authoredCornerRadius: 0,
-            isDark: false,
-            showBackground: true,
-            onAction: { _ in }
-        )
-        stage.animateWidgetsOnAppear = false
-        return stage.ignoresSafeArea().environment(\.canvasLottieRuntime, runtime)
     }
 
     private func parsedLottie(_ props: [String: Any]) throws -> CampaignCanvasWidget {
@@ -574,28 +455,6 @@ private struct LottieThemeHarness: View {
     }
 }
 
-/// `LottieAnimationSource` is immutable once built; the loader closures only read it.
-private struct LottieAnimationBox: @unchecked Sendable {
-    let animationSource: LottieAnimationSource
-}
-
 private enum LottieTestError: Error {
     case missingWidget
-}
-
-private final class LottieRuntimeProbe: @unchecked Sendable {
-    private let lock = NSLock()
-    private var urls: [URL] = []
-
-    var requestedURLs: [URL] {
-        lock.lock()
-        defer { lock.unlock() }
-        return urls
-    }
-
-    func record(url: URL) {
-        lock.lock()
-        defer { lock.unlock() }
-        urls.append(url)
-    }
 }

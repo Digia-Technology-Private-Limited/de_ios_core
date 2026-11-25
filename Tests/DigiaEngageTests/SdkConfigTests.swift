@@ -66,6 +66,77 @@ struct SdkConfigResolveTests {
     }
 }
 
+@Suite("SdkConfig media caps")
+struct SdkConfigMediaCapsTests {
+    private static let mib = 1024 * 1024
+
+    @Test("nothing fetched or cached resolves to 100 MiB each")
+    func defaultsTo100MiB() {
+        #expect(SdkConfig.defaults.imageDiskCacheBytes == 100 * Self.mib)
+        #expect(SdkConfig.defaults.lottieDiskCacheBytes == 100 * Self.mib)
+        #expect(SdkConfig.resolve().imageDiskCacheBytes == 100 * Self.mib)
+        #expect(SdkConfig.resolve().lottieDiskCacheBytes == 100 * Self.mib)
+    }
+
+    @Test("a fetched media section is honored")
+    func fetchedOverride() {
+        let resolved = SdkConfig.resolve(
+            fetched: object(#"{"media":{"imageDiskCacheBytes":67108864,"lottieDiskCacheBytes":33554432}}"#))
+        #expect(resolved.imageDiskCacheBytes == 64 * Self.mib)
+        #expect(resolved.lottieDiskCacheBytes == 32 * Self.mib)
+    }
+
+    @Test("the caps fall back fetched, then cached, then the default, one field at a time")
+    func fallbackChain() {
+        let cached = object(#"{"media":{"imageDiskCacheBytes":67108864,"lottieDiskCacheBytes":33554432}}"#)
+        let fetched = SdkConfig.resolve(
+            fetched: object(#"{"media":{"imageDiskCacheBytes":50331648}}"#), cached: cached)
+        #expect(fetched.imageDiskCacheBytes == 48 * Self.mib)
+        #expect(fetched.lottieDiskCacheBytes == 32 * Self.mib)
+
+        let fromCache = SdkConfig.resolve(fetched: object("{}"), cached: cached)
+        #expect(fromCache.imageDiskCacheBytes == 64 * Self.mib)
+        #expect(fromCache.lottieDiskCacheBytes == 32 * Self.mib)
+    }
+
+    @Test("a non-positive or malformed cap costs only itself, a small positive cap is honored")
+    func badValuesAreIsolated() {
+        let cached = object(#"{"media":{"imageDiskCacheBytes":67108864,"lottieDiskCacheBytes":33554432}}"#)
+        // Zero, negative, fractional, wrong-typed and boolean values are ignored, per field.
+        for bad in ["0", "-1", "8388607.5", #""67108864""#, "true", "null", "[]"] {
+            let resolved = SdkConfig.resolve(
+                fetched: object(#"{"media":{"imageDiskCacheBytes":\#(bad),"lottieDiskCacheBytes":20971520}}"#),
+                cached: cached)
+            #expect(resolved.imageDiskCacheBytes == 64 * Self.mib, "\(bad) must fall through to the cache")
+            // The sibling field still reads the fetched value: one bad field costs only itself.
+            #expect(resolved.lottieDiskCacheBytes == 20 * Self.mib)
+        }
+        // A small positive cap is a cap like any other: there is no minimum.
+        let small = SdkConfig.resolve(fetched: object(#"{"media":{"imageDiskCacheBytes":1048576}}"#))
+        #expect(small.imageDiskCacheBytes == 1 * Self.mib)
+        // Nothing usable anywhere resolves to the default.
+        let resolved = SdkConfig.resolve(fetched: object(#"{"media":{"imageDiskCacheBytes":"many"}}"#))
+        #expect(resolved.imageDiskCacheBytes == 100 * Self.mib)
+        #expect(resolved.lottieDiskCacheBytes == 100 * Self.mib)
+    }
+
+    @Test("the caps are part of equality")
+    func capsParticipateInEquality() {
+        let base = SdkConfig(healthEnabled: true, healthSessionCap: 20)
+        #expect(base == SdkConfig(healthEnabled: true, healthSessionCap: 20))
+        #expect(base != SdkConfig(healthEnabled: true, healthSessionCap: 20, imageDiskCacheBytes: 64 * Self.mib))
+        #expect(base != SdkConfig(healthEnabled: true, healthSessionCap: 20, lottieDiskCacheBytes: 32 * Self.mib))
+    }
+
+    @Test("a bad media section leaves the other sections alone")
+    func mediaIndependentOfOtherSections() {
+        let resolved = SdkConfig.resolve(fetched: object(
+            #"{"sdkHealth":{"enabled":false},"media":{"imageDiskCacheBytes":"many"}}"#))
+        #expect(resolved.healthEnabled == false)
+        #expect(resolved.imageDiskCacheBytes == 100 * Self.mib)
+    }
+}
+
 @Suite("SdkConfig app events")
 struct SdkConfigAppEventsTests {
     @Test("app-event controls and limits are read, a limit below 1 is ignored, fields fall back one by one")

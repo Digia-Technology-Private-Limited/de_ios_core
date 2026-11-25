@@ -145,6 +145,7 @@ struct GuideBehaviourTests {
     private func showAnchorless(_ path: String) async throws -> SdkHarness {
         SGCropProtocol.failing = "anchorless_crop_missing_404"
         URLProtocol.registerClass(SGCropProtocol.self)
+        routeImageDownloader(through: SGCropProtocol.self)
         let campaign = try httpsCrops(loadCampaign(path))
         let sdk = try await SdkHarness.start(campaign)
         try sdk.mount { GuideAnchorsScreenSG() }
@@ -167,6 +168,7 @@ struct GuideBehaviourTests {
     private func endAnchorless(_ sdk: SdkHarness) {
         sdk.tearDown()
         URLProtocol.unregisterClass(SGCropProtocol.self)
+        unrouteImageDownloader(SGCropProtocol.self)
     }
 
     // Fails if: guide_overlay_view.swift stops reporting `reportGuideRenderFailure` when the crop

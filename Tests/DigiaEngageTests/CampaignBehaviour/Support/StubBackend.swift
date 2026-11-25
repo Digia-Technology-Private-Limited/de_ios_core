@@ -1,5 +1,6 @@
 import Foundation
 import ObjectiveC
+import SDWebImage
 
 /// The network boundary: every request the SDK makes lands here instead of the internet. The campaign
 /// bundle answers with the fixture campaigns, the analytics endpoints accept everything, and the Test
@@ -39,10 +40,13 @@ final class StubBackend: URLProtocol, @unchecked Sendable {
         }
         URLProtocol.registerClass(StubBackend.self)
         swizzleDefaultConfiguration()
+        // The image downloader's session was built before the swizzle, so it is routed explicitly.
+        routeImageDownloader(through: StubBackend.self)
     }
 
     static func uninstall() {
         URLProtocol.unregisterClass(StubBackend.self)
+        unrouteImageDownloader(StubBackend.self)
     }
 
     /// `registerClass` reaches only `URLSession.shared`. The SDK and the image pipeline build their own
@@ -150,4 +154,27 @@ extension URLSessionConfiguration {
         config.protocolClasses = [StubBackend.self] + (config.protocolClasses ?? [])
         return config
     }
+}
+
+/// SDWebImage fixes its downloader's session when the downloader is created, so a protocol
+/// registered with `URLProtocol.registerClass` (which reaches only `URLSession.shared`) never sees
+/// a `MediaImage` request. Puts [protocolClass] first in the shared downloader's session, same
+/// delegate and queue, until `unrouteImageDownloader` takes it out again.
+func routeImageDownloader(through protocolClass: AnyClass) {
+    setImageDownloaderProtocols { [protocolClass] + $0.filter { ObjectIdentifier($0) != ObjectIdentifier(protocolClass) } }
+}
+
+/// Takes [protocolClass] out of the shared downloader's session again.
+func unrouteImageDownloader(_ protocolClass: AnyClass) {
+    setImageDownloaderProtocols { $0.filter { ObjectIdentifier($0) != ObjectIdentifier(protocolClass) } }
+}
+
+private func setImageDownloaderProtocols(_ change: ([AnyClass]) -> [AnyClass]) {
+    let downloader = SDWebImageDownloader.shared
+    guard let session = downloader.value(forKey: "session") as? URLSession else { return }
+    let configuration = session.configuration.copy() as! URLSessionConfiguration
+    configuration.protocolClasses = change(configuration.protocolClasses ?? [])
+    let routed = URLSession(
+        configuration: configuration, delegate: session.delegate, delegateQueue: session.delegateQueue)
+    downloader.setValue(routed, forKey: "session")
 }

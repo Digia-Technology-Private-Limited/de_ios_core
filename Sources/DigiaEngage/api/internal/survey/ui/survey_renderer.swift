@@ -1,7 +1,6 @@
 import SwiftUI
 import UIKit
 import Combine
-internal import SDWebImageSwiftUI
 
 /// Frame-settling buffer added before the survey is shown.
 private let RENDER_DELAY_MS: Int = 150
@@ -958,7 +957,7 @@ private struct SurveyBody: View {
                 .buttonStyle(.plain)
             }
         case .textMedia:
-            if !block.media.hasUrl { MediaPlaceholder() }
+            EmptyView()
         default:
             SurveyQuestionContent(
                 block: block,
@@ -1116,48 +1115,18 @@ private struct BlockTitleView: View {
 private struct BlockMediaImage: View {
     let media: BlockMedia
 
-    init(media: BlockMedia) {
-        DigiaImagePipeline.configureIfNeeded()
-        self.media = media
-    }
-
-    private var contentMode: ContentMode {
-        switch media.boxFit {
-        case "contain": return .fit
-        default: return .fill
-        }
-    }
-
     var body: some View {
-        if media.hasUrl, let url = URL(string: media.url) {
-            WebImage(url: url) { image in
-                if media.boxFit == "fill" {
-                    image.resizable()
-                } else {
-                    image.resizable().aspectRatio(contentMode: contentMode)
-                }
-            } placeholder: {
-                ZStack {
-                    SurveyTokens.surfaceSunken
-                    BlurHashPlaceholderView(placeholder: media.placeholder, fit: media.boxFit)
-                }
-            }
+        if media.hasUrl {
+            MediaImage(
+                url: media.url,
+                fit: MediaFit(authored: media.boxFit),
+                blurHash: media.placeholder?.stillBlurHash
+            )
             .frame(height: 176)
             .frame(maxWidth: .infinity)
             .clipShape(RoundedRectangle(cornerRadius: 10))
             .overlay(RoundedRectangle(cornerRadius: 10).stroke(SurveyTokens.border, lineWidth: 1))
         }
-    }
-}
-
-private struct MediaPlaceholder: View {
-    var body: some View {
-        Text("— image / video —")
-            .font(surveyFont(size: 12))
-            .foregroundColor(SurveyTokens.textTertiary)
-            .frame(maxWidth: .infinity)
-            .frame(height: 96)
-            .background(RoundedRectangle(cornerRadius: 10).fill(SurveyTokens.surfaceSunken))
     }
 }
 
