@@ -1,0 +1,284 @@
+import Foundation
+import SwiftUI
+import WebKit
+
+/// The SDK's one logging style — see ``DigiaLogger``.
+private let log = DigiaLogger()
+
+/// Breaks the retain cycle `WKUserContentController` would otherwise close:
+/// the controller holds its message handlers strongly, so the handler held
+/// here must not hold the coordinator (and through it the web view) back.
+final class WeakScriptMessageProxy: NSObject, WKScriptMessageHandler {
+    weak var target: WKScriptMessageHandler?
+
+    init(target: WKScriptMessageHandler?) {
+        self.target = target
+        super.init()
+    }
+
+    func userContentController(
+        _ userContentController: WKUserContentController,
+        didReceive message: WKScriptMessage
+    ) {
+        target?.userContentController(userContentController, didReceive: message)
+    }
+}
+
+/// Builds the locked-down `WKWebViewConfiguration`:
+/// non-persistent storage (DOM storage and cookies off), the `digia` handler
+/// on the main frame only, selection and callout off outside text inputs, bounce off, playback
+/// without a user gesture, inspection in debug builds only.
+enum GameWebViewConfigurationFactory {
+    /// Defines `window.digia.postMessage` for skins that speak the
+    /// Android/Flutter spelling. Skins using the iOS spelling
+    /// (`window.webkit.messageHandlers.digia.postMessage`) reach the same
+    /// native handler directly.
+    private static let digiaShimScript =
+        "window.digia = { postMessage: function(message) { " +
+        "window.webkit.messageHandlers.digia.postMessage(message); } };"
+
+    /// Selection and the long-press callout stay off everywhere except text
+    /// inputs, so typing, paste and cursor placement work. Same string as
+    /// Android `GAME_SELECTION_CSS`. No quotes or backslashes: it sits in a
+    /// JS string literal as is.
+    static let selectionStyle =
+        "* { -webkit-user-select: none !important; user-select: none !important; " +
+        "-webkit-touch-callout: none !important; } " +
+        "input, textarea, [contenteditable], [contenteditable] * { " +
+        "-webkit-user-select: text !important; user-select: text !important; " +
+        "-webkit-touch-callout: default !important; }"
+
+    static func make(messageProxy: WKScriptMessageHandler) -> WKWebViewConfiguration {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+        configuration.allowsInlineMediaPlayback = true
+        // Skins play sound cues (spin ticks, win/lose) from animation frames
+        // and after async work, outside a tap handler, so playback must not
+        // need a user gesture. This also covers Web Audio. Matches Android's
+        // mediaPlaybackRequiresUserGesture = false. Skins still own mute.
+        configuration.mediaTypesRequiringUserActionForPlayback = []
+
+        let controller = configuration.userContentController
+        controller.add(messageProxy, name: "digia")
+        controller.addUserScript(WKUserScript(
+            source: digiaShimScript,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        ))
+        let styleScript =
+            "var style = document.createElement('style'); style.textContent = '\(selectionStyle)'; " +
+            "(document.head || document.documentElement).appendChild(style);"
+        controller.addUserScript(WKUserScript(
+            source: styleScript,
+            injectionTime: .atDocumentEnd,
+            forMainFrameOnly: true
+        ))
+        return configuration
+    }
+}
+
+/// Owns the `WKWebView` and glues it to the `GamePresentation`: loads the
+/// cached entry from disk, enforces the URL policy, forwards `digia` messages
+/// to the bridge, sends `init` on page load, arms the ready timer, and tears
+/// everything down. Nonisolated because `WKNavigationDelegate` is an ObjC
+/// protocol; every touch of game state hops to the main actor, in arrival order.
+final class GameWebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
+    private weak var game: GamePresentation?
+    private let entryFile: URL
+    private let bundleRoot: URL
+    private let webView: WKWebView
+
+    /// `engine`, when given, is the prewarmed blank web view (same
+    /// configuration); the game adopts that instance instead of building one.
+    init(
+        game: GamePresentation, entryFile: URL, bundleRoot: URL,
+        engine: GamePrewarmer.Engine? = nil
+    ) {
+        self.game = game
+        self.entryFile = entryFile
+        self.bundleRoot = bundleRoot
+        let proxy: WeakScriptMessageProxy
+        if let engine {
+            proxy = engine.proxy
+            self.webView = engine.webView
+        } else {
+            proxy = WeakScriptMessageProxy(target: nil)
+            let configuration = GameWebViewConfigurationFactory.make(messageProxy: proxy)
+            self.webView = WKWebView(frame: .zero, configuration: configuration)
+        }
+        if #available(iOS 16.4, *) {
+            // Debug builds only: a release web view is never inspectable.
+            webView.isInspectable = SDKInstance.shared.isDebugBuild
+        }
+        super.init()
+        proxy.target = self
+        webView.navigationDelegate = self
+        webView.uiDelegate = self
+        // Contract safety rails: no bounce, no zoom, no link preview. The skin
+        // owns its own pinch-free layout; the scroll view's recognizers would
+        // only fight it.
+        webView.scrollView.bounces = false
+        // The skin pads itself from `safeArea` in `init`; letting the scroll
+        // view inset too leaves a blank band above the home indicator.
+        webView.scrollView.contentInsetAdjustmentBehavior = .never
+        webView.scrollView.minimumZoomScale = 1
+        webView.scrollView.maximumZoomScale = 1
+        if let pinch = webView.scrollView.pinchGestureRecognizer {
+            pinch.isEnabled = false
+        }
+        webView.allowsLinkPreview = false
+        // Transparent surface: the host app shows through wherever the skin
+        // draws nothing, so no layer here may paint an opaque background.
+        webView.isOpaque = false
+        webView.backgroundColor = .clear
+        webView.scrollView.backgroundColor = .clear
+    }
+
+    var view: WKWebView { webView }
+
+    /// Starts the load from the cached file and the 15 s load timer; the 5 s
+    /// ready timer starts at the page commit. Timers run only while the app is
+    /// active: a load started out of the foreground arms on didBecomeActive.
+    func start() {
+        webView.loadFileURL(entryFile, allowingReadAccessTo: bundleRoot)
+        Task { @MainActor [weak game] in game?.armLoadTimer() }
+    }
+
+    /// Stops the load, detaches the message handler, and closes the bridge.
+    /// SwiftUI calls this when the container goes away; closing an already
+    /// closed bridge is a no-op, never a second callback.
+    ///
+    /// Media is paused and the page swapped for a blank one: a skin's audio,
+    /// timers and rAF loop otherwise keep running until WebKit frees the view,
+    /// which a host retaining the view hierarchy can delay indefinitely. The
+    /// web view is never reused after this (a prewarm engine is taken once).
+    func teardown() {
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "digia")
+        webView.navigationDelegate = nil
+        webView.uiDelegate = nil
+        webView.stopLoading()
+        webView.pauseAllMediaPlayback(completionHandler: nil)
+        webView.loadHTMLString("", baseURL: nil)
+        Task { @MainActor [weak game] in game?.bridge.close() }
+    }
+
+    // MARK: - WKScriptMessageHandler (digia.postMessage)
+
+    func userContentController(
+        _ userContentController: WKUserContentController,
+        didReceive message: WKScriptMessage
+    ) {
+        // The handler is main-frame-only, and the file policy below keeps a
+        // foreign iframe from driving the game even if one were ever embedded.
+        guard message.frameInfo.isMainFrame else { return }
+        let body = message.body
+        Task { @MainActor [weak game] in game?.receive(body) }
+    }
+
+    // MARK: - WKNavigationDelegate
+
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+    ) {
+        guard let url = navigationAction.request.url,
+              let game
+        else {
+            decisionHandler(.cancel)
+            return
+        }
+        let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? true
+        let accept = navigationAction.request.value(forHTTPHeaderField: "Accept")
+        decisionHandler(GameUrlPolicy.allowNavigation(
+            url: url,
+            entryURL: game.entryFile,
+            bundleRoot: game.bundleRoot,
+            navigationType: navigationAction.navigationType,
+            isMainFrame: isMainFrame,
+            accept: accept
+        ) ? .allow : .cancel)
+    }
+
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        Task { @MainActor [weak game] in game?.pageDidCommit() }
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        Task { @MainActor [weak game] in game?.sendInit() }
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        didFailProvisionalNavigation navigation: WKNavigation!,
+        withError error: Error
+    ) {
+        let code = (error as NSError).code
+        // Our own policy cancels land here; only a real load failure closes.
+        guard code != NSURLErrorCancelled else { return }
+        log.w("Game bundle failed to load", error: error.localizedDescription)
+        Task { @MainActor [weak game] in game?.failLoading() }
+    }
+
+    /// A main-frame failure after commit (the page committed, then its load
+    /// broke). Without this the game sat on the 5 s ready timer, or on a held
+    /// game nothing at all; `failLoading` acts only while still loading.
+    func webView(
+        _ webView: WKWebView,
+        didFail navigation: WKNavigation!,
+        withError error: Error
+    ) {
+        guard (error as NSError).code != NSURLErrorCancelled else { return }
+        log.w("Game page failed after commit", error: error.localizedDescription)
+        Task { @MainActor [weak game] in game?.failLoading() }
+    }
+
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        log.w("Game web content process terminated")
+        Task { @MainActor [weak game] in game?.failRendering() }
+    }
+
+    // MARK: - WKUIDelegate
+
+    /// `window.open` never opens: links work only through the native bridge
+    /// (`action openLink`), never by navigating away.
+    func webView(
+        _ webView: WKWebView,
+        createWebViewWith configuration: WKWebViewConfiguration,
+        for navigationAction: WKNavigationAction,
+        windowFeatures: WKWindowFeatures
+    ) -> WKWebView? {
+        nil
+    }
+}
+
+/// The SwiftUI seam for the game web view. One coordinator owns one web view
+/// for the life of this view; teardown runs when the container dismisses.
+struct GameWebViewHost: UIViewRepresentable {
+    let game: GamePresentation
+
+    /// The game is presented only after `ready`, so the coordinator already
+    /// exists and its page is loaded; this view adopts it without reloading.
+    func makeCoordinator() -> GameWebCoordinator {
+        if let existing = game.webCoordinator { return existing }
+        // Unreachable in practice: `GamePresenter.open` always preloads.
+        assertionFailure("Game presented without a preloaded web view")
+        let coordinator = GameWebCoordinator(
+            game: game, entryFile: game.entryFile, bundleRoot: game.bundleRoot)
+        coordinator.start()
+        return coordinator
+    }
+
+    func makeUIView(context: Context) -> WKWebView {
+        context.coordinator.view
+    }
+
+    func updateUIView(_ uiView: WKWebView, context: Context) {
+        // Loaded once in `GamePresentation.preload()`; never reloaded here.
+    }
+
+    static func dismantleUIView(_ uiView: WKWebView, coordinator: GameWebCoordinator) {
+        coordinator.teardown()
+    }
+}

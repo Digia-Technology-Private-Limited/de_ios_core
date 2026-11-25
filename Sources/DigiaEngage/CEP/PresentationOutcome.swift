@@ -90,6 +90,33 @@ public enum DropReason: String, CaseIterable, Sendable {
     /// A CEP triggered a campaign that Digia decides. Only Digia shows it.
     case digiaManaged = "digia_managed"
 
+    /// The backend refused a gamification chance because user verification is on
+    /// and the app's `userHash` is missing or invalid for the `userId` it set.
+    case userNotVerified = "user_not_verified"
+
+    /// The backend refused a gamification chance because the campaign is not live.
+    /// Rare but real. The app saved its campaign list while this campaign was live.
+    /// Then the campaign was paused, archived, deleted, or its end date passed
+    /// before the trigger fired. A fresh list never has this campaign, so this
+    /// only happens with an old saved list.
+    case campaignNotLive = "campaign_not_live"
+
+    /// The backend refused a gamification chance because this user is not in the
+    /// campaign's audience.
+    case notInAudience = "not_in_audience"
+
+    /// The backend refused a gamification chance because the campaign's budget is
+    /// used up.
+    case budgetExhausted = "budget_exhausted"
+
+    /// The backend refused a gamification chance because the chance has expired.
+    case chanceExpired = "chance_expired"
+
+    /// The generic gamification refusal: the backend denied the chance with a
+    /// reason this SDK does not know (or none), or granted it without asking the
+    /// SDK to show it. Never a cap.
+    case notEligible = "user_held_out"
+
     /// An unexpected error — specifics in the dropped arm's `detail`.
     case error = "error"
 
@@ -192,7 +219,7 @@ public enum PresentationOutcome: Sendable, Equatable {
 ///
 /// Purely additive: ``wire`` is the same pinned string ``DropReason/value``
 /// already is. The timeline reuses this enum rather than minting a twin symbol
-/// for each of its thirteen values — see ``DiagnosticReason``.
+/// for each of its values — see ``DiagnosticReason``.
 extension DropReason: DiagnosticReason {
     /// The pinned string form, identical to ``value``.
     public var wire: String { rawValue }

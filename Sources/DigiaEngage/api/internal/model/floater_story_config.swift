@@ -61,16 +61,18 @@ struct FloaterStoryWindowConfig: Equatable {
     let exitAnimation: FloaterExitAnimation
 
     static func fromJson(
-        _ json: [String: Any]?, designTokens: DesignTokenCatalog = .empty
+        _ json: [String: Any]?, designTokens: DesignTokenCatalog = .empty,
+        maxWidthFraction: CGFloat = 0.9
     ) -> FloaterStoryWindowConfig {
         let j = json ?? [:]
         let border = j.object("border")
         let ratio = CGFloat(j.double("aspectRatio", default: 0.72))
         return FloaterStoryWindowConfig(
             // Clamped, not trusted: a window wider than the screen cannot be dragged
-            // back into it, and one under ~30dp cannot be reliably tapped.
+            // back into it, and one under ~30dp cannot be reliably tapped. Only a story-less
+            // floating entry may span the full width.
             widthFraction: CGFloat(j.double("widthFraction", default: 0.32))
-                .clampedToFloaterStoryRange(0.08, 0.9),
+                .clampedToFloaterStoryRange(0.08, maxWidthFraction),
             aspectRatio: ratio > 0 ? ratio : 0.72,
             position: FloaterCorner.from(j.nonBlankString("position")),
             margin: FloaterMargin.fromJson(j.object("marginDp")),
@@ -173,8 +175,9 @@ struct FloaterStoryConfig: Equatable {
     /// The window's content.
     let canvas: CampaignCanvas
     /// The story a tap opens — its pages and its chrome layer, exactly as the canvas
-    /// story widget carries them, so the viewer cannot tell the two apart.
-    let story: CampaignCanvasWidget
+    /// story widget carries them, so the viewer cannot tell the two apart. Nil only
+    /// for a gamification entry, whose tap runs canvas actions instead.
+    let story: CampaignCanvasWidget?
     /// The logical width the window canvas and the story pages were authored at.
     let designWidth: CGFloat
     let window: FloaterStoryWindowConfig
@@ -186,7 +189,8 @@ struct FloaterStoryConfig: Equatable {
     /// or no readable story to open. Both are the whole campaign: a window with nothing
     /// in it is an invisible tap target, and a window that opens nothing is a decoration.
     static func fromJson(
-        _ templateConfig: [String: Any], designTokens: DesignTokenCatalog = .empty
+        _ templateConfig: [String: Any], designTokens: DesignTokenCatalog = .empty,
+        requiresStory: Bool = true
     ) throws -> FloaterStoryConfig? {
         guard let canvasJSON = templateConfig.object("canvas") else { return nil }
         let parser = CampaignCanvasParser(designTokens: designTokens)
@@ -200,16 +204,16 @@ struct FloaterStoryConfig: Equatable {
                 background: .none, children: canvas.children
             )
         }
-        guard let story = parser.parseStandaloneStory(templateConfig.object("story")) else {
-            return nil
-        }
+        let story = parser.parseStandaloneStory(templateConfig.object("story"))
+        if requiresStory && story == nil { return nil }
         let designWidth = CGFloat(templateConfig.double("designWidth", default: 360))
         return FloaterStoryConfig(
             canvas: canvas,
             story: story,
             designWidth: designWidth > 0 ? designWidth : 360,
             window: FloaterStoryWindowConfig.fromJson(
-                templateConfig.object("collapsed"), designTokens: designTokens
+                templateConfig.object("collapsed"), designTokens: designTokens,
+                maxWidthFraction: requiresStory ? 0.9 : 1.0
             ),
             controls: FloaterStoryControlsConfig.fromJson(templateConfig.object("controls")),
             behavior: FloaterStoryBehaviorConfig.fromJson(templateConfig.object("behavior")),

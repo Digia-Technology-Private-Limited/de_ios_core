@@ -1,0 +1,174 @@
+import Foundation
+import Testing
+
+@testable import DigiaEngage
+
+/// The `GameOutcomeSource` HTTP seam: envelope unwrap, typed grant results,
+/// and typed failures that never throw. Guards the unwrap path
+/// (`data.response`) and the never-throws contract — break any of those lines
+/// and these fail.
+@Suite("Game outcome source", .tags(.unit, .network, .gamification))
+struct GameOutcomeSourceTests {
+    private func source(client: MockNetworkClient? = nil) -> (
+        HttpGameOutcomeSource, MockNetworkClient
+    ) {
+        let client = client ?? MockNetworkClient()
+        return (HttpGameOutcomeSource(networkClient: client), client)
+    }
+
+    private func envelope(_ response: String) -> String {
+        #"{"isSuccess":true,"data":{"response":\#(response)}} "#
+            .trimmingCharacters(in: .whitespaces)
+    }
+
+    private func body(of client: MockNetworkClient) throws -> [String: Any] {
+        let data = try #require(client.lastRequest?.body)
+        return try JSONSerialization.jsonObject(with: data) as! [String: Any]
+    }
+
+    private func grantRequest(liveTest: Bool = false) -> GrantChanceRequest {
+        GrantChanceRequest(
+            campaignKey: "bill_pay_spin",
+            userId: "u_123",
+            userHash: nil,
+            triggerId: "cep-1",
+            testInvocationId: liveTest ? "inv-1" : nil,
+            deviceId: liveTest ? "device-1" : nil
+        )
+    }
+
+    // MARK: - grantChance
+
+    @Test("a grant unwraps the envelope and posts the CEP-mode fields")
+    func grantChanceGranted() async throws {
+        let (source, client) = source()
+        client.enqueueResponse(
+            statusCode: 200,
+            body: envelope(
+                #"{"granted":true,"chanceId":"ch_1","expiresAt":"2026-11-18T18:29:59Z","show":true}"#))
+
+        let result = await source.grantChance(grantRequest())
+
+        #expect(
+            result
+                == .granted(
+                    GrantedChance(chanceId: "ch_1", expiresAt: "2026-11-18T18:29:59Z", show: true)))
+        let request = try #require(client.lastRequest)
+        #expect(request.url.absoluteString.hasSuffix("/engage/sdk/gamification/grantChance"))
+        #expect(request.method == .post)
+        let sent = try body(of: client)
+        #expect(sent["campaignKey"] as? String == "bill_pay_spin")
+        #expect(sent["userId"] as? String == "u_123")
+        #expect(sent["triggerId"] as? String == "cep-1")
+        #expect(sent["showNow"] as? Bool == true)
+        #expect(sent["testInvocationId"] == nil)
+        #expect(request.headers["x-digia-device-id"] == nil)
+    }
+
+    @Test("a denial carries its reason; a holdout carries none")
+    func grantChanceDenied() async {
+        let (source, client) = source()
+        client.enqueueResponse(
+            statusCode: 200, body: envelope(#"{"granted":false,"show":false,"denyReason":"capReached"}"#))
+
+        #expect(await source.grantChance(grantRequest()) == .denied(reason: "capReached"))
+
+        client.reset()
+        client.enqueueResponse(
+            statusCode: 200, body: envelope(#"{"granted":false,"show":false}"#))
+
+        #expect(await source.grantChance(grantRequest()) == .denied(reason: nil))
+    }
+
+    @Test("a live-test grant sends showNow with the device header")
+    func grantChanceLiveTest() async throws {
+        let (source, client) = source()
+        client.enqueueResponse(
+            statusCode: 200, body: envelope(#"{"granted":true,"chanceId":"ch_9","show":true}"#))
+
+        let result = await source.grantChance(grantRequest(liveTest: true))
+
+        #expect(result == .granted(GrantedChance(chanceId: "ch_9", expiresAt: nil, show: true)))
+        let request = try #require(client.lastRequest)
+        let sent = try body(of: client)
+        #expect(sent["showNow"] as? Bool == true)
+        #expect(sent["testInvocationId"] as? String == "inv-1")
+        #expect(request.headers["x-digia-device-id"] == "device-1")
+    }
+
+    @Test("a grant without a chanceId is a failure, not a grant")
+    func grantChanceMissingChanceId() async {
+        let (source, client) = source()
+        client.enqueueResponse(statusCode: 200, body: envelope(#"{"granted":true,"show":true}"#))
+
+        let result = await source.grantChance(grantRequest())
+
+        #expect(result == .failure(.invalidResponse("granted without chanceId")))
+    }
+
+    @Test("a timeout keeps its identity, and maps to the timeout code")
+    func transportTimeoutIdentity() async {
+        let (source, client) = source()
+
+        // Guards the timedOut flag in post: a timeout must report timeout,
+        // not network, on the close-time state call. Breaks if post stops
+        // walking the error with gameTransportIsTimeout.
+        client.simulateTransportError(URLError(.timedOut))
+        let timedOut = await source.state(campaignKey: "bill_pay_spin")
+        guard case .failed(let timeoutError) = timedOut else {
+            Issue.record("expected a failed state, got \(timedOut)")
+            return
+        }
+        #expect(timeoutError.rewardsCode == "timeout")
+        #expect(timeoutError.rewardsStatus == nil)
+
+        client.reset()
+        client.simulateTransportError(URLError(.notConnectedToInternet))
+        let offline = await source.state(campaignKey: "bill_pay_spin")
+        guard case .failed(let networkError) = offline else {
+            Issue.record("expected a failed state, got \(offline)")
+            return
+        }
+        // Guards the network arm: anything that is not a timeout stays one.
+        #expect(networkError.rewardsCode == "network")
+    }
+
+    @Test("HTTP and envelope faults map to status and invalid_response")
+    func failureCodeMapping() {
+        // Guards the rewardsCode/status mapping every game_rewards_failed
+        // emission shares. Breaks if the mapping arms change.
+        #expect(GameOutcomeError.transport("offline").rewardsCode == "network")
+        #expect(GameOutcomeError.httpStatus(500).rewardsCode == "status")
+        #expect(GameOutcomeError.httpStatus(500).rewardsStatus == 500)
+        #expect(GameOutcomeError.invalidResponse("bad").rewardsCode == "invalid_response")
+        #expect(GameOutcomeError.invalidResponse("bad").rewardsStatus == nil)
+    }
+
+    @Test("transport, HTTP and envelope faults are failures, never throws")
+    func grantChanceFailures() async {
+        let (source, client) = source()
+
+        client.simulateTransportError(URLError(.notConnectedToInternet))
+        let transport = await source.grantChance(grantRequest())
+        guard case .failure(.transport) = transport else {
+            Issue.record("expected a transport failure, got \(transport)")
+            return
+        }
+
+        client.reset()
+        client.enqueueResponse(statusCode: 500, body: "boom")
+        #expect(await source.grantChance(grantRequest()) == .failure(.httpStatus(500)))
+
+        client.reset()
+        client.enqueueResponse(statusCode: 200, body: #"{"isSuccess":false,"data":{}}"#)
+        #expect(
+            await source.grantChance(grantRequest())
+                == .failure(.invalidResponse("isSuccess is not true")))
+
+        client.reset()
+        client.enqueueResponse(statusCode: 200, body: #"{"isSuccess":true,"data":{}}"#)
+        #expect(
+            await source.grantChance(grantRequest())
+                == .failure(.invalidResponse("missing data.response")))
+    }
+}
