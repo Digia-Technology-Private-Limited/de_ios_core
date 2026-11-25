@@ -234,6 +234,10 @@ final class PipSurface: CampaignSurface {
                 busyDetail = floaterBusyDetail() ?? [:]
                 return .dropped(reason: .surfaceBusy, detail: message, deliveryDetail: busyDetail)
             }
+            // A sync media abandon already returned acceptance from the
+            // orchestrator (its dismissal callback settled dropped/cancelled),
+            // so reaching here means a real refusal: the campaign itself
+            // cannot run.
             return request.invalidConfig(message, cause: "start_failed")
         }
         return .accepted(payload: payload, kind: .floating)
