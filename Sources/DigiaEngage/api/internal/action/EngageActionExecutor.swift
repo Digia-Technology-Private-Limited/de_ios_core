@@ -179,12 +179,32 @@ final class HostActionExecutor {
                 )
             }
         case .openDeeplink(let url):
+            guard GameLinkPolicy.openableURL(url) != nil else {
+                log.w(
+                    "Action skipped \u{2014} url is not an openable link",
+                    campaign: campaignKey,
+                    stage: .interaction,
+                    reason: TimelineReason.unsupportedActionType,
+                    extras: ["action_type": "deeplink"]
+                )
+                return true
+            }
             if let deepLinkHandler {
                 try deepLinkHandler(url)
             } else if !legacyActionHandler("deep_link", url) {
                 openURL(url)
             }
         case .openUrl(let url):
+            guard GameLinkPolicy.openableURL(url) != nil else {
+                log.w(
+                    "Action skipped \u{2014} url is not an openable link",
+                    campaign: campaignKey,
+                    stage: .interaction,
+                    reason: TimelineReason.unsupportedActionType,
+                    extras: ["action_type": "url"]
+                )
+                return true
+            }
             if let openURLHandler {
                 try openURLHandler(url)
             } else if !legacyActionHandler("open_url", url) {

@@ -363,26 +363,14 @@ final class GamePresentation: Identifiable, ObservableObject {
             storage.remove(key)
             if let id { bridge.answer(id: id) }
         case .actionSteps(let id, let actions):
-            // Same JSON the canvas sends. Links leave the game: answer now,
-            // close first, then run after close (the container must not block
-            // the handoff). Everything else runs through the shared executor.
-            let links = actions.filter {
+            // Same JSON the canvas sends. Runs through the shared executor like
+            // Android, then closes when a step leaves the game.
+            let leaves = actions.contains {
                 if case .openUrl = $0 { return true }
                 if case .openDeeplink = $0 { return true }
                 return false
             }
-            if links.isEmpty {
-                runSkinActions(id: id, actions: actions)
-            } else {
-                if let id { bridge.answer(id: id, payload: ["ok": true]) }
-                for action in actions {
-                    if let op = Self.actionOp(action) {
-                        request.onCta?(op, Self.actionUrl(action))
-                    }
-                }
-                dismiss(reason: "cta")
-                runSkinActionsAfterClose(actions: actions)
-            }
+            runSkinActions(id: id, actions: actions, closeAfter: leaves)
         case .actionClose(let id, let reason):
             if let reason, !reason.isEmpty {
                 log.d("Game closed by skin (reason=\(reason))", campaign: self.request.campaignKey)
@@ -439,14 +427,15 @@ final class GamePresentation: Identifiable, ObservableObject {
     /// host handlers behave exactly as for any other campaign action. Answered
     /// only once the actions have run — or not at all, when the skin sent no id
     /// or the game closed mid-execution. A run fires `onCta` per step, like
-    /// Android's, including id-less runs, which still tapped.
-    private func runSkinActions(id: String?, actions: [EngageAction]) {
+    /// Android's, including id-less runs, which still tapped. Steps that leave
+    /// the game close the container once the link has been handed off.
+    private func runSkinActions(id: String?, actions: [EngageAction], closeAfter: Bool = false) {
         Task { @MainActor [weak self] in
             guard let self, self.bridge.state != .closed else { return }
             await SDKInstance.shared.executeActionFlow(
                 actions, variables: nil, campaignKey: self.request.campaignKey,
-                localActionExecutor: LocalActionExecutor(
-                    dismiss: { [weak self] in self?.dismiss(reason: "skin") }))
+                // No dismiss: Dismiss steps close through the session, never the executor.
+                localActionExecutor: LocalActionExecutor())
             guard self.bridge.state != .closed else { return }
             if let id { self.bridge.answer(id: id, payload: ["ok": true]) }
             for action in actions {
@@ -454,20 +443,7 @@ final class GamePresentation: Identifiable, ObservableObject {
                     self.request.onCta?(op, Self.actionUrl(action))
                 }
             }
-        }
-    }
-
-    /// Runs bridge steps after the surface already closed (the link path):
-    /// no reply is owed, and the closed bridge must not swallow the host-ward
-    /// side effect. Captures the request, not the session, so teardown cannot
-    /// cancel the open.
-    private func runSkinActionsAfterClose(actions: [EngageAction]) {
-        let campaignKey = self.request.campaignKey
-        Task { @MainActor in
-            await SDKInstance.shared.executeActionFlow(
-                actions, variables: nil, campaignKey: campaignKey,
-                localActionExecutor: LocalActionExecutor(
-                    dismiss: { GamePresenter.dismiss() }))
+            if closeAfter { self.dismiss(reason: "cta") }
         }
     }
 
