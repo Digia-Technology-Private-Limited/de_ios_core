@@ -49,14 +49,15 @@ final class GameMotionSource: NSObject {
     nonisolated static let lightName = "light"
     nonisolated static let proximityName = "proximity"
 
-    /// Every sensor the bridge intake accepts, in `init.device.sensors`
-    /// order. Unknown names never reach here — the intake rejects them.
+    /// Every sensor `init.device.sensors` may advertise, in wire order. The
+    /// motion intake accepts only gyroscope + accelerometer — the rest are
+    /// feature detection for skins, never subscribable.
     nonisolated static let orderedSensorNames = [
         gyroscopeName, accelerometerName, gravityName, linearAccelerationName,
         rotationVectorName, magneticFieldName, pressureName, lightName, proximityName,
     ]
 
-    /// Every sensor the bridge intake accepts.
+    /// Every sensor `init.device.sensors` may advertise.
     nonisolated static let allSensorNames: Set<String> = Set(orderedSensorNames)
 
     /// Default rate when the skin sends no `hz`.

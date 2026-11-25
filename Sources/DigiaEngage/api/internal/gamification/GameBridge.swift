@@ -527,7 +527,7 @@ final class GameBridge {
     }
 
     private static func isMotionSensor(_ sensor: String) -> Bool {
-        GameMotionSource.allSensorNames.contains(sensor)
+        sensor == GameMotionSource.gyroscopeName || sensor == GameMotionSource.accelerometerName
     }
 
     /// A JSON number as a Double: `hz` may arrive as either. Non-numbers and
