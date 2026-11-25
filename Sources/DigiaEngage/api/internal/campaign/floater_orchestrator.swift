@@ -277,14 +277,19 @@ final class FloaterOrchestrator: ObservableObject {
         // back to false afterwards.
         awaitingMedia = true
         prepareMedia(active)
-        // prepareMedia can give up synchronously — an unusable URL. The campaign
-        // never ran and there will be no terminal event, so report the drop rather
-        // than claim acceptance and leave the CEP holding its in-app slot forever.
-        let accepted = state?.token == active.token
-        if !accepted, lastStartFailureReason == nil {
-            lastStartFailureReason = "media was abandoned synchronously"
-        }
-        return accepted
+        if state?.token == active.token { return true }
+        // prepareMedia abandoned synchronously for an unusable URL. That path
+        // already ended the showing through the dismissal callback, which
+        // settled dropped/cancelled — the campaign was accepted and ended at
+        // once, so return acceptance and let that verdict stand rather than
+        // covering it with invalid_config (#245). `abandonMedia` is the only
+        // synchronous path that clears `state`, so a set failure reason means
+        // it ran.
+        if lastStartFailureReason != nil { return true }
+        // No terminal event ran: refusing is the only honest answer, or the
+        // CEP would hold its slot for a campaign that never ends.
+        lastStartFailureReason = "media was abandoned synchronously"
+        return false
     }
 
     /// The media is ready to paint. Idempotent — only the first call counts. `token`
