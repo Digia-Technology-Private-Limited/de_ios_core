@@ -95,6 +95,10 @@ public enum DropReason: String, CaseIterable, Sendable {
     case userNotVerified = "user_not_verified"
 
     /// The backend refused a gamification chance because the campaign is not live.
+    /// Rare but real. The app saved its campaign list while this campaign was live.
+    /// Then the campaign was paused, archived, deleted, or its end date passed
+    /// before the trigger fired. A fresh list never has this campaign, so this
+    /// only happens with an old saved list.
     case campaignNotLive = "campaign_not_live"
 
     /// The backend refused a gamification chance because this user is not in the
