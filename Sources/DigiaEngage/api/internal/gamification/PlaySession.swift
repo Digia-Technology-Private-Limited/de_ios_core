@@ -182,11 +182,11 @@ final class PlaySession {
     /// The after-close decision from the `state` answer about the entry's own
     /// chance. `playable` keeps the entry with that chance; a failed call
     /// keeps it with the stored one, so a network blip never dismisses it;
-    /// anything else, `played` included, hides it: once played, a floater
-    /// comes down on its own. When `dismissAfterPlayed` is false, a `played`
-    /// answer keeps the entry instead, so the floater (or inline card) stays
-    /// and a reopen shows the reward already won. Pure, so both platforms
-    /// share it exactly.
+    /// anything else, `played` included, hides it: once played, a floating
+    /// entry comes down on its own. When `dismissAfterPlayed` is false, a
+    /// `played` answer keeps the entry instead, so the floater stays and a
+    /// reopen shows the reward already won. Inline entries never consult this
+    /// flag. Pure, so both platforms share it exactly.
     nonisolated static func decideAfterClose(
         _ state: ChanceStateResult, dismissAfterPlayed: Bool = true
     ) -> CloseDecision {

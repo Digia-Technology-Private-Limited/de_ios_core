@@ -719,10 +719,9 @@ final class GameSurface {
             }
             log.d("Gamification state after close (state=\(result))", campaign: campaignKey)
             // The entry's own campaign resolves a live test to its test
-            // version; the store alone would read the published campaign.
+            // version. An unknown entry defaults to dismiss, as on Android.
             let dismissAfterPlayed = self.sdk.gamificationSurface.entryCampaign(payload)?
                 .gamificationConfig?.dismissAfterPlayed
-                ?? self.sdk.campaignStore.find(campaignKey)?.gamificationConfig?.dismissAfterPlayed
                 ?? true
             switch PlaySession.decideAfterClose(result, dismissAfterPlayed: dismissAfterPlayed) {
             case .keep(let replacement):
