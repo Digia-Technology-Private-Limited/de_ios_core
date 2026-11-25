@@ -186,10 +186,10 @@ private struct SurveySession: View {
             if complete { finish(completed: true) }
         }
         .onChange(of: vm.redirectUrl) { url in
-            guard let url, let parsed = URL(string: url) else { return }
+            guard let url, URL(string: url) != nil else { return }
             // Through the action platform (live: `UIApplication.shared.open`), so a
             // test records the redirect instead of leaving the app.
-            ActionPlatform.current.open(parsed)
+            ActionPlatform.current.open(url)
         }
     }
 
