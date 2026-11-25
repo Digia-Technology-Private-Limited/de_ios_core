@@ -81,7 +81,9 @@ func loadLottieSource(_ url: URL) async -> (source: LottieAnimationSource?, fail
 private let lottieSessionLock = NSLock()
 private nonisolated(unsafe) var lottieDiskBytes: Int = SdkConfig.defaultMediaDiskCacheBytes
 private nonisolated(unsafe) var currentLottieSession: URLSession = makeLottieDownloadSession(
-    diskBytes: SdkConfig.defaultMediaDiskCacheBytes)
+    diskBytes: SdkConfig.defaultMediaDiskCacheBytes, extraProtocols: [])
+/// Test fakes routed into the dedicated session, first in its protocol list. Empty in production.
+private nonisolated(unsafe) var lottieExtraProtocols: [AnyClass] = []
 
 /// The session `loadLottieSource` downloads through, at the currently applied disk cap.
 func lottieDownloadSession() -> URLSession {
@@ -94,11 +96,25 @@ func setLottieDiskCacheBytes(_ bytes: Int) {
     lottieSessionLock.withLock {
         guard bytes != lottieDiskBytes else { return }
         lottieDiskBytes = bytes
-        currentLottieSession = makeLottieDownloadSession(diskBytes: bytes)
+        currentLottieSession = makeLottieDownloadSession(
+            diskBytes: bytes, extraProtocols: lottieExtraProtocols)
     }
 }
 
-private func makeLottieDownloadSession(diskBytes: Int) -> URLSession {
+/// Test-only: routes fake origins into the dedicated Lottie session, by rebuilding it with the
+/// given protocols first. Production never calls this, so the shipped session keeps the
+/// system's protocols only. Fakes that registered globally (which the shared session honors
+/// but a custom-configured session does not) must be routed here to reach Lottie downloads.
+func setLottieExtraProtocolClassesForTests(_ classes: [AnyClass]) {
+    lottieSessionLock.withLock {
+        guard !lottieExtraProtocols.elementsEqual(classes, by: ===) else { return }
+        lottieExtraProtocols = classes
+        currentLottieSession = makeLottieDownloadSession(
+            diskBytes: lottieDiskBytes, extraProtocols: classes)
+    }
+}
+
+private func makeLottieDownloadSession(diskBytes: Int, extraProtocols: [AnyClass]) -> URLSession {
     let configuration = URLSessionConfiguration.default
     configuration.requestCachePolicy = .useProtocolCachePolicy
     let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
@@ -109,6 +125,9 @@ private func makeLottieDownloadSession(diskBytes: Int) -> URLSession {
         diskCapacity: diskBytes,
         directory: directory
     )
+    if !extraProtocols.isEmpty {
+        configuration.protocolClasses = extraProtocols + (configuration.protocolClasses ?? [])
+    }
     return URLSession(configuration: configuration)
 }
 

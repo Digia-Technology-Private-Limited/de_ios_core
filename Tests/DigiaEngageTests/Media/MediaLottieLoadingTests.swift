@@ -61,12 +61,12 @@ struct MediaLottieLoadingTests {
         #expect(MediaStage.lottieViews(in: window).isEmpty)
     }
 
-    @Test("a server error reports nothing")
-    func serverErrorReportsNothing() async {
+    @Test("a server error reports nothing", arguments: [503, 500])
+    func serverErrorReportsNothing(status: Int) async {
         MediaOrigin.install()
         defer { MediaOrigin.end() }
         let target = MediaOrigin.url("busy.json")
-        MediaOrigin.set(.status(503, Data("busy".utf8)), for: target)
+        MediaOrigin.set(.status(status, Data("busy".utf8)), for: target)
         let recorder = HealthRecorder()
         let finished = MediaStage.countLottieLoads()
 
@@ -76,6 +76,23 @@ struct MediaLottieLoadingTests {
         ComponentTestHost.drainRunLoop(for: 0.3)
 
         #expect(recorder.all.isEmpty)
+        #expect(MediaStage.lottieViews(in: window).isEmpty)
+    }
+
+    @Test("a missing dotLottie reports http_4xx once")
+    func missingDotLottieReportsHttp4xx() async {
+        MediaOrigin.install()
+        defer { MediaOrigin.end() }
+        let target = MediaOrigin.url("gone.lottie")
+        MediaOrigin.set(.status(404, Data("not found".utf8)), for: target)
+        let recorder = HealthRecorder()
+
+        let window = MediaStage.lottie(url: target.absoluteString, blurHash: Self.blurHash)
+        defer { ComponentTestHost.unmount(window) }
+        #expect(await waitUntilMedia { !recorder.all.isEmpty })
+        ComponentTestHost.drainRunLoop(for: 0.3)
+
+        #expect(recorder.all == [.init(campaignKey: MediaStage.campaign, kind: .lottie, cause: "http_4xx")])
         #expect(MediaStage.lottieViews(in: window).isEmpty)
     }
 

@@ -214,7 +214,9 @@ struct MediaImageComponentTests {
 
     @Test("a server error or a lost connection reports nothing", arguments: [
         MediaOrigin.Reply.status(503, Data("busy".utf8)),
+        MediaOrigin.Reply.status(500, Data("boom".utf8)),
         MediaOrigin.Reply.fail(.notConnectedToInternet),
+        MediaOrigin.Reply.fail(.timedOut),
     ])
     func serverAndNetworkFailuresReportNothing(reply: MediaOrigin.Reply) async {
         MediaOrigin.install()

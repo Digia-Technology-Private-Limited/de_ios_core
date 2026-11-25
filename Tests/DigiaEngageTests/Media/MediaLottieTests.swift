@@ -6,11 +6,11 @@ import UIKit
 
 @testable import DigiaEngage
 
-// The wrapper over a fake origin (`MediaLottie` loads through the real `loadLottieSource`, with
-// Lottie's own cache) with only the HTTP layer faked. Every animation is drawn on the one
-// `MediaStage`; what is on screen is proved by the goldens, and the other tests assert the health
-// records and the animation view. Lottie caches a composition by URL, so each test (held ones
-// included) loads its own URL.
+// The wrapper over a fake origin (`MediaLottie` loads through the real `loadLottieSource`,
+// through the SDK's HTTP disk cache) with only the HTTP layer faked. Every animation is drawn
+// on the one `MediaStage`; what is on screen is proved by the goldens, and the other tests assert
+// the health records and the animation view. Each test (held ones included) loads its own URL,
+// so no load can reuse another test's HTTP cache entry.
 
 extension RenderedUITests {
 @MainActor
@@ -203,12 +203,14 @@ struct MediaLottieComponentTests {
         #expect(recorder.all == [.init(campaignKey: MediaStage.campaign, kind: .lottie, cause: "http_4xx")])
     }
 
-    @Test("a lost connection reports nothing")
-    func networkFailureReportsNothing() async {
+    @Test("a lost connection or a timeout reports nothing", arguments: [
+        URLError.Code.notConnectedToInternet, URLError.Code.timedOut,
+    ])
+    func networkFailureReportsNothing(code: URLError.Code) async {
         MediaOrigin.install()
         defer { MediaOrigin.end() }
         let target = MediaOrigin.url("offline.json")
-        MediaOrigin.set(.fail(.notConnectedToInternet), for: target)
+        MediaOrigin.set(.fail(code), for: target)
         let recorder = HealthRecorder()
         let finished = CallCount()
         MediaServices.override(loadLottie: { url in
@@ -248,8 +250,12 @@ struct MediaLottieComponentTests {
         MediaOrigin.release(second)
     }
 
-    @Test("a second render of the same animation is a cache hit with no fetches")
-    func secondRenderIsCacheHit() async {
+    // No parsed-animation cache (it would skip HTTP freshness and revalidation checks): each
+    // fresh mount loads again, and the fake origin forbids HTTP storage, so the second render
+    // downloads again. Against a caching origin the same load revalidates; see
+    // LottieHTTPCacheTests.
+    @Test("a second render loads again instead of reusing a parsed animation")
+    func secondRenderLoadsAgain() async {
         MediaOrigin.install()
         defer { MediaOrigin.end() }
         let target = MediaOrigin.url("cached-once.json")
@@ -264,7 +270,7 @@ struct MediaLottieComponentTests {
         defer { ComponentTestHost.unmount(second) }
         #expect(await waitForAnimation(in: second) != nil)
 
-        #expect(MediaOrigin.requests(for: target).count == 1)
+        #expect(MediaOrigin.requests(for: target).count == 2)
     }
 
     /// Two tabs, the animation on the first: showing the second takes the first off screen, and

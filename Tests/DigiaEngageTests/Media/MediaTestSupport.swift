@@ -90,11 +90,14 @@ final class MediaOrigin: URLProtocol, @unchecked Sendable {
 
     /// Routes the media loaders to this origin: the SDWebImage downloader's session gets the
     /// protocol in its configuration (SDWebImage fixes the session when the downloader is
-    /// created, so the shared downloader's session is replaced once, same delegate and queue),
-    /// and `URLSession.shared`, which Lottie uses, gets it from the global registry.
+    /// created, so the shared downloader's session is replaced once, same delegate and queue).
+    /// Lottie downloads through the SDK's dedicated session, whose custom configuration does
+    /// not honor the global registry, so the origin is also routed into that session's
+    /// protocols here; `end()` clears it back out.
     static func install() {
         _ = routeDownloader
         URLProtocol.registerClass(MediaOrigin.self)
+        setLottieExtraProtocolClassesForTests([MediaOrigin.self])
     }
 
     static func uninstall() { URLProtocol.unregisterClass(MediaOrigin.self) }
@@ -103,6 +106,7 @@ final class MediaOrigin: URLProtocol, @unchecked Sendable {
     /// media services back.
     static func end() {
         uninstall()
+        setLottieExtraProtocolClassesForTests([])
         reset()
         MediaServices.reset()
     }
