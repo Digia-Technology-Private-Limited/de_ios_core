@@ -308,28 +308,6 @@ final class GamificationSurface: CampaignSurface {
         GamePrewarmer.discard(reason: "chance_gone", campaignKey: payload.campaignKey)
     }
 
-    /// Forgets an inline entry's spent chance and clears its slot, mirroring
-    /// `hideFloatingEntry` for the inline surface (the iOS equivalent of
-    /// Android's `displayCoordinator.dismissInline`). Only the slot still
-    /// holding this delivery is cleared, as `.completed` — the campaign ran to
-    /// its end — never as a user close. A later trigger re-renders the card.
-    func hideInlineEntry(_ payload: CEPTriggerPayload) {
-        chances.removeValue(forKey: Self.entryKey(payload))
-        GamePrewarmer.discard(reason: "chance_gone", campaignKey: payload.campaignKey)
-        guard let config = entryCampaign(payload)?.gamificationConfig,
-              config.entryKind == .inlineTeaser
-        else { return }
-        let slotKey: String? = {
-            if case .inline(let canvas)? = config.entryCanvas { return canvas.slotKey }
-            return config.slotKey
-        }()
-        guard let slotKey,
-              let current = sdk.inlineController.getCampaign(slotKey),
-              surfaceOwns(current, payload: payload)
-        else { return }
-        sdk.inlineController.dismissCampaign(slotKey, reason: .completed)
-    }
-
     /// Clears the session entry state for a user change: the next user must
     /// not inherit stored chances. Called from the user
     /// change listener in `SDKInstance.initialize`.

@@ -657,27 +657,17 @@ final class GameSurface {
         }
     }
 
-    /// After a game opened from an inline entry closes: the card stays only
-    /// when the close decision keeps it (`playable` with a fresh chance, a
-    /// failed `state` call, or `played` with `dismissAfterPlayed: false` — a
-    /// spent chance stays stored too, so a tap reopens the skin, whose own
-    /// `state` call answers `played` and shows the reward already won).
-    /// Otherwise the card is hidden: its chance is forgotten and its slot
-    /// cleared as `.completed`, mirroring Android's `dismissInline`.
+    /// After a game opened from an inline entry closes: the card always
+    /// stays. `state` only refreshes its stored chance (a `playable` answer
+    /// stores that chance). A spent chance stays stored too, so a tap reopens the
+    /// skin, whose own `state` call answers `played` and shows the reward
+    /// already won.
     private func refreshInlineEntryAfterClose(
         campaignKey: String, payload: CEPTriggerPayload, chanceId: String
     ) {
+        let rewarm: @MainActor () -> Void = { [weak self] in self?.rewarmEntry(payload) }
         refreshEntryAfterClose(
-            campaignKey: campaignKey, payload: payload, chanceId: chanceId,
-            hide: { [weak self] in self?.hideInlineEntry(payload) },
-            onKept: { [weak self] in self?.rewarmEntry(payload) })
-    }
-
-    /// Hides an inline entry after its game closed: forgets the spent chance
-    /// and clears its slot. The slot clear reports the CEP Dismissed through
-    /// the inline removal path, like `hideFloatingEntry` does for floaters.
-    private func hideInlineEntry(_ payload: CEPTriggerPayload) {
-        sdk.gamificationSurface.hideInlineEntry(payload)
+            campaignKey: campaignKey, payload: payload, chanceId: chanceId, hide: rewarm, onKept: rewarm)
     }
 
     /// The one entry-close round-trip both entries share: with no user the

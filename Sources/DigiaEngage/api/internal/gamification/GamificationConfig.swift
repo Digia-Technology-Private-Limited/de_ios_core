@@ -50,10 +50,12 @@ struct GamificationConfig: Equatable {
     /// campaign hides it. Back and the skin's own `close` still close a game
     /// whose X is hidden.
     let showClose: Bool
-    /// Whether the entry dismisses after its chance is played (`templateConfig.dismissAfterPlayed`,
-    /// falling back to `surface.dismissAfterPlayed`); absent means the entry
-    /// dismisses. When false, a `played` close keeps the entry so the player
-    /// can reopen the skin and see the reward already won — mirroring Android.
+    /// Whether a floating entry dismisses after its chance is played
+    /// (`templateConfig.dismissAfterPlayed`, falling back to
+    /// `surface.dismissAfterPlayed`); absent means it dismisses. When false,
+    /// a `played` close keeps the floater so the player can reopen the skin
+    /// and see the reward already won — mirroring Android. Inline entries
+    /// never read it.
     let dismissAfterPlayed: Bool = true
     let bundleUrl: String
     let sensors: [GamificationSkinSensor]
