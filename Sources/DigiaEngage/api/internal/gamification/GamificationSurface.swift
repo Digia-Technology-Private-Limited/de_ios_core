@@ -314,6 +314,7 @@ final class GamificationSurface: CampaignSurface {
     func clearForUserChange() {
         chances.removeAll()
         entryCampaigns.removeAll()
+        GameChanceStateCache.shared.clearAll()
         GamePrewarmer.discard(reason: "chance_gone")
     }
 }

@@ -5,10 +5,12 @@ import Testing
 
 /// The init `chanceState` contract
 /// (ai_docs/gamification/eng/sdk/init-chance-state-contract.md): the SDK
-/// stores only `playable` and `played` answers (only they carry a `chanceId`)
-/// and sends the cached answer only for the same `chanceId`. Each test uses a
-/// unique campaign key because the cache is in memory with no clear hook.
-/// Mirrors Android `ChanceStateCacheTest` 1:1 against `GameChanceStateCache`.
+/// stores only terminal `played` answers (only they stay true; a cached
+/// `playable` goes stale the moment the chance is played through another
+/// surface) and sends the cached answer only for the same `chanceId`.
+/// Each test uses a unique campaign key because the cache is in memory with
+/// no per-test reset (except the `clearAll` test). Mirrors Android
+/// `ChanceStateCacheTest` 1:1 against `ChanceStateCache`.
 @Suite("Game chance state cache", .serialized, .tags(.unit, .game))
 struct GameChanceStateCacheTests {
     private func response(_ pairs: [(String, Any)]) -> [String: Any] {
@@ -23,9 +25,11 @@ struct GameChanceStateCacheTests {
         return String(data: data, encoding: .utf8)!
     }
 
-    // Fails if `record` stops storing a playable answer: the state gate.
-    @Test("record playable then lookup hits for same chanceId")
-    func playableHit() {
+    // Fails if `record` stores a playable answer: only terminal answers may
+    // be cached, or the next open replays a stale playable and offers play
+    // on an already-played chance.
+    @Test("record playable is ignored")
+    func playableIgnored() {
         let key = "chance-cache-playable-hit-ios"
         GameChanceStateCache.shared.record(
             campaignKey: key,
@@ -34,7 +38,7 @@ struct GameChanceStateCacheTests {
                 ("expiresAt", "2026-11-24T00:00:00Z"),
             ]))
 
-        #expect(GameChanceStateCache.shared.lookup(campaignKey: key, chanceId: "ch-1") != nil)
+        #expect(GameChanceStateCache.shared.lookup(campaignKey: key, chanceId: "ch-1") == nil)
     }
 
     // Fails if `record` stops storing a played answer: the state gate.
@@ -78,7 +82,7 @@ struct GameChanceStateCacheTests {
         GameChanceStateCache.shared.record(
             campaignKey: key,
             response: response([
-                ("state", "playable"), ("chanceId", "ch-5"), ("refused", true),
+                ("state", "played"), ("chanceId", "ch-5"), ("refused", true),
             ]))
 
         #expect(GameChanceStateCache.shared.lookup(campaignKey: key, chanceId: "ch-5") == nil)
@@ -112,14 +116,14 @@ struct GameChanceStateCacheTests {
         let key = "chance-cache-mismatch-ios"
         GameChanceStateCache.shared.record(
             campaignKey: key,
-            response: response([("state", "playable"), ("chanceId", "ch-8")]))
+            response: response([("state", "played"), ("chanceId", "ch-8")]))
 
         #expect(GameChanceStateCache.shared.lookup(campaignKey: key, chanceId: "ch-other") == nil)
     }
 
-    // Fails if the envelope path stores a non-playable answer: the state gate
+    // Fails if the envelope path stores a non-played answer: the state gate
     // via `record`, driven through `state` which unwraps
-    // `{isSuccess, data:{response}}` exactly like `recordEnvelope`.
+    // `{isSuccess, data:{response}}` exactly like the Android envelope path.
     @Test("envelope with expired state is ignored")
     func envelopeExpiredIgnored() async {
         let key = "chance-cache-envelope-expired-ios"
@@ -133,10 +137,10 @@ struct GameChanceStateCacheTests {
         #expect(GameChanceStateCache.shared.lookup(campaignKey: key, chanceId: "ch-9") == nil)
     }
 
-    // Fails if the envelope path stops storing a playable answer: the
-    // delegation to `record` through `state`.
-    @Test("envelope with playable state records")
-    func envelopePlayableRecords() async {
+    // Fails if the envelope path stores a playable answer: playable answers
+    // are never cached, even when they arrive over `state`.
+    @Test("envelope with playable state is ignored")
+    func envelopePlayableIgnored() async {
         let key = "chance-cache-envelope-playable-ios"
         let client = MockNetworkClient()
         let source = HttpGameOutcomeSource(networkClient: client)
@@ -145,7 +149,22 @@ struct GameChanceStateCacheTests {
             body: envelope(["state": "playable", "chanceId": "ch-10"]))
 
         _ = await source.state(campaignKey: key, testInvocationId: nil, chanceId: nil)
-        #expect(GameChanceStateCache.shared.lookup(campaignKey: key, chanceId: "ch-10") != nil)
+        #expect(GameChanceStateCache.shared.lookup(campaignKey: key, chanceId: "ch-10") == nil)
+    }
+
+    // Fails if the envelope path stores a played answer: the delegation to
+    // `record` through `state`.
+    @Test("envelope with played state records")
+    func envelopePlayedRecords() async {
+        let key = "chance-cache-envelope-played-ios"
+        let client = MockNetworkClient()
+        let source = HttpGameOutcomeSource(networkClient: client)
+        client.enqueueResponse(
+            statusCode: 200,
+            body: envelope(["state": "played", "chanceId": "ch-10b", "result": ["rank": 1]]))
+
+        _ = await source.state(campaignKey: key, testInvocationId: nil, chanceId: nil)
+        #expect(GameChanceStateCache.shared.lookup(campaignKey: key, chanceId: "ch-10b") != nil)
     }
 
     // Fails if the envelope path stores a failed envelope: the isSuccess guard
@@ -157,9 +176,24 @@ struct GameChanceStateCacheTests {
         let source = HttpGameOutcomeSource(networkClient: client)
         client.enqueueResponse(
             statusCode: 200,
-            body: envelope(["state": "playable", "chanceId": "ch-11"], isSuccess: false))
+            body: envelope(["state": "played", "chanceId": "ch-11"], isSuccess: false))
 
         _ = await source.state(campaignKey: key, testInvocationId: nil, chanceId: nil)
         #expect(GameChanceStateCache.shared.lookup(campaignKey: key, chanceId: "ch-11") == nil)
+    }
+
+    // Fails if `clearAll` leaves entries behind: the user-change path must
+    // never hand the next user the previous user's `chanceState`.
+    @Test("clearAll drops every entry")
+    func clearAllDropsEverything() {
+        let key = "chance-cache-clear-all-ios"
+        GameChanceStateCache.shared.record(
+            campaignKey: key,
+            response: response([("state", "played"), ("chanceId", "ch-12")]))
+        #expect(GameChanceStateCache.shared.lookup(campaignKey: key, chanceId: "ch-12") != nil)
+
+        GameChanceStateCache.shared.clearAll()
+
+        #expect(GameChanceStateCache.shared.lookup(campaignKey: key, chanceId: "ch-12") == nil)
     }
 }
