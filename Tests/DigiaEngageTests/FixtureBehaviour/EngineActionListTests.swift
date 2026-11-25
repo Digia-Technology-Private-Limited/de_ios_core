@@ -14,16 +14,9 @@ struct EngineActionListTests {
 
     // Fails if the parser stops skipping steps it cannot read: the string/null steps then end the
     // list before the later steps run.
-    //
-    // Known gap: `EngageActionParser.parse` reads `steps` as `[[String: Any]]`, so one step that is
-    // not an object (`"not a step"`, `null`) fails the cast and the whole list parses as empty —
-    // the button does nothing. Flutter skips just those steps (`whereType<Map>()`).
-    // `withKnownIssue` fails the day iOS skips them, as the cue to drop the wrapper.
     @Test("the steps it understands still run around the ones it does not")
     func understoodStepsStillRun() async throws {
-        await withKnownIssue("iOS drops the whole action list when one step is not an object") {
-            try await runSteps()
-        }
+        try await runSteps()
     }
 
     private func runSteps() async throws {

@@ -69,8 +69,7 @@ enum EngageAction: Equatable {
 
 struct EngageActionParser {
     func parse(_ onClick: [String: Any]?) -> [EngageAction] {
-        guard let steps = onClick?["steps"] as? [[String: Any]] else { return [] }
-        return steps.compactMap(parseStep)
+        (onClick?.objectArray("steps") ?? []).compactMap(parseStep)
     }
 
     private func parseStep(_ step: [String: Any]) -> EngageAction? {
