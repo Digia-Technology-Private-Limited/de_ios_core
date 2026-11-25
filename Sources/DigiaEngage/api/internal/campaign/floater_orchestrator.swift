@@ -75,7 +75,10 @@ enum FloaterDismissReason: Equatable {
         case .autoTimeout: return .autoTimeout
         case .mediaEnd: return .completed
         case .invalidated, .hostTeardown: return .cancelled
-        case .sessionEnd: return .screenExit
+        // A session that ended under a floater is a timeout by another name:
+        // nothing closed it, its time simply ran out. (Dead today — no caller
+        // emits `.sessionEnd` — unified with Android/Flutter regardless.)
+        case .sessionEnd: return .autoTimeout
         case .superseded: return .superseded
         }
     }
