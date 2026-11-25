@@ -252,8 +252,10 @@ struct GameMotionSourceTests {
 
     @Test("the wire names match Android's GAME_SENSOR_TYPES")
     func wireNamesMatchAndroid() {
-        // Guards orderedSensorNames: the intake, the init sensors and the
-        // sampler read one name list, character-identical to Android.
+        // Guards orderedSensorNames: the init sensors list and the sampler
+        // read one name list, character-identical to Android. The motion
+        // intake accepts only gyroscope + accelerometer (see the bridge
+        // tests) — the rest are feature detection for skins.
         #expect(GameMotionSource.orderedSensorNames == [
             "gyroscope", "accelerometer", "gravity", "linear_acceleration",
             "rotation_vector", "magnetic_field", "pressure", "light", "proximity",

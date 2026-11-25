@@ -175,8 +175,8 @@ struct GameBridgeTests {
         #expect(payload["code"] as? String == "unsupported")
     }
 
-    @Test("motion subscribe with the Android wire names passes the intake")
-    func motionSubscribeAndroidWireNamesPassIntake() throws {
+    @Test("motion subscribe with gyroscope and accelerometer passes the intake")
+    func motionSubscribeGyroAccelPassIntake() throws {
         let bridge = makeBridge()
         var scripts: [String] = []
         var requests: [GameBridgeRequest] = []
@@ -185,26 +185,48 @@ struct GameBridgeTests {
 
         bridge.receive(msg("motion", id: "9", payload: [
             "op": "subscribe",
-            "sensors": [
-                "gravity", "linear_acceleration", "rotation_vector",
-                "magnetic_field", "pressure", "light", "proximity",
-            ],
+            "sensors": ["gyroscope", "accelerometer"],
             "hz": 30,
         ]))
 
         // Guards the sensor-name check in handleMotion's subscribe case:
-        // every Android wire name passes the intake — a missing sensor
+        // only gyroscope + accelerometer pass the intake — a missing sensor
         // answers `unsupported` later at the host, never `bad_request` here.
         #expect(scripts.isEmpty)
         #expect(requests.count == 1)
         if case .motionSubscribe(let id, let sensors, let hz) = requests[0] {
             #expect(id == "9")
-            #expect(sensors == [
-                "gravity", "linear_acceleration", "rotation_vector",
-                "magnetic_field", "pressure", "light", "proximity",
-            ])
+            #expect(sensors == ["gyroscope", "accelerometer"])
             #expect(hz == 30)
         } else { Issue.record("request 0 is not motion subscribe") }
+    }
+
+    @Test("motion with a non-intake sensor replies bad_request")
+    func motionNonIntakeSensorBadRequest() throws {
+        let bridge = makeBridge()
+        var scripts: [String] = []
+        var requests: [GameBridgeRequest] = []
+        bridge.onSend = { scripts.append($0) }
+        bridge.onRequest = { requests.append($0) }
+
+        // Guards the sensor-name check in handleMotion: the init sensors
+        // list still advertises these names, but the intake accepts only
+        // gyroscope + accelerometer — each answers bad_request here.
+        for name in [
+            "gravity", "linear_acceleration", "rotation_vector",
+            "magnetic_field", "pressure", "light", "proximity",
+        ] {
+            bridge.receive(msg("motion", id: "g", payload: ["op": "subscribe", "sensors": [name]]))
+            bridge.receive(msg("motion", id: "g", payload: ["op": "unsubscribe", "sensors": [name]]))
+        }
+
+        #expect(scripts.count == 14)
+        for script in scripts {
+            let reply = try received(script)
+            let payload = try #require(reply["payload"] as? [String: Any])
+            #expect(payload["code"] as? String == "bad_request")
+        }
+        #expect(requests.isEmpty)
     }
 
     @Test("motion with an unknown sensor replies bad_request")
