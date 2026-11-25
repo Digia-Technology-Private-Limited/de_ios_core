@@ -83,12 +83,13 @@ final class PipReporter {
         _ state: ActiveFloaterState, _ reason: FloaterDismissReason, _ metrics: FloaterMetrics,
         _ wasVisible: Bool
     ) {
+        let completed = reason.completed
         if !wasVisible {
-            ctx.events.toCep(.dismissed(reason: reason.presentationReason), payload: state.payload)
+            ctx.events.toCep(.dismissed(reason: reason.presentationReason, completed: completed), payload: state.payload)
             return
         }
         ctx.events.toBoth(
-            .dismissed(reason: reason.presentationReason),
+            .dismissed(reason: reason.presentationReason, completed: completed),
             FloaterEvent.Dismissed(
                 dismissReason: reason.wire,
                 dwellMs: ctx.dwell.consumeDwellMs(state.payload.cepCampaignId),

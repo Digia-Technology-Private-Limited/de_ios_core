@@ -72,12 +72,19 @@ enum FloaterDismissReason: Equatable {
         case .userClose: return .userClose
         case .ctaTaken: return .ctaAction
         case .screenExit: return .screenExit
-        case .autoTimeout, .mediaEnd: return .autoTimeout
+        case .autoTimeout: return .autoTimeout
+        case .mediaEnd: return .completed
         case .invalidated, .hostTeardown: return .cancelled
         case .sessionEnd: return .screenExit
         case .superseded: return .superseded
         }
     }
+
+    /// Whether the showing reached its authored end: only a media end
+    /// completes. Mirrors Android's `FloaterDismissReason.completed` and
+    /// Flutter's `PipDismissReason.completed` — the CEP hears `completed`
+    /// with `completed: true`, and dashboards read the completed flag.
+    var completed: Bool { self == .mediaEnd }
 }
 
 struct FloaterMetrics: Equatable {
