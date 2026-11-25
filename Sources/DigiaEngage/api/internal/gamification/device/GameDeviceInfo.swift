@@ -66,7 +66,7 @@ struct GameDeviceInfo: Equatable, Sendable {
 
     // Levels: 0 unknown, 1 low, 2 average, 3 high, 4 excellent, after grofers/droid-dex.
     // The RAM, battery and CPU-cap cutoffs come from the backend's
-    // `gamification.measurement` section; the defaults below reproduce the
+    // `gamification.deviceTier.thresholds`; the defaults reproduce the
     // long-standing hardcoded numbers, so a missing section changes nothing.
 
     /// The server-driven cutoffs the level math reads; the defaults until a config applies.

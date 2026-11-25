@@ -601,7 +601,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// The SDK config's skin, cache, bridge and storage caps; defaults until a config arrives.
     var gameSkinLimits = GameSkinLimits.defaults
     var gameStorageLimits = GameStorageLimits.defaults
-    /// The SDK config's device-tier measurement cutoffs; today's hardcoded numbers until a config arrives.
+    /// The SDK config's device-tier thresholds cutoffs; today's hardcoded numbers until a config arrives.
     var gameMeasurement = GameMeasurementThresholds.defaults
 
     /// Not awaited. A failed call changes nothing, except that a first install with no
