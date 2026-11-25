@@ -2,8 +2,7 @@ import Foundation
 
 /// The last successful `state` answer per (campaignKey, chanceId), kept in
 /// memory for the app session so the next open of the same chance can hand it
-/// to the skin as `init.chanceState` and skip its open-time `state` call (see
-/// ai_docs/gamification/eng/sdk/init-chance-state-contract.md).
+/// to the skin as `init.chanceState` and skip its open-time `state` call.
 ///
 /// The stored value is the server's `data.response` unchanged: the exact
 /// object the skin's own `state` bridge call resolves, so og-shim applies both

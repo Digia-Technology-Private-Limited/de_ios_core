@@ -47,6 +47,10 @@ final class GamePresentation: Identifiable, ObservableObject {
     let entryFile: URL
     let bundleRoot: URL
     let bridge: GameBridge
+    /// The one open/load/ready watchdog for this session: the single 15 s
+    /// wall plus the foreground-only load/ready phase timers. The per-skin-
+    /// `http` ceiling (`httpWatchdogs`) stays separate, per in-flight call.
+    private let watchdog: GameOpenWatchdog
 
     /// Set when `ready` arrives; the game is presented only after this.
     private(set) var isReady = false
@@ -123,6 +127,7 @@ final class GamePresentation: Identifiable, ObservableObject {
         // `bridgeMessageMaxBytes`, and storage refuses writes past its quotas.
         // Tests that never apply a config read the burned defaults here.
         self.bridge = GameBridge(messageMaxBytes: messageMaxBytes)
+        self.watchdog = GameOpenWatchdog(bridge: bridge)
         self.storage = GameBridgeStorage(
             defaults: Self.storageDefaults,
             namespace: GameBridgeStorage.namespaceFor(
@@ -148,6 +153,23 @@ final class GamePresentation: Identifiable, ObservableObject {
         bridge.onClosed = { [weak self] in self?.didClose() }
         bridge.onFailed = { [weak self] reason in self?.didFail(reason) }
         bridge.onDropped = { [weak self] reason, type in self?.reportBridgeDrop(reason: reason, type: type) }
+        watchdog.onOpenTimeout = { [weak self] in
+            // The overall deadline for an open that is not a direct campaign:
+            // the presentation coordinator's acceptance window (15 s, the same
+            // watchdog that takes a stuck nudge off), counted in wall clock
+            // from the open to `ready` across every phase and across
+            // background time. A direct game is already watched by the
+            // coordinator, whose timeout closes it through
+            // `GamificationSurface.dismiss`, so it arms nothing here. Entry and
+            // rewards opens have no coordinator presentation, so this is
+            // theirs. A game that is ready, finished or held is left alone.
+            guard let self, !self.didFinish, !self.isReady, !self.isHeld else { return }
+            let seconds = PresentationCoordinator.defaultAcceptanceTimeout
+            log.w("Game not shown within \(Int(seconds)) s — cancelled",
+                  campaign: self.request.campaignKey)
+            self.finish(report: { [request = self.request] in request.onFailure?(.openTimeout) })
+            self.bridge.close()
+        }
         observeDeviceSignals()
     }
 
@@ -202,74 +224,19 @@ final class GamePresentation: Identifiable, ObservableObject {
         }
         if !didCommitPage { request.timing.stage = GameOpenTiming.stageCommit }
         coordinator.start()
-        if !held { armOpenWatchdog() }
-    }
-
-    /// The overall deadline for an open that is not a direct campaign: the
-    /// presentation coordinator's acceptance window (15 s, the same watchdog
-    /// that takes a stuck nudge off), counted in wall clock from the open to
-    /// `ready` across every phase and across background time. A direct game
-    /// is already watched by the coordinator, whose timeout closes it through
-    /// `GamificationSurface.dismiss`, so it arms nothing here. Entry and
-    /// rewards opens have no coordinator presentation, so this is theirs. A
-    /// game that is ready, finished or held is left alone.
-    private func armOpenWatchdog() {
-        guard request.entry != GamificationEntryKind.direct.rawValue else { return }
-        let seconds = PresentationCoordinator.defaultAcceptanceTimeout
-        DispatchQueue.main.asyncAfter(wallDeadline: .now() + seconds) { [weak self] in
-            Task { @MainActor [weak self] in
-                guard let self, !self.didFinish, !self.isReady, !self.isHeld else { return }
-                log.w("Game not shown within \(Int(seconds)) s — cancelled",
-                      campaign: self.request.campaignKey)
-                self.finish(report: { [request = self.request] in request.onFailure?(.openTimeout) })
-                self.bridge.close()
-            }
-        }
+        if !held { watchdog.arm(request: request) }
     }
 
     /// True once the page committed: the load timer is done and the ready
     /// timer owns the wait for `ready`.
     private var didCommitPage = false
-    /// Foreground seconds left in the current phase's budget; nil until the
-    /// phase first arms.
-    private var phaseRemaining: TimeInterval?
-    /// Uptime when the running timer was armed; nil while none runs.
-    private var phaseArmedAt: TimeInterval?
 
-    /// Charges the running timer's foreground time to the phase budget.
-    private func spendPhaseBudget() {
-        guard let armedAt = phaseArmedAt, let remaining = phaseRemaining else { return }
-        phaseRemaining = max(0, remaining - (MonotonicClock.nowSeconds() - armedAt))
-        phaseArmedAt = nil
-    }
-
-    /// Arms the timer for the phase the load is in: 15 s to the page commit,
-    /// then 5 s to `ready`. The budgets count foreground time only, like
-    /// Android: a re-arm after the app returns gets what is left, never a full
-    /// budget, so repeated backgrounding cannot keep a load (and the busy slot)
-    /// alive forever. Each arm carries a fresh bridge generation, so re-arming
-    /// (or `cancelReadyTimer`) makes any earlier timer a stale no-op. Runs only
-    /// while loading and in the foreground.
+    /// The web view's load seam: (re)arms the watchdog's phase timer for the
+    /// phase the load is in. The host recreation path funnels here, and the
+    /// arm is idempotent per request — it replaces the phase task, never
+    /// stacks a second wall.
     func armLoadTimer() {
-        guard !didFinish, !isHeld, bridge.state == .loading,
-              UIApplication.shared.applicationState == .active
-        else { return }
-        spendPhaseBudget()
-        let committed = didCommitPage
-        let seconds = phaseRemaining
-            ?? (committed ? GameBridge.readyTimeoutSeconds : GameBridge.loadTimeoutSeconds)
-        phaseRemaining = seconds
-        phaseArmedAt = MonotonicClock.nowSeconds()
-        let generation = bridge.beginLoading()
-        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
-            Task { @MainActor [weak self] in
-                if committed {
-                    self?.bridge.readyTimeoutFired(generation: generation)
-                } else {
-                    self?.bridge.loadTimeoutFired(generation: generation)
-                }
-            }
-        }
+        watchdog.signal(.hostRecreated)
     }
 
     /// The page committed: the load timer gives way to the 5 s ready timer.
@@ -277,10 +244,7 @@ final class GamePresentation: Identifiable, ObservableObject {
         guard !didCommitPage else { return }
         didCommitPage = true
         request.timing.stage = GameOpenTiming.stageReady
-        // The ready phase starts with its own full budget.
-        phaseRemaining = nil
-        phaseArmedAt = nil
-        armLoadTimer()
+        watchdog.signal(.pageCommitted)
     }
 
     /// Sends the session's `init`: once after the page loads, and again on
@@ -313,10 +277,12 @@ final class GamePresentation: Identifiable, ObservableObject {
         initMessage = Self.initMessage(for: request)
         lastDevicePush = GameDeviceInfo.current(sdkVersion: sdkVersion).pushPayload
         isHeld = false
-        armOpenWatchdog()
+        // The adopt is this open's first arm: a held game never armed, so the
+        // wall starts here and the phase timer with it, the page having
+        // committed.
+        watchdog.arm(request: request)
         // A held `ready` is replayed below and answered with `init` there.
         if pageFinished, heldReady == nil { sendInit() }
-        armLoadTimer()
         // A skin that booted while held already sent its one `ready`.
         if let ready = heldReady {
             heldReady = nil
@@ -396,23 +362,27 @@ final class GamePresentation: Identifiable, ObservableObject {
             }
             storage.remove(key)
             if let id { bridge.answer(id: id) }
-        case .actionCopy(let id, let text):
-            runSkinAction(id: id, action: .copyToClipboard(text), op: "copy")
-        case .actionOpenLink(let id, let op, let url):
-            // The container closes first, then the host opens the link.
-            if let id { bridge.answer(id: id, payload: ["ok": true]) }
-            request.onCta?(op, url.absoluteString)
-            dismiss(reason: "cta")
-            runSkinActionAfterClose(action: .openUrl(url.absoluteString))
-        case .actionOpenDeeplink(let id, let url):
-            if let id { bridge.answer(id: id, payload: ["ok": true]) }
-            request.onCta?("deeplink", nil)
-            dismiss(reason: "cta")
-            runSkinActionAfterClose(action: .openDeeplink(url.absoluteString))
-        case .actionShare(let id, let text):
-            runSkinAction(id: id, action: .share(text), op: "share")
-        case .actionCustomKV(let id, let payload):
-            runSkinAction(id: id, action: .customKV(payload), op: "customKV")
+        case .actionSteps(let id, let actions):
+            // Same JSON the canvas sends. Links leave the game: answer now,
+            // close first, then run after close (the container must not block
+            // the handoff). Everything else runs through the shared executor.
+            let links = actions.filter {
+                if case .openUrl = $0 { return true }
+                if case .openDeeplink = $0 { return true }
+                return false
+            }
+            if links.isEmpty {
+                runSkinActions(id: id, actions: actions)
+            } else {
+                if let id { bridge.answer(id: id, payload: ["ok": true]) }
+                for action in actions {
+                    if let op = Self.actionOp(action) {
+                        request.onCta?(op, Self.actionUrl(action))
+                    }
+                }
+                dismiss(reason: "cta")
+                runSkinActionsAfterClose(actions: actions)
+            }
         case .actionClose(let id, let reason):
             if let reason, !reason.isEmpty {
                 log.d("Game closed by skin (reason=\(reason))", campaign: self.request.campaignKey)
@@ -441,49 +411,61 @@ final class GamePresentation: Identifiable, ObservableObject {
         case .motionUnsubscribe(let id, let sensors):
             for sensor in sensors { motion.stop(sensor: sensor) }
             bridge.answer(id: id)
-        case .actionPassthrough(let id, let op, let action):
-            // Any campaign action the canvas parser knows (e.g. requestReview)
-            // runs through the same executor. One that leaves the game closes
-            // the container first, like the named link ops.
-            switch action {
-            case .openUrl, .openDeeplink:
-                if let id { bridge.answer(id: id, payload: ["ok": true]) }
-                request.onCta?(op, nil)
-                dismiss(reason: "cta")
-                runSkinActionAfterClose(action: action)
-            default:
-                runSkinAction(id: id, action: action, op: op)
-            }
         }
     }
 
-    /// Runs one skin `action` op through the same executor the canvas uses, so
+    /// The click-analytics op for a bridge step. Web links report as `openLink`.
+    private static func actionOp(_ action: EngageAction) -> String? {
+        switch action {
+        case .openUrl: return "openLink"
+        case .openDeeplink: return "deeplink"
+        case .copyToClipboard: return "copy"
+        case .share: return "share"
+        case .customKV: return "customKV"
+        case .requestReview: return "requestReview"
+        case .dismiss, .next, .previous, .openGame, .showStory: return nil
+        }
+    }
+
+    private static func actionUrl(_ action: EngageAction) -> String? {
+        switch action {
+        case .openUrl(let url): return url
+        case .openDeeplink: return nil
+        default: return nil
+        }
+    }
+
+    /// Runs bridge steps through the same executor the canvas uses, so
     /// host handlers behave exactly as for any other campaign action. Answered
-    /// only once the action has run — or not at all, when the skin sent no id
-    /// or the game closed mid-execution. A run fires `onCta`, like Android's,
-    /// including id-less runs, which still tapped.
-    private func runSkinAction(id: String?, action: EngageAction, op: String) {
+    /// only once the actions have run — or not at all, when the skin sent no id
+    /// or the game closed mid-execution. A run fires `onCta` per step, like
+    /// Android's, including id-less runs, which still tapped.
+    private func runSkinActions(id: String?, actions: [EngageAction]) {
         Task { @MainActor [weak self] in
             guard let self, self.bridge.state != .closed else { return }
             await SDKInstance.shared.executeActionFlow(
-                [action], variables: nil, campaignKey: self.request.campaignKey,
+                actions, variables: nil, campaignKey: self.request.campaignKey,
                 localActionExecutor: LocalActionExecutor(
                     dismiss: { [weak self] in self?.dismiss(reason: "skin") }))
             guard self.bridge.state != .closed else { return }
             if let id { self.bridge.answer(id: id, payload: ["ok": true]) }
-            self.request.onCta?(op, nil)
+            for action in actions {
+                if let op = Self.actionOp(action) {
+                    self.request.onCta?(op, Self.actionUrl(action))
+                }
+            }
         }
     }
 
-    /// Runs one skin `action` after the surface already closed (the openLink /
-    /// openDeeplink path): no reply is owed, and the closed bridge must not
-    /// swallow the host-ward side effect. Captures the request, not the
-    /// session, so teardown cannot cancel the open.
-    private func runSkinActionAfterClose(action: EngageAction) {
+    /// Runs bridge steps after the surface already closed (the link path):
+    /// no reply is owed, and the closed bridge must not swallow the host-ward
+    /// side effect. Captures the request, not the session, so teardown cannot
+    /// cancel the open.
+    private func runSkinActionsAfterClose(actions: [EngageAction]) {
         let campaignKey = self.request.campaignKey
         Task { @MainActor in
             await SDKInstance.shared.executeActionFlow(
-                [action], variables: nil, campaignKey: campaignKey,
+                actions, variables: nil, campaignKey: campaignKey,
                 localActionExecutor: LocalActionExecutor(
                     dismiss: { GamePresenter.dismiss() }))
         }
@@ -852,10 +834,7 @@ final class GamePresentation: Identifiable, ObservableObject {
     private func appDidResignActive() {
         guard !didFinish, !isHeld else { return }
         request.onForeground?(false)
-        if bridge.state == .loading {
-            spendPhaseBudget()
-            bridge.cancelReadyTimer()
-        }
+        watchdog.signal(.resignedActive)
         pushLifecycle("paused")
         motion.suspend()
     }
@@ -863,7 +842,7 @@ final class GamePresentation: Identifiable, ObservableObject {
     private func appDidBecomeActive() {
         guard !didFinish, !isHeld else { return }
         request.onForeground?(true)
-        armLoadTimer()
+        watchdog.signal(.becameActive)
         pushLifecycle("resumed")
         motion.resume()
     }
@@ -928,6 +907,8 @@ final class GamePresentation: Identifiable, ObservableObject {
     private func didBecomeReady(version _: Int) {
         guard !didFinish, !isReady else { return }
         isReady = true
+        // Ready disarms the watchdog: the wall and the phase timer stop here.
+        watchdog.signal(.ready)
         // Hand the loaded web view to the container; it is never reloaded.
         webCoordinator?.view.removeFromSuperview()
         webCoordinator?.view.alpha = 1
@@ -944,6 +925,9 @@ final class GamePresentation: Identifiable, ObservableObject {
     private func finish(report: @MainActor () -> Void) {
         guard !didFinish else { return }
         didFinish = true
+        // Terminal for the watchdog: `failed` and `closed` both settle here,
+        // so the wall and the phase timer never outlive the session.
+        watchdog.cancel()
         cancelAllHttpWatchdogs()
         for task in httpTasks.values { task.cancel() }
         httpTasks.removeAll()

@@ -61,4 +61,21 @@ struct GameLinkPolicyTests {
             #expect(!openable(raw), "\(raw)")
         }
     }
+
+    // Fails if control characters smuggle a blocked scheme past the bridge
+    // check: the bridge policy-decides on the stripped string and opens that
+    // same canonical URL. `java\nscript:` strips to `javascript:`, which is
+    // blocked; a padded web link still opens as its trimmed self.
+    @Test("control characters cannot smuggle a blocked scheme")
+    func controlCharsCannotSmuggleBlockedScheme() {
+        for raw in [
+            "java\nscript:alert(1)", "java\tscript:alert(1)", "java\rscript:alert(1)",
+            "\ncontent://com.x/file", "\u{7F}intent://scan/#Intent;scheme=zxing;end",
+        ] {
+            #expect(!GameLinkPolicy.isOpenableLink(raw), "\(raw)")
+            #expect(GameLinkPolicy.openableURL(raw) == nil, "\(raw)")
+        }
+        #expect(GameLinkPolicy.openableURL("  https://example.org/deal  ")?.absoluteString
+            == "https://example.org/deal")
+    }
 }

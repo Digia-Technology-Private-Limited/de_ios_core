@@ -601,6 +601,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// The SDK config's skin, cache, bridge and storage caps; defaults until a config arrives.
     var gameSkinLimits = GameSkinLimits.defaults
     var gameStorageLimits = GameStorageLimits.defaults
+    /// The SDK config's device-tier thresholds cutoffs; today's hardcoded numbers until a config arrives.
+    var gameMeasurement = GameMeasurementThresholds.defaults
 
     /// Not awaited. A failed call changes nothing, except that a first install with no
     /// cached config runs on the defaults from here, which also sends the held health events.
@@ -622,6 +624,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         services?.appEventsService?.applyPolicy(config.appEvents)
         GameDeviceTier.applyConfig(config.deviceTier)
         gamePrewarm = config.gamePrewarm
+        gameMeasurement = config.gameMeasurement
+        GameDeviceInfo.applyMeasurementThresholds(config.gameMeasurement)
         gameSkinLimits = config.gameSkinLimits
         gameStorageLimits = config.gameStorageLimits
         gamification.applySkinLimits(config.gameSkinLimits)
@@ -2435,6 +2439,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         gamePrewarm = .off
         gameSkinLimits = .defaults
         gameStorageLimits = .defaults
+        gameMeasurement = .defaults
+        GameDeviceInfo.applyMeasurementThresholds(.defaults)
         services?.tearDown()
         services = nil
         currentSession.set(nil, requestHeaders: [:])

@@ -149,6 +149,8 @@ final class PlaySession {
     /// `frequency_capped`; every other backend `denyReason` names what
     /// happened, and an unknown or missing one is `.notEligible`, never a cap.
     /// Spellings are the backend's `DenyReason`.
+    /// `notLive` means the saved list was old: the campaign was paused, deleted,
+    /// or ended after the app fetched it.
     nonisolated static func dropReason(forDenyReason denyReason: String?) -> DropReason {
         switch denyReason {
         case "capReached", "alreadyPlayed": return .frequencyCapped

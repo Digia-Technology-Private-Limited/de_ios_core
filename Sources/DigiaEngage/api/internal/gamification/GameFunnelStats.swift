@@ -5,8 +5,8 @@ import Foundation
 /// plays landed an outcome, the latest refusal, and how long the game was visible
 /// in the foreground after it showed. Fed from
 /// the bridge's `http` answers and app foreground changes. Mirrors Android's
-/// `GameWindowStats`.
-final class GameWindowStats: @unchecked Sendable {
+/// `GameFunnelStats`.
+final class GameFunnelStats: @unchecked Sendable {
     private let lock = NSLock()
     private let clock: () -> Int64
     private var latestChanceId: String
