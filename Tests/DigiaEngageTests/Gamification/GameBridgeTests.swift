@@ -429,6 +429,35 @@ struct GameBridgeTests {
         #expect(scripts.isEmpty)
     }
 
+    @Test("multi-step batches run together")
+    func multiStepBatch() {
+        let bridge = makeBridge()
+        var requests: [GameBridgeRequest] = []
+        bridge.onRequest = { requests.append($0) }
+
+        bridge.receive(msg("action", id: "m", payload: ["steps": [
+            ["type": "Action.copyToClipBoard", "data": ["text": "CODE"]],
+            ["type": "Action.openUrl", "data": ["url": "https://example.com/a", "launchMode": "externalApplication"]],
+        ]]))
+        bridge.receive(msg("action", id: "n", payload: ["steps": [
+            ["type": "Action.dismiss", "data": [:]],
+            ["type": "Action.copyToClipBoard", "data": ["text": "CODE"]],
+        ]]))
+
+        #expect(requests.count == 2)
+        guard case .actionSteps(_, let first) = requests[0] else {
+            Issue.record("multi-step batch was not accepted")
+            return
+        }
+        #expect(first == [.copyToClipboard("CODE"), .openUrl("https://example.com/a")])
+        // A mixed dismiss batch runs the runnable steps and ignores the dismiss.
+        guard case .actionSteps(_, let second) = requests[1] else {
+            Issue.record("mixed dismiss batch was not accepted")
+            return
+        }
+        #expect(second == [.copyToClipboard("CODE")])
+    }
+
     @Test("an unknown step answers unsupported, or is dropped without an id")
     func unknownActionUnsupported() throws {
         let bridge = makeBridge()
