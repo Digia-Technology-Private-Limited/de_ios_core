@@ -55,8 +55,9 @@ struct GamificationConfig: Equatable {
     /// `surface.dismissAfterPlayed`); absent means it dismisses. When false,
     /// a `played` close keeps the floater so the player can reopen the skin
     /// and see the reward already won — mirroring Android. Inline entries
-    /// never read it.
-    let dismissAfterPlayed: Bool = true
+    /// never read it. No default here: the parser at `fromJson` defaults it,
+    /// and a defaulted `let` would drop it from the memberwise init.
+    let dismissAfterPlayed: Bool
     let bundleUrl: String
     let sensors: [GamificationSkinSensor]
     /// The skin's minimum SDK version for this platform
