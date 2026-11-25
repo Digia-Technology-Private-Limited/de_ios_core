@@ -176,21 +176,54 @@ struct SdkConfigGameLimitsTests {
         #expect(skin.bridgeMessageMaxBytes == GameSkinLimits.defaults.bridgeMessageMaxBytes)
     }
 
-    @Test("out-of-range values clamp into their native range")
-    func outOfRangeClamps() {
-        let skin = limits(
-            #"{"gamification":{"limits":{"skinFileMaxBytes":1,"skinCacheMaxBytes":1000000000,"bridgeMessageMaxBytes":100}}}"#)
-        #expect(skin.skinFileMaxBytes == GameSkinLimits.minSkinFileBytes)
-        #expect(skin.skinCacheMaxBytes == GameSkinLimits.maxSkinCacheBytes)
-        #expect(skin.bridgeMessageMaxBytes == GameSkinLimits.minBridgeMessageBytes)
-        let quotas = storage(
-            #"{"gamification":{"storage":{"valueMaxBytes":1,"namespaceMaxBytes":1000000000}}}"#)
-        #expect(quotas.valueMaxBytes == GameStorageLimits.minValueBytes)
-        #expect(quotas.namespaceMaxBytes == GameStorageLimits.maxNamespaceBytes)
-        // A value past Int range still clamps instead of trapping: the range
-        // check runs on the double before converting.
+    @Test("an out-of-range value falls its whole section back to the defaults")
+    func outOfRangeFallsWholeSectionBack() {
+        // Guards the range check in rangedBytes: one value outside the
+        // backend's ranges fails its whole section, like Android's
+        // `game caps outside their native range are ignored`.
+        for section in [
+            #"{"gamification":{"limits":{"skinFileMaxBytes":0}}}"#,
+            #"{"gamification":{"limits":{"skinFileMaxBytes":20971521}}}"#,
+            #"{"gamification":{"limits":{"skinCacheMaxBytes":1024}}}"#,
+            #"{"gamification":{"limits":{"skinCacheMaxBytes":2147483648}}}"#,
+            #"{"gamification":{"limits":{"bridgeMessageMaxBytes":100}}}"#,
+            #"{"gamification":{"limits":{"bridgeMessageMaxBytes":9999999}}}"#,
+            #"{"gamification":{"storage":{"valueMaxBytes":100}}}"#,
+            #"{"gamification":{"storage":{"valueMaxBytes":9999999}}}"#,
+            #"{"gamification":{"storage":{"namespaceMaxBytes":100}}}"#,
+            #"{"gamification":{"storage":{"namespaceMaxBytes":99999999}}}"#,
+        ] {
+            #expect(limits(section) == .defaults, "\(section)")
+            #expect(storage(section) == .defaults, "\(section)")
+        }
+        // A value past Int range still fails whole instead of trapping: the
+        // range check runs on the double before converting.
         let huge = limits(#"{"gamification":{"limits":{"skinFileMaxBytes":1e30}}}"#)
-        #expect(huge.skinFileMaxBytes == GameSkinLimits.maxSkinFileBytes)
+        #expect(huge == .defaults)
+    }
+
+    @Test("values at the backend range edges are kept")
+    func rangeEdgesKept() {
+        // Guards the exact backend ranges: file 1 byte…20 MB, cache
+        // 1 MB…1 GB, message 1 KB…1 MB, value 1 KB…1 MB, namespace 4 KB…16 MB.
+        let low = limits(
+            #"{"gamification":{"limits":{"skinFileMaxBytes":1,"skinCacheMaxBytes":1048576,"bridgeMessageMaxBytes":1024}}}"#)
+        #expect(low.skinFileMaxBytes == 1)
+        #expect(low.skinCacheMaxBytes == 1 * 1024 * 1024)
+        #expect(low.bridgeMessageMaxBytes == 1024)
+        let high = limits(
+            #"{"gamification":{"limits":{"skinFileMaxBytes":20971520,"skinCacheMaxBytes":1073741824,"bridgeMessageMaxBytes":1048576}}}"#)
+        #expect(high.skinFileMaxBytes == 20 * 1024 * 1024)
+        #expect(high.skinCacheMaxBytes == 1024 * 1024 * 1024)
+        #expect(high.bridgeMessageMaxBytes == 1024 * 1024)
+        let quotasLow = storage(
+            #"{"gamification":{"storage":{"valueMaxBytes":1024,"namespaceMaxBytes":4096}}}"#)
+        #expect(quotasLow.valueMaxBytes == 1024)
+        #expect(quotasLow.namespaceMaxBytes == 4 * 1024)
+        let quotasHigh = storage(
+            #"{"gamification":{"storage":{"valueMaxBytes":1048576,"namespaceMaxBytes":16777216}}}"#)
+        #expect(quotasHigh.valueMaxBytes == 1024 * 1024)
+        #expect(quotasHigh.namespaceMaxBytes == 16 * 1024 * 1024)
     }
 
     @Test("a non-numeric value falls the whole section back to the defaults")
@@ -222,6 +255,27 @@ struct SdkConfigGameLimitsTests {
         let flipped = SdkConfig.resolve(fetched: object(
             #"{"gamification":{"limits":{"skinFileMaxBytes":2097152},"storage":{"valueMaxBytes":"big"}}}"#))
         #expect(flipped.gameSkinLimits.skinFileMaxBytes == 2 * 1024 * 1024)
+        #expect(flipped.gameStorageLimits == .defaults)
+    }
+
+    @Test("one out-of-range value fails its whole section, not its neighbour")
+    func mixedPayloadOutOfRangeFallsWholeSectionBack() {
+        // Guards the whole-section rule in parse: a valid file cap beside
+        // an out-of-range cache cap still falls the whole limits section
+        // back — the valid key does not survive — while storage parses alone.
+        let resolved = SdkConfig.resolve(fetched: object(
+            #"{"gamification":{"limits":{"skinFileMaxBytes":2097152,"skinCacheMaxBytes":9999999999},"storage":{"valueMaxBytes":8192}}}"#))
+        #expect(resolved.gameSkinLimits == .defaults)
+        #expect(resolved.gameStorageLimits == GameStorageLimits(
+            valueMaxBytes: 8 * 1024, namespaceMaxBytes: GameStorageLimits.defaults.namespaceMaxBytes))
+        // Mirrored: a valid storage quota beside an out-of-range namespace
+        // quota fails the whole storage section; limits parse alone.
+        let flipped = SdkConfig.resolve(fetched: object(
+            #"{"gamification":{"limits":{"bridgeMessageMaxBytes":32768},"storage":{"valueMaxBytes":8192,"namespaceMaxBytes":1}}}"#))
+        #expect(flipped.gameSkinLimits == GameSkinLimits(
+            skinFileMaxBytes: GameSkinLimits.defaults.skinFileMaxBytes,
+            skinCacheMaxBytes: GameSkinLimits.defaults.skinCacheMaxBytes,
+            bridgeMessageMaxBytes: 32 * 1024))
         #expect(flipped.gameStorageLimits == .defaults)
     }
 

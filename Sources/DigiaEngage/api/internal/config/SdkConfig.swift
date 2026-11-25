@@ -7,24 +7,26 @@ private let log = DigiaLogger()
 /// `gamification.limits` and `gamification.storage` are read here;
 /// the saved response is kept whole.
 /// `gamification.limits`: caps for skin downloads, the skin cache and the
-/// bridge intake. Every present value clamps into its range; absent keys take
-/// their default. A non-numeric value falls the whole section back to the
+/// bridge intake. The ranges mirror the backend's `LIMIT_RANGES` in
+/// `gamificationConfig.ts`, the source of truth. A present value must be a
+/// finite whole number inside its range; absent keys take their default. A
+/// malformed or out-of-range value falls the whole section back to the
 /// defaults (like `deviceTier`), never half-applies, and never throws.
 struct GameSkinLimits: Equatable, Sendable {
     /// One self-contained skin file. Default is the old whole-bundle budget
-    /// (3 MB + 10%); clamps 1…20 MB.
+    /// (3 MB + 10%); valid 1 byte…20 MB.
     var skinFileMaxBytes: Int
-    /// The whole skin cache across entries. Default 16 MB; clamps 8…64 MB.
+    /// The whole skin cache across entries. Default 16 MB; valid 1 MB…1 GB.
     var skinCacheMaxBytes: Int
-    /// One skin bridge message. Default 64 KB; clamps 16…256 KB.
+    /// One skin bridge message. Default 64 KB; valid 1 KB…1 MB.
     var bridgeMessageMaxBytes: Int
 
-    static let minSkinFileBytes = 1 * 1024 * 1024
+    static let minSkinFileBytes = 1
     static let maxSkinFileBytes = 20 * 1024 * 1024
-    static let minSkinCacheBytes = 8 * 1024 * 1024
-    static let maxSkinCacheBytes = 64 * 1024 * 1024
-    static let minBridgeMessageBytes = 16 * 1024
-    static let maxBridgeMessageBytes = 256 * 1024
+    static let minSkinCacheBytes = 1 * 1024 * 1024
+    static let maxSkinCacheBytes = 1024 * 1024 * 1024
+    static let minBridgeMessageBytes = 1 * 1024
+    static let maxBridgeMessageBytes = 1024 * 1024
 
     static let defaults = GameSkinLimits(
         skinFileMaxBytes: 3 * 1024 * 1024 + (3 * 1024 * 1024) / 10,
@@ -34,13 +36,13 @@ struct GameSkinLimits: Equatable, Sendable {
 
     static func parse(_ json: [String: Any]?) -> GameSkinLimits {
         guard let json else { return .defaults }
-        guard let file = clampedBytes(
+        guard let file = rangedBytes(
             json["skinFileMaxBytes"], default: defaults.skinFileMaxBytes,
             min: minSkinFileBytes, max: maxSkinFileBytes),
-            let cache = clampedBytes(
+            let cache = rangedBytes(
                 json["skinCacheMaxBytes"], default: defaults.skinCacheMaxBytes,
                 min: minSkinCacheBytes, max: maxSkinCacheBytes),
-            let message = clampedBytes(
+            let message = rangedBytes(
                 json["bridgeMessageMaxBytes"], default: defaults.bridgeMessageMaxBytes,
                 min: minBridgeMessageBytes, max: maxBridgeMessageBytes)
         else { return .defaults }
@@ -48,42 +50,43 @@ struct GameSkinLimits: Equatable, Sendable {
             skinFileMaxBytes: file, skinCacheMaxBytes: cache, bridgeMessageMaxBytes: message)
     }
 
-    /// Absent reads as the default; a finite whole number clamps; anything else
+    /// Absent reads as the default; a present value must be a finite whole
+    /// number inside `[min, max]` — the backend's typo guards. Anything else
     /// is nil, failing the whole section. The range check runs on the double
-    /// before converting, so a huge value clamps instead of trapping `Int`.
-    static func clampedBytes(_ raw: Any?, default fallback: Int, min: Int, max: Int) -> Int? {
+    /// before converting, so a huge value fails instead of trapping `Int`.
+    static func rangedBytes(_ raw: Any?, default fallback: Int, min: Int, max: Int) -> Int? {
         guard let raw else { return fallback }
         guard let number = raw as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
         let value = number.doubleValue
-        guard value.isFinite, value == floor(value) else { return nil }
-        if value <= Double(min) { return min }
-        if value >= Double(max) { return max }
+        guard value.isFinite, value == floor(value),
+              value >= Double(min), value <= Double(max)
+        else { return nil }
         return Int(value)
     }
 }
 
 /// `gamification.storage`: the per-skin key-value quotas. Same whole-fallback
-/// rule as `limits`: absent keys take their default, a non-numeric value
-/// falls the whole section back to the defaults.
+/// rule as `limits`: absent keys take their default, a malformed or
+/// out-of-range value falls the whole section back to the defaults.
 struct GameStorageLimits: Equatable, Sendable {
-    /// One storage value. Default 16 KB; clamps 4…256 KB.
+    /// One storage value. Default 16 KB; valid 1 KB…1 MB.
     var valueMaxBytes: Int
-    /// One skin namespace across keys. Default 64 KB; clamps 16 KB…1 MB.
+    /// One skin namespace across keys. Default 64 KB; valid 4 KB…16 MB.
     var namespaceMaxBytes: Int
 
-    static let minValueBytes = 4 * 1024
-    static let maxValueBytes = 256 * 1024
-    static let minNamespaceBytes = 16 * 1024
-    static let maxNamespaceBytes = 1024 * 1024
+    static let minValueBytes = 1 * 1024
+    static let maxValueBytes = 1024 * 1024
+    static let minNamespaceBytes = 4 * 1024
+    static let maxNamespaceBytes = 16 * 1024 * 1024
 
     static let defaults = GameStorageLimits(valueMaxBytes: 16 * 1024, namespaceMaxBytes: 64 * 1024)
 
     static func parse(_ json: [String: Any]?) -> GameStorageLimits {
         guard let json else { return .defaults }
-        guard let value = GameSkinLimits.clampedBytes(
+        guard let value = GameSkinLimits.rangedBytes(
             json["valueMaxBytes"], default: defaults.valueMaxBytes,
             min: minValueBytes, max: maxValueBytes),
-            let namespace = GameSkinLimits.clampedBytes(
+            let namespace = GameSkinLimits.rangedBytes(
                 json["namespaceMaxBytes"], default: defaults.namespaceMaxBytes,
                 min: minNamespaceBytes, max: maxNamespaceBytes)
         else { return .defaults }
