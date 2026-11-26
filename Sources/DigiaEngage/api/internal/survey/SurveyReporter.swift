@@ -170,7 +170,7 @@ final class SurveyReporter {
 
         // Analytics "Completed" fires once per survey showing, regardless of
         // whether a submission is reported to the backend below.
-        let answeredCount = answers.isEmpty ? response.count : answers.count
+        let answeredCount = answers.isEmpty ? response.count : answers.values.filter { $0.isAnswered }.count
         ctx.events.toDigia(
             SurveyEvent.Completed(
                 itemTotal: state.config.itemTotal,
@@ -181,10 +181,6 @@ final class SurveyReporter {
             payload: state.payload
         )
 
-        if answers.isEmpty {
-            ctx.sdk.logVerbose("reportSurveyCompleted: skip submission — no answers")
-            return
-        }
         if isLiveTest {
             relayLiveTestSubmission(state: state, answers: answers)
             return
