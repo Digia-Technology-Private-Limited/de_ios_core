@@ -8,6 +8,7 @@ import UIKit
 let yamlDebugHandlers: [String: YamlHandler] = [
     "openTimeline": { world, args in try await openTimeline(world, args) },
     "openDebugSettings": { world, _ in try await openDebugSettings(world) },
+    "closeDebugSettings": { world, _ in try await closeDebugSettings(world) },
     "emitTimelineRecord": { world, args in try await emitTimelineRecord(world, args) },
     "openLink": { world, args in try await openLink(world, args) },
     "clearTimeline": { world, _ in ScreenSink.shared.clear() },
@@ -59,6 +60,20 @@ let yamlDebugHandlers: [String: YamlHandler] = [
     }
     Digia.presentDebugSettings(from: root)
     try await world.waitUntil("the debug settings are open", timeout: 5) { world.isShowing("Digia bubble") }
+    ComponentTestHost.drainRunLoop(for: 0.05)
+    await world.settle()
+}
+
+/// Closes the debug settings screen presented over the app.
+@MainActor private func closeDebugSettings(_ world: YamlWorld) async throws {
+    _ = try world.sdk
+    guard let window = world.window,
+          let root = window.rootViewController
+    else { return }
+    if root.presentedViewController != nil {
+        root.dismiss(animated: false)
+    }
+    try await world.waitUntil("the debug settings close", timeout: 5) { root.presentedViewController == nil }
     ComponentTestHost.drainRunLoop(for: 0.05)
     await world.settle()
 }

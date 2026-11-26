@@ -10,6 +10,9 @@ import SwiftUI
 /// Also re-checks `DigiaDebugDetection.isDebugBuild()` — defense in depth.
 @MainActor
 struct RecordingBadgeView: View {
+    /// Test seam: stops the connecting/error dot's repeatForever pulse so
+    /// golden snapshots are deterministic. Always `false` in production.
+    static var disablePulseForTesting = false
     @ObservedObject private var overlay = SDKInstance.shared.debugOverlayControllerSnapshot()
 
     var body: some View {
@@ -168,8 +171,12 @@ private struct BadgeContent: View {
         // connecting). `pulse`'s oscillating value is only ever *read*
         // conditionally via `isPulsing`, matching Android/Flutter's pattern.
         .onAppear {
-            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+            if RecordingBadgeView.disablePulseForTesting {
                 pulse = true
+            } else {
+                withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                    pulse = true
+                }
             }
         }
         .onChange(of: sdk.captureStatusMessage) { message in

@@ -916,24 +916,46 @@ struct CanvasStoryRailRenderer: View {
                     }
                 }
             }
-            .fullScreenCover(isPresented: Binding(
-                get: { openIndex != nil },
-                set: { if !$0 { openIndex = nil } }
-            )) {
-                CanvasStoryViewer(
-                    pages: pages,
-                    chrome: chrome,
-                    initialIndex: openIndex ?? 0,
-                    restartOnCompleted: restartOnCompleted,
-                    startMuted: startMuted,
-                    isDark: isDark,
-                    onAction: onAction,
-                    onDismiss: { openIndex = nil },
-                    safeAreaInsets: activeFloaterWindowSafeAreaInsets
-                )
-                .ignoresSafeArea()
-            }
+            .background(
+                CanvasStoryCoverPresenter(
+                    isPresented: Binding(
+                        get: { openIndex != nil },
+                        set: { if !$0 { openIndex = nil } }
+                    )
+                ) {
+                    CanvasStoryViewer(
+                        pages: pages,
+                        chrome: chrome,
+                        initialIndex: openIndex ?? 0,
+                        restartOnCompleted: restartOnCompleted,
+                        startMuted: startMuted,
+                        isDark: isDark,
+                        onAction: onAction,
+                        onDismiss: { openIndex = nil },
+                        safeAreaInsets: activeFloaterWindowSafeAreaInsets
+                    )
+                    .ignoresSafeArea()
+                }
+            )
         )
+    }
+}
+
+/// Isolates `.fullScreenCover` so disabling cover animation in tests (via
+/// `CanvasStoryViewer.disableCoverAnimationForTesting`) does not mutate any
+/// other animations in the rail or canvas. Production keeps default animation.
+struct CanvasStoryCoverPresenter<Content: View>: View {
+    let isPresented: Binding<Bool>
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        Color.clear
+            .fullScreenCover(isPresented: isPresented, content: content)
+            .transaction {
+                if CanvasStoryViewer.disableCoverAnimationForTesting {
+                    $0.disablesAnimations = true
+                }
+            }
     }
 }
 
@@ -983,6 +1005,8 @@ struct CanvasStoryViewer: View {
     @State private var muted = true
     @State private var paused = false
     @State private var appActive = UIApplication.shared.applicationState == .active
+    @GestureState private var isHolding = false
+    @State private var pressStartedAt: TimeInterval?
     @State private var ticker: Timer?
     /// Test seam: how the authored page timer waits out its 1/30 s tick, in
     /// nanoseconds. `nil` (always, in a shipped app) ticks on the real clock.
@@ -992,6 +1016,10 @@ struct CanvasStoryViewer: View {
     /// Test seam: monotonic uptime in seconds matching `tickSleepForTesting`.
     /// `nil` in production, which reads `ProcessInfo.processInfo.systemUptime`.
     static var uptimeForTesting: (() -> TimeInterval)?
+    /// Test seam: disables SwiftUI's `.fullScreenCover` presentation animation
+    /// under the YAML test host (matches `NudgeCoverPresenter`). Always `false`
+    /// in production so the native slide-up presentation is untouched.
+    static var disableCoverAnimationForTesting = false
     @State private var tickTask: Task<Void, Never>?
     @State private var lastTickUptime: TimeInterval = 0
     @State private var videoBuffering = false
@@ -1040,20 +1068,6 @@ struct CanvasStoryViewer: View {
             // backdrop — a background draws behind its parent's content — and
             // hide the story's own media behind a black rectangle.
             ZStack(alignment: .top) {
-                // Navigation sits under the chrome and over the page, so a
-                // button the author placed on a page still wins the tap.
-                HStack(spacing: 0) {
-                    Color.clear.contentShape(Rectangle()).onTapGesture { step(-1) }
-                    Color.clear.contentShape(Rectangle()).onTapGesture { step(1) }
-                }
-                .simultaneousGesture(
-                    LongPressGesture(minimumDuration: 0.2)
-                        .onChanged { _ in pause() }
-                        .onEnded { _ in resume() }
-                )
-                .allowsHitTesting(showsOverlays)
-                .accessibilityHidden(!showsOverlays)
-
                 let safeHeight = max(
                     0, proxy.size.height - safeAreaInsets.top - safeAreaInsets.bottom
                 )
@@ -1139,6 +1153,45 @@ struct CanvasStoryViewer: View {
             // top-aligned chrome above the top edge and the bottom-anchored page
             // canvas below the bottom one.
             .frame(width: proxy.size.width, height: proxy.size.height)
+            .contentShape(Rectangle())
+            // One unified DragGesture(minimumDistance: 0) on the full-screen reader
+            // handles hold-to-pause and left/right taps on any non-interactive area
+            // (even over opaque page backgrounds), while child buttons (Mute, Close,
+            // CTAs) keep higher gesture priority.
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .updating($isHolding) { _, state, _ in
+                        state = true
+                    }
+                    .onChanged { _ in
+                        guard showsOverlays else { return }
+                        if pressStartedAt == nil {
+                            pressStartedAt = Self.currentUptime()
+                            pause()
+                        }
+                    }
+                    .onEnded { value in
+                        guard showsOverlays else { return }
+                        let started = pressStartedAt
+                        pressStartedAt = nil
+                        resume()
+                        let held = started.map { max(0, Self.currentUptime() - $0) } ?? 0
+                        let travel = hypot(value.translation.width, value.translation.height)
+                        if held < 0.2 && travel < 20 {
+                            step(value.location.x < proxy.size.width / 2 ? -1 : 1)
+                        } else if value.translation.height > 80
+                            && value.translation.height > abs(value.translation.width)
+                        {
+                            dismissWithReport()
+                        }
+                    }
+            )
+            .onChange(of: isHolding) { holding in
+                if !holding {
+                    pressStartedAt = nil
+                    resume()
+                }
+            }
             // The media goes here rather than in the stack for the same reason:
             // a background is measured against its parent and can never resize
             // it, however large the image inside turns out to be. It still
