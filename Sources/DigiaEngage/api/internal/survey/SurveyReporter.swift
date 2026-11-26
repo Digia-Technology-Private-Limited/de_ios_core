@@ -315,14 +315,19 @@ final class SurveyReporter {
         return labels.joined(separator: ", ")
     }
 
-    /// Numeric scale bounds for scored blocks (Rating 1–5, NPS 0–10). Other
-    /// block types have no scale.
+    /// Scale bounds for scored blocks: the question's authored bounds when it
+    /// has them, else the block type's default range (Rating 1–5, NPS 0–10).
     private static func scaleBounds(_ block: SurveyBlock) -> (min: Int, max: Int)? {
+        let defaults: (min: Int, max: Int)
         switch block.type {
-        case .rating: return (1, 5)
-        case .nps, .npsEmoji, .npsSmiley: return (0, 10)
+        case .rating: defaults = (1, 5)
+        case .nps, .npsEmoji, .npsSmiley: defaults = (0, 10)
         default: return nil
         }
+        return (
+            min: block.scaleMin.map { Int($0.rounded()) } ?? defaults.min,
+            max: block.scaleMax.map { Int($0.rounded()) } ?? defaults.max
+        )
     }
 
     private static let openEndedQuestionTypes: Set<SurveyBlockType> = [

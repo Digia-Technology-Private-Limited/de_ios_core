@@ -416,6 +416,10 @@ struct SurveyBlock: Equatable {
     /// NUMBER-block constraints. nil means unbounded on that side.
     let numberMin: Double?
     let numberMax: Double?
+    /// Authored bounds of a rating/NPS scale input. nil when the JSON omits
+    /// them; analytics then reports the block type's default range.
+    let scaleMin: Double?
+    let scaleMax: Double?
     /// Conditional visibility. When non-nil, the node is skipped if it evaluates false.
     let showWhen: ConditionExpr?
 
@@ -448,6 +452,8 @@ struct SurveyBlock: Equatable {
             backgroundColor: SurveyParse.string(json["backgroundColor"]) ?? "",
             numberMin: SurveyParse.double(json["min"]),
             numberMax: SurveyParse.double(json["max"]),
+            scaleMin: SurveyParse.double(json["min"]),
+            scaleMax: SurveyParse.double(json["max"]),
             showWhen: ConditionExpr.from(SurveyParse.object(json["showWhen"]))
         )
     }
