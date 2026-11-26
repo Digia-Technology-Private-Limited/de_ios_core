@@ -182,6 +182,7 @@ final class YamlWorld {
         FloaterOrchestrator.autoDismissSleepForTesting = { try await clock.sleep(nanoseconds: $0) }
         FloaterStoryOrchestrator.autoDismissSleepForTesting = { try await clock.sleep(nanoseconds: $0) }
         CanvasStoryViewer.tickSleepForTesting = { try await clock.sleep(nanoseconds: $0) }
+        CanvasStoryViewer.uptimeForTesting = { clock.nowSeconds }
         // The acceptance and anchor watchdogs wait on the same fake clock, so
         // advanceTime fires them like any other timer.
         PresentationCoordinator.acceptanceSleepForTesting = { try await clock.sleep(nanoseconds: $0) }
@@ -568,6 +569,7 @@ final class YamlWorld {
         FloaterOrchestrator.autoDismissSleepForTesting = nil
         FloaterStoryOrchestrator.autoDismissSleepForTesting = nil
         CanvasStoryViewer.tickSleepForTesting = nil
+        CanvasStoryViewer.uptimeForTesting = nil
         PresentationCoordinator.acceptanceSleepForTesting = nil
         AnchorRegistry.readinessSleepForTesting = nil
         DigiaBottomSheetConfig.disableAnimationForTesting = false
@@ -1325,6 +1327,7 @@ enum YamlMatch {
 @MainActor
 final class YamlFakeClock {
     private var now: UInt64 = 0
+    var nowSeconds: TimeInterval { Double(now) / 1_000_000_000 }
     private var nextId = 0
     private var sleepers: [(id: Int, due: UInt64, wake: CheckedContinuation<Void, Error>)] = []
 
