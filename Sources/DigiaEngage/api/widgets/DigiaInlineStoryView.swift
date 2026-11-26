@@ -984,10 +984,16 @@ struct StoryRemoteImage: View {
 
 @MainActor
 struct InlineStoryVideoView: View {
+    private struct PlaybackInputs: Equatable {
+        let active: Bool
+        let muted: Bool
+    }
+
     let item: StoryItemConfig
     var active: Bool = true
     let muted: Bool
     var onReadyForDisplay: (@MainActor @Sendable () -> Void)?
+    var onDuration: (@MainActor @Sendable (Double) -> Void)?
     var onProgress: (@MainActor @Sendable (Double) -> Void)?
     var onEnded: (@MainActor @Sendable () -> Void)?
     var onBuffering: (@MainActor @Sendable (Bool) -> Void)?
@@ -1001,6 +1007,7 @@ struct InlineStoryVideoView: View {
         active: Bool = true,
         muted: Bool,
         onReadyForDisplay: (@MainActor @Sendable () -> Void)? = nil,
+        onDuration: (@MainActor @Sendable (Double) -> Void)? = nil,
         onProgress: (@MainActor @Sendable (Double) -> Void)? = nil,
         onEnded: (@MainActor @Sendable () -> Void)? = nil,
         onBuffering: (@MainActor @Sendable (Bool) -> Void)? = nil,
@@ -1010,6 +1017,7 @@ struct InlineStoryVideoView: View {
         self.active = active
         self.muted = muted
         self.onReadyForDisplay = onReadyForDisplay
+        self.onDuration = onDuration
         self.onProgress = onProgress
         self.onEnded = onEnded
         self.onBuffering = onBuffering
@@ -1034,13 +1042,14 @@ struct InlineStoryVideoView: View {
                 .opacity(playback.showPlayerLayer ? 1 : 0)
             }
         }
-        .onAppear(perform: updatePlayback)
-        .onChange(of: active) { _ in updatePlayback() }
-        .onChange(of: muted) { _ in updatePlayback() }
+        .onAppear { updatePlayback(active: active, muted: muted) }
+        .onChange(of: PlaybackInputs(active: active, muted: muted)) { next in
+            updatePlayback(active: next.active, muted: next.muted)
+        }
         .onDisappear { playback.tearDown() }
     }
 
-    private func updatePlayback() {
+    private func updatePlayback(active: Bool, muted: Bool) {
         playback.campaignKey = campaignKey
         playback.update(
             state: StoryVideoPlaybackState(
@@ -1052,6 +1061,7 @@ struct InlineStoryVideoView: View {
             ),
             events: StoryVideoPlaybackEvents(
                 onReady: { onReadyForDisplay?() },
+                onDuration: { onDuration?($0) },
                 onProgress: { onProgress?($0) },
                 onEnded: { onEnded?() },
                 onBuffering: { onBuffering?($0) },

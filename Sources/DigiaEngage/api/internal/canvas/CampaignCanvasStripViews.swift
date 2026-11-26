@@ -975,17 +975,28 @@ struct CanvasStoryViewer: View {
     /// the screen while authored page and chrome content stay inside these margins.
     var safeAreaInsets = EdgeInsets()
 
+    /// Extra headroom past a video's real duration before the stall backstop advances the page.
+    private static let videoEndBackstopSeconds: TimeInterval = 1.5
+
     @State private var index = 0
     @State private var progress: CGFloat = 0
     @State private var muted = true
     @State private var paused = false
+    @State private var appActive = UIApplication.shared.applicationState == .active
     @State private var ticker: Timer?
     /// Test seam: how the authored page timer waits out its 1/30 s tick, in
     /// nanoseconds. `nil` (always, in a shipped app) ticks on the real clock.
     /// Tests set a fake clock so `advanceTime` fires page turns instantly,
     /// like `FloaterOrchestrator.autoDismissSleepForTesting`.
     static var tickSleepForTesting: ((UInt64) async throws -> Void)?
+    /// Test seam: monotonic uptime in seconds matching `tickSleepForTesting`.
+    /// `nil` in production, which reads `ProcessInfo.processInfo.systemUptime`.
+    static var uptimeForTesting: (() -> TimeInterval)?
     @State private var tickTask: Task<Void, Never>?
+    @State private var lastTickUptime: TimeInterval = 0
+    @State private var videoBuffering = false
+    @State private var videoDurationSeconds: Double?
+    @State private var videoActiveElapsed: TimeInterval = 0
     @State private var playbackGeneration = 0
     @State private var displayedMediaKey = CanvasStoryMediaKey(index: 0, generation: 0)
 
@@ -1147,6 +1158,12 @@ struct CanvasStoryViewer: View {
                                         guard mediaKey == currentMediaKey else { return }
                                         displayedMediaKey = mediaKey
                                     },
+                                    onDuration: { duration in
+                                        guard mediaKey == currentMediaKey,
+                                              duration.isFinite, duration > 0 else { return }
+                                        videoDurationSeconds = duration
+                                        startVideoBackstopIfReady()
+                                    },
                                     onProgress: {
                                         guard mediaKey == currentMediaKey,
                                               mediaKey == displayedMediaKey else { return }
@@ -1155,6 +1172,10 @@ struct CanvasStoryViewer: View {
                                     onEnded: {
                                         guard mediaKey == currentMediaKey else { return }
                                         step(1)
+                                    },
+                                    onBuffering: { buffering in
+                                        guard mediaKey == currentMediaKey else { return }
+                                        videoBuffering = buffering
                                     },
                                     onFailed: {
                                         guard mediaKey == currentMediaKey else { return }
@@ -1190,6 +1211,16 @@ struct CanvasStoryViewer: View {
         .onDisappear {
             lastReportedIndex = nil
             stop()
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: UIApplication.willResignActiveNotification
+        )) { _ in
+            appActive = false
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: UIApplication.didBecomeActiveNotification
+        )) { _ in
+            appActive = true
         }
     }
 
@@ -1305,6 +1336,9 @@ struct CanvasStoryViewer: View {
         stop()
         progress = 0
         paused = false
+        videoBuffering = false
+        videoDurationSeconds = nil
+        videoActiveElapsed = 0
         playbackGeneration += 1
 
         let current = page
@@ -1325,6 +1359,51 @@ struct CanvasStoryViewer: View {
         return CGFloat(interval / max(0.1, duration))
     }
 
+    private static func currentUptime() -> TimeInterval {
+        uptimeForTesting?() ?? ProcessInfo.processInfo.systemUptime
+    }
+
+    private func startVideoBackstopIfReady() {
+        guard let duration = videoDurationSeconds,
+              duration.isFinite, duration > 0,
+              ticker == nil, tickTask == nil else { return }
+        let mediaKey = currentMediaKey
+        let deadline = duration + Self.videoEndBackstopSeconds
+        let interval = 1.0 / 30.0
+        lastTickUptime = Self.currentUptime()
+        if let sleep = Self.tickSleepForTesting {
+            let intervalNs = UInt64(interval * 1_000_000_000)
+            tickTask = Task { @MainActor in
+                do {
+                    while !Task.isCancelled {
+                        try await sleep(intervalNs)
+                        guard mediaKey == currentMediaKey else { return }
+                        let now = Self.currentUptime()
+                        let elapsed = max(0, now - lastTickUptime)
+                        lastTickUptime = now
+                        if !paused && appActive && !videoBuffering {
+                            videoActiveElapsed += elapsed
+                            if videoActiveElapsed >= deadline { step(1); return }
+                        }
+                    }
+                } catch { return }
+            }
+            return
+        }
+        ticker = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
+            Task { @MainActor in
+                guard mediaKey == currentMediaKey else { return }
+                let now = Self.currentUptime()
+                let elapsed = max(0, now - lastTickUptime)
+                lastTickUptime = now
+                if !paused && appActive && !videoBuffering {
+                    videoActiveElapsed += elapsed
+                    if videoActiveElapsed >= deadline { step(1) }
+                }
+            }
+        }
+    }
+
     private func startAuthoredTimer() {
         ticker?.invalidate()
         ticker = nil
@@ -1334,6 +1413,7 @@ struct CanvasStoryViewer: View {
         let mediaKey = currentMediaKey
 
         let interval = 1.0 / 30.0
+        lastTickUptime = Self.currentUptime()
         if let sleep = Self.tickSleepForTesting {
             let intervalNs = UInt64(interval * 1_000_000_000)
             tickTask = Task { @MainActor in
@@ -1341,10 +1421,13 @@ struct CanvasStoryViewer: View {
                     while !Task.isCancelled {
                         try await sleep(intervalNs)
                         guard mediaKey == currentMediaKey else { return }
+                        let now = Self.currentUptime()
+                        let elapsed = max(0, now - lastTickUptime)
+                        lastTickUptime = now
                         progress += Self.progressIncrement(
-                            interval: interval,
+                            interval: elapsed,
                             duration: current.duration,
-                            isPaused: paused
+                            isPaused: paused || !appActive
                         )
                         if progress >= 1 { step(1); return }
                     }
@@ -1355,10 +1438,13 @@ struct CanvasStoryViewer: View {
         ticker = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
             Task { @MainActor in
                 guard mediaKey == currentMediaKey else { return }
+                let now = Self.currentUptime()
+                let elapsed = max(0, now - lastTickUptime)
+                lastTickUptime = now
                 progress += Self.progressIncrement(
-                    interval: interval,
+                    interval: elapsed,
                     duration: current.duration,
-                    isPaused: paused
+                    isPaused: paused || !appActive
                 )
                 if progress >= 1 { step(1) }
             }

@@ -206,10 +206,13 @@ final class YamlCanvasVideos {
             actual: "\(args)",
             line: world.step.line)
     }
-    try TouchSynthesizer.press(
-        at: pointOnScreen(point, in: window),
-        in: window,
-        for: Double(duration.milliseconds) / 1000)
+    let pt = try pointOnScreen(point, in: window)
+    let finger = try TouchSynthesizer.Finger(window: window, start: pt)
+    try finger.move(to: pt)
+    let ms = Int64(duration.milliseconds)
+    world.time.advance(byMs: ms)
+    await world.clock.advance(byNanoseconds: UInt64(max(0, ms)) * 1_000_000)
+    try finger.release()
 }
 
 /// Story strip thumbnail videos play for real from here on, instead of
