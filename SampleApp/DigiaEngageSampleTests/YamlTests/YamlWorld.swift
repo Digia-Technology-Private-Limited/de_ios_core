@@ -183,6 +183,8 @@ final class YamlWorld {
         FloaterStoryOrchestrator.autoDismissSleepForTesting = { try await clock.sleep(nanoseconds: $0) }
         CanvasStoryViewer.tickSleepForTesting = { try await clock.sleep(nanoseconds: $0) }
         CanvasStoryViewer.uptimeForTesting = { clock.nowSeconds }
+        CanvasStoryViewer.disableCoverAnimationForTesting = true
+        RecordingBadgeView.disablePulseForTesting = true
         // The acceptance and anchor watchdogs wait on the same fake clock, so
         // advanceTime fires them like any other timer.
         PresentationCoordinator.acceptanceSleepForTesting = { try await clock.sleep(nanoseconds: $0) }
@@ -570,6 +572,8 @@ final class YamlWorld {
         FloaterStoryOrchestrator.autoDismissSleepForTesting = nil
         CanvasStoryViewer.tickSleepForTesting = nil
         CanvasStoryViewer.uptimeForTesting = nil
+        CanvasStoryViewer.disableCoverAnimationForTesting = false
+        RecordingBadgeView.disablePulseForTesting = false
         PresentationCoordinator.acceptanceSleepForTesting = nil
         AnchorRegistry.readinessSleepForTesting = nil
         DigiaBottomSheetConfig.disableAnimationForTesting = false
