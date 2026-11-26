@@ -1,6 +1,7 @@
 import Foundation
 import SDWebImage
 import UIKit
+@testable import DigiaEngage
 
 /// Serves the Test Kit's media for fixture images, so goldens draw deterministic
 /// pixels with no network, like the Android (`TestkitImages` stand-in) and
@@ -42,6 +43,10 @@ final class YamlImageStubLoader: NSObject, SDImageLoader {
         // (test process only). Every image from here on is offered to the
         // stub above before the real internet.
         SDWebImageManager.shared.setValue(
+            SDImageLoadersManager.shared, forKey: "imageLoader")
+        // The SDK's pictures load through its own manager (and cache), which fronts the
+        // downloader directly, so it gets the same treatment.
+        DigiaImagePipeline.imageManager.setValue(
             SDImageLoadersManager.shared, forKey: "imageLoader")
     }
 

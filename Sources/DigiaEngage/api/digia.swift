@@ -78,9 +78,45 @@ public enum Digia {
     /// `true`; otherwise returns `false` so the host can continue its own routing.
     @discardableResult
     public static func handleDeepLink(_ url: URL, from presenter: UIViewController) -> Bool {
+        if isRewardsDeepLink(url) {
+            openRewards()
+            return true
+        }
         guard isDebugSettingsDeepLink(url) else { return false }
         presentDebugSettings(from: presenter)
         return true
+    }
+
+    /// Path suffix for the SDK's rewards deep link. Like the debug-settings
+    /// path, this is a convention the host routes from its own deep-linking:
+    /// map the app's own reward URL (universal link or scheme) to
+    /// `openRewards()`, or hand the SDK-owned `_digia/rewards` URL to
+    /// `handleDeepLink(_:from:)`.
+    public static let rewardsDeepLinkPath = "_digia/rewards"
+
+    /// Whether `url` is the SDK's rewards deep link (same matching as
+    /// `isDebugSettingsDeepLink`).
+    public static func isRewardsDeepLink(_ url: URL) -> Bool {
+        let raw = url.absoluteString
+        let afterScheme: Substring
+        if let range = raw.range(of: "://") {
+            afterScheme = raw[range.upperBound...]
+        } else {
+            afterScheme = raw[...]
+        }
+        let trimmed = afterScheme.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return trimmed == rewardsDeepLinkPath
+            || trimmed.hasSuffix("/\(rewardsDeepLinkPath)")
+    }
+
+    /// Opens the hosted rewards page full screen over the top-most view
+    /// controller. Games open over the page and it refreshes when they close.
+    ///
+    /// Call this from the app's own button or menu, or map the app's own deep
+    /// link to it in the host's deep-link handling. No-op below iOS 17.
+    public static func openRewards() {
+        guard #available(iOS 17, *) else { return }
+        SDKInstance.shared.openRewards()
     }
     /// Initializes the Digia SDK. No-ops below iOS 17 — the SDUI rendering layer
     /// requires APIs (`Layout`, newer `SwiftUI` scroll/animation modifiers) that
@@ -109,6 +145,34 @@ public enum Digia {
             return
         }
         try await SDKInstance.shared.initialize(config)
+    }
+
+    /// Draws Digia Engage campaigns over a UIKit app. Call it once, with your window, after setting its
+    /// root view controller:
+    ///
+    /// ```swift
+    /// window.rootViewController = HomeViewController()
+    /// window.makeKeyAndVisible()
+    /// Digia.attach(to: window)
+    /// ```
+    ///
+    /// The SDK adds its layer as a child of the window's root view controller. After you replace the root
+    /// (`window.rootViewController = …`), it moves to the new root before the next campaign shows; a
+    /// campaign that was on screen when you replaced the root is ended. Call it again only for a new
+    /// `UIWindow`.
+    ///
+    /// The root must be a plain view controller. A `UINavigationController`, `UITabBarController`,
+    /// `UISplitViewController` or `UIPageViewController` root is not supported, because it would treat
+    /// Digia's layer as one of its own screens; then nothing is drawn and a warning is logged. SwiftUI apps
+    /// use `DigiaHost` instead.
+    ///
+    /// No-ops below iOS 17 (see `initialize`): no campaign can show there, so no layer is added.
+    public static func attach(to window: UIWindow) {
+        guard #available(iOS 17, *) else {
+            log.w("attach(to:) ignored — Digia Engage requires iOS 17 or later")
+            return
+        }
+        DigiaHostAttachment.attach(to: window)
     }
 
     public static var requestHeaders: [String: String] { SDKInstance.shared.requestHeaders }
@@ -190,6 +254,15 @@ public enum Digia {
         SDKInstance.shared.controller.forceNudgeDismiss()
     }
 
+    /// Ends every overlay campaign on screen or waiting to show (nudge, survey, guide, floater, story) as
+    /// `cancelled`. Inline content stays.
+    ///
+    /// For Digia's own React Native module, which calls it after a JS reload so nothing from the previous
+    /// JS session stays on screen. Not part of the supported integration surface.
+    public static func dismissActiveCampaigns() {
+        SDKInstance.shared.endCampaignsForJsReload()
+    }
+
     /// True when any overlay (toast, dialog, bottom sheet, anchored tooltip/spotlight)
     /// is currently active. Used by host views to decide whether to forward hit tests
     /// to the SwiftUI layer or pass them through to content below.
@@ -201,10 +274,12 @@ public enum Digia {
     /// Leaving it out is not a degraded hit test but no hit test at all: a host that has not been
     /// told an overlay is active claims only the window's old rect and every tap on the story —
     /// advance, close, mute — falls through to the app behind it.
+    /// A dialog game renders inline in the same overlay, so an active game counts too.
     public static var hasActiveOverlay: Bool {
         let ctrl = SDKInstance.shared.controller
         return ctrl.activeStoryOverlay != nil
             || ctrl.activeNudge != nil
+            || ctrl.activeGame != nil
             || SDKInstance.shared.surveyOrchestrator.state != nil
             || SDKInstance.shared.floaterStoryOrchestrator.storyOverlayActive
             || SDKInstance.shared.guideOrchestrator.state != nil

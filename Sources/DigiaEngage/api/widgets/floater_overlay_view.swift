@@ -32,6 +32,9 @@ struct FloaterOverlayView: View {
     var body: some View {
         if let state = orchestrator.state, !orchestrator.awaitingMedia {
             FloaterSessionView(state: state, orchestrator: orchestrator)
+                // The media's health reports carry this key; the expanded content sets it again
+                // for itself below.
+                .environment(\.digiaCampaignKey, state.payload.campaignKey)
                 .id(state.token)
                 // Full-bleed in both states, and placed inside the real window insets below, as
                 // the story floater is. Respecting the container's safe area as well inset the
@@ -286,7 +289,7 @@ private struct FloaterSessionView: View {
                         media: config.media, player: orchestrator.player,
                         cover: !expanded || config.expanded.cover,
                         resolvedUrl: state.resolvedMediaUrl,
-                        preloadedImage: orchestrator.preloadedImage
+                        lottieSource: orchestrator.lottieSource
                     )
                     .allowsHitTesting(false)
                     .zIndex(0)
@@ -592,13 +595,19 @@ struct FloaterCollapsedInteractionView: UIViewRepresentable {
     func makeUIView(context: Context) -> FloaterTouchShieldView {
         let view = FloaterTouchShieldView()
 
+        // The pan sits on the window, not on the shield: content drawn above the shield
+        // (a story canvas's tap region or button) wins the hit-test, and a recognizer on
+        // the shield never sees a drag that starts there. One on an ancestor sees every
+        // touch; `shouldReceive` keeps it to the floater's own rect. It does not delay
+        // touches, so a plain tap still reaches that content; a real drag cancels it.
         let pan = UIPanGestureRecognizer(
             target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
         pan.cancelsTouchesInView = true
-        pan.delaysTouchesBegan = true
+        pan.delaysTouchesBegan = false
         pan.delegate = context.coordinator
-        view.addGestureRecognizer(pan)
+        view.windowPan = pan
         context.coordinator.pan = pan
+        context.coordinator.shield = view
 
         let tap = UITapGestureRecognizer(
             target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
@@ -629,6 +638,7 @@ struct FloaterCollapsedInteractionView: UIViewRepresentable {
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         weak var pan: UIPanGestureRecognizer?
         weak var tap: UITapGestureRecognizer?
+        weak var shield: FloaterTouchShieldView?
 
         private var draggable = false
         private var tapExpands = false
@@ -655,13 +665,14 @@ struct FloaterCollapsedInteractionView: UIViewRepresentable {
 
         @objc func handlePan(_ recognizer: UIPanGestureRecognizer) {
             guard draggable, !closing else { return }
-            let translationPoint = recognizer.translation(in: recognizer.view)
+            let reference = shield ?? recognizer.view
+            let translationPoint = recognizer.translation(in: reference)
             let translation = CGSize(width: translationPoint.x, height: translationPoint.y)
             switch recognizer.state {
             case .began, .changed:
                 onDragChanged(translation)
             case .ended:
-                let velocity = recognizer.velocity(in: recognizer.view)
+                let velocity = recognizer.velocity(in: reference)
                 let projected = CGSize(
                     width: translation.width + velocity.x * 0.18,
                     height: translation.height + velocity.y * 0.18
@@ -687,6 +698,15 @@ struct FloaterCollapsedInteractionView: UIViewRepresentable {
                 return tapExpands && !closing
             }
             return true
+        }
+
+        /// The window pan takes only touches that start on this floater's shield area.
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch
+        ) -> Bool {
+            guard gestureRecognizer === pan else { return true }
+            guard draggable, !closing, let shield else { return false }
+            return shield.accepts(touch.location(in: shield))
         }
 
         func gestureRecognizer(
@@ -722,12 +742,27 @@ final class FloaterTouchShieldView: UIView {
         nil
     }
 
+    /// The drag recognizer, installed on this view's window so it also sees touches
+    /// that land on content drawn above the shield.
+    var windowPan: UIGestureRecognizer?
+
+    override func willMove(toWindow newWindow: UIWindow?) {
+        super.willMove(toWindow: newWindow)
+        if let windowPan { window?.removeGestureRecognizer(windowPan) }
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if let windowPan { window?.addGestureRecognizer(windowPan) }
+    }
+
+    func accepts(_ point: CGPoint) -> Bool {
+        isUserInteractionEnabled && !activeRect.isNull && activeRect.contains(point)
+            && !excludedRects.contains(where: { $0.contains(point) })
+    }
+
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        guard isUserInteractionEnabled, !activeRect.isNull, activeRect.contains(point),
-            !excludedRects.contains(where: { $0.contains(point) })
-        else {
-            return nil
-        }
+        guard accepts(point) else { return nil }
         return super.hitTest(point, with: event)
     }
 }

@@ -21,12 +21,12 @@ struct SDKInstanceSdkConfigTests {
     private func makeInstance(
         defaults: UserDefaults, network: ConfigNetworkClient, sink: HealthSink
     ) -> SDKInstance {
-        SDKInstance(
+        { let instance = SDKInstance(
             defaults: defaults,
             legacyDefaults: makeDefaults(),
             makeNetworkClient: { _ in network },
             healthSink: sink
-        )
+        ); instance.onHostMounted(SDKInstance.testHostId); return instance }()
     }
 
     private func seedCache(_ defaults: UserDefaults, _ json: String) {
@@ -201,6 +201,43 @@ struct SDKInstanceSdkConfigTests {
         return await service.queuedPayloads().filter { names.contains($0["event_name"] as? String ?? "") }
     }
 
+    @Test("a cached gamification limits section applies at launch")
+    func cachedGameLimitsAtLaunch() async throws {
+        let defaults = makeDefaults()
+        seedCache(defaults, #"{"gamification":{"limits":{"skinFileMaxBytes":2097152,"skinCacheMaxBytes":33554432,"bridgeMessageMaxBytes":32768},"storage":{"valueMaxBytes":8192,"namespaceMaxBytes":32768}}}"#)
+        let network = ConfigNetworkClient()
+        let sdk = makeInstance(defaults: defaults, network: network, sink: HealthSink())
+
+        try await sdk.initialize(DigiaConfig(apiKey: apiKey))
+
+        // Guards the applySdkConfig lines: the cached limits land on the SDK
+        // and the skin cache is rebuilt around them.
+        #expect(sdk.gameSkinLimits == GameSkinLimits(
+            skinFileMaxBytes: 2 * 1024 * 1024, skinCacheMaxBytes: 32 * 1024 * 1024,
+            bridgeMessageMaxBytes: 32 * 1024))
+        #expect(sdk.gameStorageLimits == GameStorageLimits(valueMaxBytes: 8 * 1024, namespaceMaxBytes: 32 * 1024))
+        network.answer("{}")
+    }
+
+    @Test("a cached gamification thresholds section applies at launch")
+    func cachedMeasurementAtLaunch() async throws {
+        defer { GameDeviceInfo.applyMeasurementThresholds(.defaults) }
+        let defaults = makeDefaults()
+        seedCache(defaults, #"{"gamification":{"deviceTier":{"thresholds":{"ramLowGb":3.0,"lowRamDeviceMb":2048}}}}"#)
+        let network = ConfigNetworkClient()
+        let sdk = makeInstance(defaults: defaults, network: network, sink: HealthSink())
+
+        try await sdk.initialize(DigiaConfig(apiKey: apiKey))
+
+        // Guards the applySdkConfig lines: the cached thresholds land on the
+        // instance and on the facts reader; the rest stay default.
+        #expect(sdk.gameMeasurement.ramLowGb == 3.0)
+        #expect(sdk.gameMeasurement.lowRamDeviceMb == 2048)
+        #expect(sdk.gameMeasurement.batteryHigh == GameMeasurementThresholds.defaults.batteryHigh)
+        #expect(GameDeviceInfo.measurementThresholds == sdk.gameMeasurement)
+        network.answer("{}")
+    }
+
     @Test("a cached upload switch-off drops an event tracked before the call answers")
     func cachedUploadOffAtLaunch() async throws {
         let defaults = makeDefaults()
@@ -313,6 +350,16 @@ final class ConfigNetworkClient: NetworkClient, @unchecked Sendable {
                 continuation.resume(with: earlyResult)
             }
         }
+    }
+
+    func executeCapped(request: NetworkRequest, maxBytes: Int) async throws -> NetworkResponse {
+        let response = try await execute(request: request)
+        guard let body = response.body, body.count > maxBytes else { return response }
+        return NetworkResponse(
+            statusCode: response.statusCode,
+            headers: response.headers,
+            body: Data(body.prefix(maxBytes + 1)),
+            isSuccessful: response.isSuccessful)
     }
 
     func executeMultipart(request: MultipartUploadRequest) async throws -> NetworkResponse {

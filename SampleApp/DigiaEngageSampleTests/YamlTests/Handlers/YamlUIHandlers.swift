@@ -843,7 +843,7 @@ private func pointOnScreen(_ point: String, in window: UIWindow) throws -> CGPoi
     // catches the placeholder and the golden flakes. Drain until the image
     // pipeline is idle (bounded), so the capture sees the served image.
     let imagesIdleBy = Date().addingTimeInterval(5)
-    while SDWebImageManager.shared.isRunning && Date() < imagesIdleBy {
+    while (SDWebImageManager.shared.isRunning || DigiaImagePipeline.imageManager.isRunning) && Date() < imagesIdleBy {
         ComponentTestHost.drainRunLoop(for: 0.1)
     }
     ComponentTestHost.drainRunLoop(for: 0.01)

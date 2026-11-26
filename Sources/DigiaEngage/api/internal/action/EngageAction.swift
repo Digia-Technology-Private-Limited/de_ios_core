@@ -19,6 +19,11 @@ enum EngageAction: Equatable {
     /// stories instead. Handled by the canvas stage rather than the shared
     /// action runner — it is the only thing that knows which stories to open.
     case showStory(Int)
+    /// Open the game of the gamification campaign whose entry canvas this is.
+    ///
+    /// Handled by the canvas host, like `showStory`: only it knows which
+    /// campaign the canvas belongs to. Anywhere else it is a no-op.
+    case openGame
 
     var analyticsType: String {
         switch self {
@@ -32,6 +37,7 @@ enum EngageAction: Equatable {
         case .previous: "previous"
         case .requestReview: "request_review"
         case .showStory: "show_story"
+        case .openGame: "open_game"
         }
     }
 
@@ -69,7 +75,24 @@ enum EngageAction: Equatable {
 
 struct EngageActionParser {
     func parse(_ onClick: [String: Any]?) -> [EngageAction] {
-        (onClick?.objectArray("steps") ?? []).compactMap(parseStep)
+        parseReportingUnknown(onClick).actions
+    }
+
+    /// Parses canvas steps, also reporting whether any step was unknown or
+    /// malformed. The canvas itself skips those; the game bridge answers them
+    /// as `unsupported` instead.
+    func parseReportingUnknown(_ onClick: [String: Any]?) -> (
+        actions: [EngageAction], hasUnknown: Bool
+    ) {
+        guard let steps = onClick?["steps"] as? [[String: Any]] else { return ([], false) }
+        var actions: [EngageAction] = []
+        actions.reserveCapacity(steps.count)
+        var hasUnknown = false
+        for step in steps {
+            if let action = parseStep(step) { actions.append(action) }
+            else { hasUnknown = true }
+        }
+        return (actions, hasUnknown)
     }
 
     private func parseStep(_ step: [String: Any]) -> EngageAction? {
@@ -109,8 +132,9 @@ struct EngageActionParser {
             let raw = data["index"] ?? step["index"]
             let index = (raw as? NSNumber)?.intValue ?? Int("\(raw ?? "")") ?? 0
             return .showStory(max(0, index))
+        case "Action.openGame": return .openGame
         case "Action.customKV":
-            guard let action = (data["payload"] as? [String: Any]).flatMap(customKV(from:)) else {
+            guard let action = Self.customKV(from: data["payload"] as? [String: Any]) else {
                 return unsupported(type)
             }
             return action
@@ -130,7 +154,8 @@ struct EngageActionParser {
         return nil
     }
 
-    private func customKV(from raw: [String: Any]) -> EngageAction? {
+    static func customKV(from raw: [String: Any]?) -> EngageAction? {
+        guard let raw else { return nil }
         let payload = raw.reduce(into: [String: String]()) { result, entry in
             if let value = entry.value as? String { result[entry.key] = value }
         }

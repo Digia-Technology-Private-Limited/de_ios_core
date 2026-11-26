@@ -57,6 +57,7 @@ struct NudgeOverlayView: View {
                 }
 
                 NudgeCoverPresenter(presentation: coverBinding)
+                GameCoverPresenter(presentation: gameCoverBinding)
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
         }
@@ -77,7 +78,31 @@ struct NudgeOverlayView: View {
                 return nudge
             },
             set: { newValue in
-                if newValue == nil { SDKInstance.shared.nudgeOrchestrator.markNudgeDismissed() }
+                guard newValue == nil, let nudge = SDKInstance.shared.controller.activeNudge else { return }
+                // SwiftUI clears this only when the system tears the cover down (the app replaced its root, or
+                // dismissed everything): the user's own closes call `markNudgeDismissed` directly, and the
+                // cover can't be swiped away. So it is never a user close. On the next turn, unless the nudge
+                // already ended (e.g. by the host teardown).
+                DispatchQueue.main.async {
+                    guard SDKInstance.shared.controller.activeNudge?.id == nudge.id else { return }
+                    SDKInstance.shared.nudgeOrchestrator.markNudgeDismissed(reason: .cancelled)
+                }
+            }
+        )
+    }
+
+    /// Drives the game cover from the controller's active game. Clearing it
+    /// routes through `GamePresenter.dismiss()` so the session settles exactly once.
+    private var gameCoverBinding: Binding<GamePresentation?> {
+        Binding(
+            get: {
+                // A game the open rewards page owns shows over the page instead.
+                controller.activeGame.flatMap {
+                    GameLayerOwner.layer(for: ObjectIdentifier($0)) == .root ? $0 : nil
+                }
+            },
+            set: { newValue in
+                if newValue == nil { GamePresenter.dismiss() }
             }
         )
     }
@@ -104,24 +129,60 @@ private struct NudgeCoverPresenter: View {
                 // `.id(nudge.id)`: a direct swap between two active nudges (no
                 // nil in between) must still create a fresh presentation view.
                 if #available(iOS 16.4, *) {
-                    content(nudge)
+                    NudgeCoverContent(nudge: nudge)
                         .presentationBackground(.clear)
                         .id(nudge.id)
                 } else {
-                    content(nudge).id(nudge.id)
+                    NudgeCoverContent(nudge: nudge).id(nudge.id)
                 }
             }
             .transaction { $0.disablesAnimations = true }
     }
+}
 
-    @ViewBuilder
-    private func content(_ nudge: DigiaNudgePresentation) -> some View {
+/// The bottom-sheet or full-screen nudge the cover presents.
+private struct NudgeCoverContent: View {
+    let nudge: DigiaNudgePresentation
+
+    var body: some View {
         if nudge.config.surface.isFullScreen {
             NudgeFullScreenView(presentation: nudge)
                 .interactiveDismissDisabled()
         } else {
             NudgeSheetView(presentation: nudge)
         }
+    }
+}
+
+/// The game surface, shared by the root cover and the rewards page.
+struct GameLayerView: View {
+    let game: GamePresentation
+
+    var body: some View {
+        GameContainer(game: game, safeAreaInsets: activeWindowSafeAreaInsets).id(game.id)
+    }
+}
+
+/// Isolates the game full-screen-cover transaction like `NudgeCoverPresenter`
+/// does for nudges. The game fills the window over a clear presentation
+/// background and closes through the native button or the skin, never through
+/// a gesture.
+private struct GameCoverPresenter: View {
+    let presentation: Binding<GamePresentation?>
+
+    var body: some View {
+        Color.clear
+            .fullScreenCover(item: presentation) { game in
+                // `.id(game.id)`: a direct swap between two games (no nil in
+                // between) must still create a fresh presentation view.
+                if #available(iOS 16.4, *) {
+                    GameLayerView(game: game)
+                        .presentationBackground(.clear)
+                } else {
+                    GameLayerView(game: game)
+                }
+            }
+            .transaction { $0.disablesAnimations = true }
     }
 }
 
@@ -568,26 +629,20 @@ struct NudgeDialogContainer: View {
 
 @MainActor private var activeWindowSize: CGSize {
     if let override = activeFloaterWindowGeometryOverride { return override.bounds.size }
-    return UIApplication.shared.connectedScenes
-        .compactMap { $0 as? UIWindowScene }
-        .first(where: { $0.activationState == .foregroundActive })?
-        .windows.first(where: \.isKeyWindow)?
-        .bounds.size ?? UIScreen.main.bounds.size
+    return ViewControllerUtil.keyWindow()?.bounds.size ?? UIScreen.main.bounds.size
 }
 
 /// Honours `activeFloaterWindowGeometryOverride`, the test seam for the window lookup; `nil` in
-/// production, where the key window of the active scene is read as before.
+/// production, where the host's window is read. React Native hosts often have no key window
+/// while a game opens, so the strict key-window lookup read zero insets and put the close
+/// button under the status bar; `ViewControllerUtil.keyWindow()` falls back to a visible window.
 @MainActor var activeWindowSafeAreaInsets: UIEdgeInsets {
     if let override = activeFloaterWindowGeometryOverride {
         return UIEdgeInsets(
             top: override.safeArea.top, left: override.safeArea.leading,
             bottom: override.safeArea.bottom, right: override.safeArea.trailing)
     }
-    return UIApplication.shared.connectedScenes
-        .compactMap { $0 as? UIWindowScene }
-        .first(where: { $0.activationState == .foregroundActive })?
-        .windows.first(where: \.isKeyWindow)?
-        .safeAreaInsets ?? .zero
+    return ViewControllerUtil.keyWindow()?.safeAreaInsets ?? .zero
 }
 
 private struct DialogHeightKey: PreferenceKey {

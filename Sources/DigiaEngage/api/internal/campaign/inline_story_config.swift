@@ -207,6 +207,7 @@ struct StoryCardConfig: Equatable {
 /// The campaign-level image that opens the story viewer at its first item.
 struct StoryPreviewImageConfig: Equatable {
     let url: String
+    var placeholder: ImagePlaceholder? = nil
     var boxFit: StoryMediaFit = .cover
     var aspectRatio: Double = 0
     var height: Double = 200
@@ -225,6 +226,7 @@ struct StoryPreviewImageConfig: Equatable {
         let edges = json.object("padding") ?? [:]
         return StoryPreviewImageConfig(
             url: url,
+            placeholder: ImagePlaceholder.from(json.object("placeholder")),
             boxFit: StoryMediaFit.fromWireValue(json.string("boxFit", default: "cover"), mediaType: .image),
             aspectRatio: positive("aspectRatio", 0),
             height: positive("height", 200),

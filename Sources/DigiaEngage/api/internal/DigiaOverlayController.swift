@@ -27,6 +27,9 @@ final class DigiaOverlayController: ObservableObject {
     /// Flutter's `SDKInstance.waitClockForTesting`.
     static var autoDismissSleepForTesting: ((UInt64) async throws -> Void)?
     @Published private(set) var activeStoryOverlay: InlineStoryOverlayState?
+    /// The open gamification game, if any. Separate from `activeNudge`: a game
+    /// owns the surface through `GamePresenter`, not the nudge presentation.
+    @Published private(set) var activeGame: GamePresentation?
 
     var onAction: ((_ actionType: String, _ url: String, _ payload: CEPTriggerPayload) -> Bool)?
 
@@ -51,6 +54,21 @@ final class DigiaOverlayController: ObservableObject {
         activeNudge = nil
     }
 
+    /// Sets the game state. Impression/dismissal analytics are emitted by
+    /// ``SDKInstance``, not here — same split as `showNudge`.
+    func showGame(_ presentation: GamePresentation) {
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) {
+            activeGame = presentation
+        }
+    }
+
+    func dismissGame() {
+        guard activeGame != nil else { return }
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) {
+            activeGame = nil
+        }
+    }
+
     /// Starts on appearance and stays owned by this nudge when child views appear.
     /// Any authored auto-dismiss is honored on every surface. The dashboard
     /// authors it for full-screen nudges only; the SDK stays ready for more.
@@ -72,19 +90,45 @@ final class DigiaOverlayController: ObservableObject {
         }
     }
 
-    func showStoryOverlay(config: InlineStoryConfig, initialIndex: Int, payload: CEPTriggerPayload)
+    /// Opens the story viewer, answering whether it was shown.
+    ///
+    /// The "story open" state is recorded only once UIKit accepted the present: a story that could not
+    /// be shown (no screen to present from, one mid-transition, or a refused present) would otherwise
+    /// leave the SDK believing a story is open with nothing on screen. That failure is recorded as
+    /// `story_present_failed`.
+    @discardableResult
+    func showStoryOverlay(config: InlineStoryConfig, initialIndex: Int, payload: CEPTriggerPayload) -> Bool
     {
         let state = InlineStoryOverlayState(
             config: config,
             initialIndex: initialIndex,
             payload: payload
         )
+        if let cause = DigiaStoryPresenter.shared.present(state: state) {
+            storyLog.w(
+                "Story not shown — \(cause)",
+                campaign: payload.campaignKey,
+                stage: .render,
+                reason: TimelineReason.storyPresentFailed,
+                extras: ["cause": cause]
+            )
+            // A story already open was dismissed to make room for this one, so none is open now.
+            activeStoryOverlay = nil
+            return false
+        }
         activeStoryOverlay = state
-        DigiaStoryPresenter.shared.present(state: state)
+        return true
     }
 
     func dismissStoryOverlay() {
         activeStoryOverlay = nil
         DigiaStoryPresenter.shared.dismiss()
     }
+
+    /// The story viewer was taken down outside the SDK; only the state is left to clear.
+    func storyOverlayEnded() {
+        activeStoryOverlay = nil
+    }
 }
+
+private let storyLog = DigiaLogger()

@@ -25,8 +25,17 @@ struct DeliveryTimelineObserverTests {
         #expect(stageOf(.surfaceBusy) == .gating)
         #expect(stageOf(.superseded) == .gating)
         #expect(stageOf(.hostSuppressed) == .gating)
+        // The backend's refusal reasons: the campaign was held back before
+        // anything rendered.
+        #expect(stageOf(.userNotVerified) == .gating)
+        #expect(stageOf(.campaignNotLive) == .gating)
+        #expect(stageOf(.notInAudience) == .gating)
+        #expect(stageOf(.budgetExhausted) == .gating)
+        #expect(stageOf(.chanceExpired) == .gating)
+        #expect(stageOf(.notEligible) == .gating)
 
         #expect(stageOf(.invalidConfig) == .render)
+        #expect(stageOf(.hostModalOpen) == .gating)
         #expect(stageOf(.anchorNotRegistered) == .render)
         #expect(stageOf(.hostNotMounted) == .render)
         #expect(stageOf(.timeout) == .render)
@@ -38,6 +47,6 @@ struct DeliveryTimelineObserverTests {
 
         // Total by construction — if a reason is ever added, this count fails
         // before the mapping can silently acquire a default branch.
-        #expect(DropReason.allCases.count == 18)
+        #expect(DropReason.allCases.count == 25)
     }
 }

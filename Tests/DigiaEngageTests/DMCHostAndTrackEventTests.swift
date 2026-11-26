@@ -13,10 +13,10 @@ struct DMCHostTriggerTests {
     // dmc-case: dmc.trigger.calls_before_init_dropped_not_held
     @Test("a host trigger before initialize drops at once, not silently")
     func dropsBeforeInitialize() {
-        let sdk = SDKInstance(
+        let sdk = { let instance = SDKInstance(
             defaults: UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!,
             legacyDefaults: UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!,
-            makeNetworkClient: { _ in HeldBundleNetworkClient() })
+            makeNetworkClient: { _ in HeldBundleNetworkClient() }); instance.onHostMounted(SDKInstance.testHostId); return instance }()
         #expect(sdk.sdkState == .notInitialized)
 
         let presentation = sdk.triggerCampaign("home_banner", variables: nil)

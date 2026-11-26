@@ -63,6 +63,16 @@ private final class ContextNetworkClient: NetworkClient, @unchecked Sendable {
         }
     }
 
+    func executeCapped(request: NetworkRequest, maxBytes: Int) async throws -> NetworkResponse {
+        let response = try await execute(request: request)
+        guard let body = response.body, body.count > maxBytes else { return response }
+        return NetworkResponse(
+            statusCode: response.statusCode,
+            headers: response.headers,
+            body: Data(body.prefix(maxBytes + 1)),
+            isSuccessful: response.isSuccessful)
+    }
+
     func executeMultipart(request: MultipartUploadRequest) async throws -> NetworkResponse {
         NetworkResponse(statusCode: 200, headers: [:], body: nil, isSuccessful: true)
     }
@@ -94,11 +104,11 @@ struct DMCContextWaitTests {
             bundle: NetworkResponse(statusCode: 200, headers: [:], body: body, isSuccessful: true))
         let defaults = UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!
         if let user { defaults.set(user, forKey: "identity.user_id") }
-        let sdk = SDKInstance(
+        let sdk = { let instance = SDKInstance(
             defaults: defaults,
             legacyDefaults: UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!,
             makeNetworkClient: { _ in network }
-        )
+        ); instance.onHostMounted(SDKInstance.testHostId); return instance }()
         let sink = WaitSink()
         DigiaLogger.registerSink(sink)
         let plugin = WaitPlugin()

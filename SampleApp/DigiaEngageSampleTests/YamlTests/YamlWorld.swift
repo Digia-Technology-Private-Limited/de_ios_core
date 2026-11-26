@@ -281,11 +281,15 @@ final class YamlWorld {
         // clearDisk finishes on a queue: await it, or a load that queries the
         // disk mid-delete still hits the stale photo and never sees the stub.
         SDWebImageManager.shared.cancelAll()
+        DigiaImagePipeline.imageManager.cancelAll()
         SDImageCache.shared.clearMemory()
+        DigiaImagePipeline.imageCache.clearMemory()
         if !Self.diskCacheCleared || phoneHost || tabletHost {
             Self.diskCacheCleared = true
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                SDImageCache.shared.clearDisk(onCompletion: { continuation.resume() })
+                SDImageCache.shared.clearDisk(onCompletion: {
+                    DigiaImagePipeline.imageCache.clearDisk(onCompletion: { continuation.resume() })
+                })
             }
         }
         ActionPlatform.current = platform.actionPlatform
@@ -628,7 +632,7 @@ final class YamlWorld {
     private var hasPendingAsync: Bool {
         if network.inFlightCount > 0 { return true }
         if SDWebImageManager.shared.isRunning { return true }
-        if AnchorlessImageLoader.inFlightCount > 0 { return true }
+        if DigiaImagePipeline.imageManager.isRunning { return true }
         if CarouselStripMotion.pendingRestChecks > 0 { return true }
         if let services = SDKInstance.shared.services {
             if services.analyticsService?.isDispatching == true { return true }

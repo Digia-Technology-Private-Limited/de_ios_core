@@ -41,13 +41,14 @@ struct DigiaInlineStoryView: View {
     }
 
     private func openStory(at index: Int) {
-        SDKInstance.shared.storyReporter.reportStoryOpened(payload)
-        SDKInstance.shared.storyReporter.reportClassicStoryOpened(payload, index: index)
-        SDKInstance.shared.controller.showStoryOverlay(
+        // Reported only for a story that was shown.
+        guard SDKInstance.shared.controller.showStoryOverlay(
             config: config,
             initialIndex: index,
             payload: payload
-        )
+        ) else { return }
+        SDKInstance.shared.storyReporter.reportStoryOpened(payload)
+        SDKInstance.shared.storyReporter.reportClassicStoryOpened(payload, index: index)
     }
 
     private var rail: some View {
@@ -71,7 +72,7 @@ private struct SingleImageStoryPreview: View {
 
     var body: some View {
         let media = Color.black
-            .overlay(StoryRemoteImage(urlString: image.url, fit: image.boxFit))
+            .overlay(StoryRemoteImage(urlString: image.url, fit: image.boxFit, blurHash: image.placeholder?.stillBlurHash))
             .clipShape(RoundedRectangle(cornerRadius: CGFloat(image.cornerRadius), style: .continuous))
         Group {
             if image.aspectRatio > 0 {
@@ -438,9 +439,9 @@ private struct StoryThumbnailCard: View {
                     player: thumbnailPlayerIdentity(item)
                 ))
             } else if item.type == .video {
-                StoryThumbnailPlaceholderView(thumbnail: item.thumbnail)
+                StoryThumbnailPlaceholderView(thumbnail: item.thumbnail, ground: storyRailFailureGround)
             } else {
-                StoryRemoteImage(urlString: item.url, fit: item.thumbnailBoxFit)
+                StoryRemoteImage(urlString: item.url, fit: item.thumbnailBoxFit, ground: storyRailFailureGround)
             }
         }
         .frame(width: width, height: height)
@@ -494,7 +495,10 @@ final class DigiaStoryPresenter {
 
     private init() {}
 
-    func present(state: InlineStoryOverlayState) {
+    /// Presents the story, answering why it could not: `no_presenter`, `presenter_transitioning` (UIKit refuses to present from a controller mid
+    /// present or dismiss) or `present_refused`; nil once presented.
+    @discardableResult
+    func present(state: InlineStoryOverlayState) -> String? {
         // Replace any story already showing (e.g. tapping another story).
         // Tear the old one down without animation so it doesn't collide with
         // the incoming present.
@@ -503,7 +507,8 @@ final class DigiaStoryPresenter {
             presented.presentingViewController?.dismiss(animated: false)
         }
 
-        guard let presenter = ViewControllerUtil.topViewController() else { return }
+        guard let presenter = ViewControllerUtil.topViewController() else { return "no_presenter" }
+        if presenter.isBeingPresented || presenter.isBeingDismissed { return "presenter_transitioning" }
 
         let host = DigiaStoryHostingController(
             rootView: InlineStoryOverlayContent(state: state)
@@ -515,12 +520,26 @@ final class DigiaStoryPresenter {
         host.modalTransitionStyle = .crossDissolve
         presented = host
         presenter.present(host, animated: true)
+        if presenter.presentedViewController !== host {
+            presented = nil
+            return "present_refused"
+        }
+        return nil
     }
 
     func dismiss() {
         guard let presented else { return }
         self.presented = nil
         presented.presentingViewController?.dismiss(animated: true)
+    }
+
+    /// UIKit took a story down without the SDK asking (the app dismissed it, or its root went away). Clears the
+    /// story state, else `hasActiveOverlay` stays true and the host swallows every touch. Not for a story a
+    /// newer one already replaced.
+    func storyWentAway(_ controller: UIViewController) {
+        guard presented == nil || presented === controller else { return }
+        presented = nil
+        SDKInstance.shared.controller.storyOverlayEnded()
     }
 }
 
@@ -547,6 +566,14 @@ private final class DigiaStoryHostingController<Content: View>: UIHostingControl
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         becomeFirstResponder()
+    }
+
+    /// Dismissed, by the SDK or from outside it. Covered by something presented on top is not a dismissal.
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        if isBeingDismissed || presentingViewController == nil {
+            DigiaStoryPresenter.shared.storyWentAway(self)
+        }
     }
 
     @objc private func dismissStoryOverlay() {
@@ -964,21 +991,34 @@ struct StoryRemoteImage: View {
     let urlString: String
     let fit: StoryMediaFit
 
-    @ViewBuilder
+    /// Drawn while the picture loads and after a failure, when given: the rail card passes the
+    /// failure fill, every other story surface none (its own ground shows). Once the picture has
+    /// drawn, a letterbox shows what is behind the card, as it always did.
+    var ground: Color? = nil
+    /// The authored blurred preview, drawn while the picture loads and after a failure.
+    var blurHash: String? = nil
+    @State private var loaded = false
+
     var body: some View {
-        if let url = URL(string: urlString) {
-            let image = DigiaCachedImageView(
-                url: url,
-                placeholder: AnyView(Color(red: 0.10, green: 0.10, blue: 0.10))
+        // The picture is stretched to the box it is given (`.fill`): this view applies the story's
+        // own aspect rule below, as it did around the cached image view.
+        let image = ZStack {
+            if !loaded, let ground { ground }
+            MediaImage(
+                url: urlString,
+                fit: .fill,
+                blurHash: blurHash,
+                onSuccess: { loaded = true }
             )
+        }
+        Group {
             if fit.stretchesImage {
                 image.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 image.aspectRatio(contentMode: fit.imageContentMode)
             }
-        } else {
-            Color(red: 0.16, green: 0.16, blue: 0.16)
         }
+        .onChange(of: urlString) { _ in loaded = false }
     }
 }
 

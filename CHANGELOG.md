@@ -2,6 +2,42 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
+## [4.6.0] - 2026-11-26
+
+### New Features
+
+- Added gamification campaigns, which play a game in a full-screen web view and need a user set with `Digia.setUserId`.
+- Added `Digia.openRewards()` and a `digia_rewards_widget` slot for rewards; `Digia.handleDeepLink(_:from:)` now opens rewards for the SDK's rewards link.
+
+### Improvements
+
+- Failed canvas and nudge images and Lottie animations no longer show a grey labelled box, and banner and survey pictures lose their grey backdrop.
+- Digia Engage images now load through their own loader and disk cache, separate from your app's image cache.`.
+- An anchorless guide step now ends when its picture has not drawn in time, instead of when the request idles too long.
+
+### Bug Fixes
+
+- Nudges and surveys now read safe areas from a visible window when no window is key, as in React Native hosts.
+
+## [4.5.0] - 2026-11-23
+
+### New Features
+
+- Added `DigiaHostViewController`, `DigiaHostView` and `DigiaSlotView` so UIKit apps can show campaigns and inline slots without SwiftUI.
+- Added `Digia.attach(to:)` to add Digia's layer to your window's root, which must be a plain view controller.
+
+### Improvements
+
+- Breaking: nudges and surveys that arrive while your app presents its own modal now drop as the new `DropReason.hostModalOpen`; add it to exhaustive switches.
+- Campaigns that cannot show because no Digia host is on screen are now reported to your messaging platform as not mounted instead of timed out.
+- An open story now turns new nudges and surveys away instead of drawing them hidden behind it.
+
+### Bug Fixes
+
+- Campaigns on screen when your app replaces its root now end as cancelled, and a system teardown is no longer reported as the user closing them.
+- A story that cannot be presented is no longer treated as open, which blocked other campaigns and sent a Story Opened event.
+- A cancelled guide now has its next showing recorded as displayed.
+
 ## [4.4.0] - 2026-11-17
 
 ### New Features

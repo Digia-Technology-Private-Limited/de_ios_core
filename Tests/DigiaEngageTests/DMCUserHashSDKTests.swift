@@ -23,6 +23,16 @@ private final class UserContextRecorder: NetworkClient, @unchecked Sendable {
         return NetworkResponse(statusCode: 200, headers: [:], body: Data("{}".utf8), isSuccessful: true)
     }
 
+    func executeCapped(request: NetworkRequest, maxBytes: Int) async throws -> NetworkResponse {
+        let response = try await execute(request: request)
+        guard let body = response.body, body.count > maxBytes else { return response }
+        return NetworkResponse(
+            statusCode: response.statusCode,
+            headers: response.headers,
+            body: Data(body.prefix(maxBytes + 1)),
+            isSuccessful: response.isSuccessful)
+    }
+
     func executeMultipart(request: MultipartUploadRequest) async throws -> NetworkResponse {
         NetworkResponse(statusCode: 200, headers: [:], body: nil, isSuccessful: true)
     }
@@ -41,10 +51,10 @@ struct DMCUserHashSDKTests {
     private let network = UserContextRecorder()
 
     private func makeSDK() -> SDKInstance {
-        SDKInstance(
+        { let instance = SDKInstance(
             defaults: UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!,
             legacyDefaults: UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!,
-            makeNetworkClient: { [network] _ in network })
+            makeNetworkClient: { [network] _ in network }); instance.onHostMounted(SDKInstance.testHostId); return instance }()
     }
 
     private func initialize(_ sdk: SDKInstance) async throws {

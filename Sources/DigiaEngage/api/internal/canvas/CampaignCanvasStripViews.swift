@@ -60,7 +60,7 @@ func canvasColor(_ color: CampaignColor?, _ isDark: Bool, _ fallback: Color) -> 
 
 /// The story's media — a still or a looping clip — drawn to fill its box.
 ///
-/// Images go through the same `WebImage` the canvas image widget uses, so a
+/// Images go through the same `MediaImage` the canvas image widget uses, so a
 /// story card and an image widget cache and decode identically.
 struct CampaignCanvasRemoteMedia: View {
     let url: String

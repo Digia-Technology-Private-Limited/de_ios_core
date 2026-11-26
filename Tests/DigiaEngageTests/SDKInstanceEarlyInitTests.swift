@@ -11,11 +11,11 @@ import Testing
 struct SDKInstanceEarlyInitTests {
 
     private func makeInstance(network: HeldBundleNetworkClient) -> SDKInstance {
-        SDKInstance(
+        { let instance = SDKInstance(
             defaults: UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!,
             legacyDefaults: UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!,
             makeNetworkClient: { _ in network }
-        )
+        ); instance.onHostMounted(SDKInstance.testHostId); return instance }()
     }
 
     private func deliver(_ sdk: SDKInstance, _ campaignKey: String) -> PresentationRecorder {
@@ -334,6 +334,16 @@ final class HeldBundleNetworkClient: NetworkClient, @unchecked Sendable {
                 lock.unlock()
             }
         }
+    }
+
+    func executeCapped(request: NetworkRequest, maxBytes: Int) async throws -> NetworkResponse {
+        let response = try await execute(request: request)
+        guard let body = response.body, body.count > maxBytes else { return response }
+        return NetworkResponse(
+            statusCode: response.statusCode,
+            headers: response.headers,
+            body: Data(body.prefix(maxBytes + 1)),
+            isSuccessful: response.isSuccessful)
     }
 
     func executeMultipart(request: MultipartUploadRequest) async throws -> NetworkResponse {
