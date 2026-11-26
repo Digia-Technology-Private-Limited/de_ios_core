@@ -54,7 +54,7 @@ struct CanvasSurveyAnswerValidator {
     ) -> String? {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return "This field is required" }
-        if let minLength, value.count < minLength { return "Enter at least \(minLength) characters" }
+        if let minLength, trimmed.count < minLength { return "Enter at least \(minLength) characters" }
         if let maxLength, value.count > maxLength { return "Enter at most \(maxLength) characters" }
         if type == .number {
             guard let parsed = Double(trimmed) else { return "Enter a valid number" }
