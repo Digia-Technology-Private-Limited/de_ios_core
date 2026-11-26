@@ -136,6 +136,8 @@ enum CanvasSurveyConfigParser {
             backgroundColor: "",
             numberMin: nil,
             numberMax: nil,
+            scaleMin: nil,
+            scaleMax: nil,
             showWhen: nil
         )
     }
@@ -181,8 +183,18 @@ enum CanvasSurveyConfigParser {
             backgroundColor: "",
             numberMin: input.flatMap { SurveyParse.double($0["minimum"]) },
             numberMax: input.flatMap { SurveyParse.double($0["maximum"]) },
+            scaleMin: isScaleType(type) ? input.flatMap { SurveyParse.double($0["minimum"]) } : nil,
+            scaleMax: isScaleType(type) ? input.flatMap { SurveyParse.double($0["maximum"]) } : nil,
             showWhen: nil
         )
+    }
+
+    /// Rating and NPS blocks are the ones with a numeric scale input.
+    private static func isScaleType(_ type: SurveyBlockType) -> Bool {
+        switch type {
+        case .rating, .nps, .npsEmoji, .npsSmiley: return true
+        default: return false
+        }
     }
 
     private static func inputStyle(
