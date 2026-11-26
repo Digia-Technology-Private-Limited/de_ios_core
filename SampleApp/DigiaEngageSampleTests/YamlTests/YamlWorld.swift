@@ -1066,6 +1066,11 @@ final class YamlNetworkFake: NetworkClient, @unchecked Sendable {
         return `default`(for: endpoint)
     }
 
+    /// The capped read is for gamification skin files; the fake answers it like `execute`.
+    func executeCapped(request: NetworkRequest, maxBytes: Int) async throws -> NetworkResponse {
+        try await execute(request: request)
+    }
+
     private func appendLog(_ entry: YamlRequest) {
         lock.withLock { log.append(entry) }
     }
