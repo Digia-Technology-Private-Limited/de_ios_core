@@ -27,6 +27,8 @@ struct FloaterMediaView: View {
             MediaVideo(
                 url: resolvedUrl,
                 fit: cover ? .cover : .contain,
+                thumbnailUrl: media.poster?.url,
+                blurHash: media.poster?.blurHash,
                 loop: media.loop,
                 muted: muted,
                 volume: media.volume,

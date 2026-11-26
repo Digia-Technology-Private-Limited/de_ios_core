@@ -481,6 +481,8 @@ private struct NudgeVideoView: View {
         MediaVideo(
             url: url,
             fit: node.boxFit.mediaFit,
+            thumbnailUrl: node.poster?.url,
+            blurHash: node.poster?.blurHash,
             loop: node.loop,
             muted: node.muted,
             autoplay: node.autoplay,

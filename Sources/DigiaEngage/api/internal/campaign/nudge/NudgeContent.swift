@@ -190,6 +190,7 @@ struct NudgeVideo: Equatable {
     let showControls: Bool
     let muted: Bool
     let boxFit: NudgeVideoFit
+    var poster: VideoPoster? = nil
 }
 
 enum NudgeVideoFit: Equatable {

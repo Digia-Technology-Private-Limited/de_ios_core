@@ -716,13 +716,14 @@ enum CampaignCanvasRendererRegistry {
         "video": { widget, dark, _ in
             guard
                 case .video(
-                    let box, let source, let autoplay, let loop, let muted, let controls, let fit) =
+                    let box, let source, let autoplay, let loop, let muted, let controls, let fit,
+                    let poster) =
                     widget
             else { return AnyView(EmptyView()) }
             return AnyView(
                 CanvasVideoRenderer(
                     box: box, source: source, autoplay: autoplay, loop: loop, muted: muted,
-                    showControls: controls, fit: fit, isDark: dark))
+                    showControls: controls, fit: fit, poster: poster, isDark: dark))
         },
         "container": { widget, dark, _ in
             guard case .container(let fill, let radius, let border, let shadow) = widget else {
@@ -1910,6 +1911,7 @@ private struct CanvasVideoRenderer: View {
     let muted: Bool
     let showControls: Bool
     let fit: String
+    var poster: VideoPoster? = nil
     let isDark: Bool
     @Environment(\.digiaVariables) private var variables
     @Environment(\.digiaCampaignKey) private var campaignKey
@@ -1931,6 +1933,8 @@ private struct CanvasVideoRenderer: View {
             MediaVideo(
                 url: url,
                 fit: fit == "contain" ? .contain : .cover,
+                thumbnailUrl: poster?.url,
+                blurHash: poster?.blurHash,
                 loop: loop,
                 muted: muted,
                 autoplay: autoplay,
