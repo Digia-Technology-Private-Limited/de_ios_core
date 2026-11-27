@@ -71,6 +71,11 @@ public final class DigiaHostView: UIView {
         guard HostRegistry.shared.isActive(hostId) else { return nil }
         let hit = hostedView.hitTest(convert(point, to: hostedView), with: event)
         let windowPoint = convert(point, to: nil)
+        // A guide whose `tapInsideBehavior` is `passThrough` leaves its cutout to the app: it is
+        // not a hit inside the SwiftUI layer, so this host must not claim it either.
+        if SDKInstance.shared.guideOrchestrator.tapInsidePassThroughRect?.contains(windowPoint) == true {
+            return nil
+        }
         let claimed =
             Digia.hasActiveOverlay
             || Digia.debugBadgeFrame?.contains(windowPoint) == true

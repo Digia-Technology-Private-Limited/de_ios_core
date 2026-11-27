@@ -504,6 +504,8 @@ struct CampaignModel: Equatable {
                     "outsideTapBehavior",
                     default: "next"
                 )
+                // Guide-wide, like `outsideTapBehavior`; absent or unknown stays inert.
+                widget["tapInsideBehavior"] = templateJson.string("tapInsideBehavior")
                 return widget
             }
         )

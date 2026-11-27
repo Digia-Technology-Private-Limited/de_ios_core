@@ -160,6 +160,22 @@ private struct GuideStepOverlay: View {
                 width: max(0, geo.size.width - safeAreaInsets.left - safeAreaInsets.right),
                 height: max(0, geo.size.height - safeAreaInsets.top - safeAreaInsets.bottom)
             )
+            // The cutout the scrim holes out: the anchor plus its padding, in this overlay's
+            // coordinate space.
+            let cutoutRadius: CGFloat = !isAnchorless
+                ? CGFloat(config.overlay.cutout.cornerRadius) * canvasScale
+                : cornerRadius
+            let spotlightHole: CGRect = {
+                guard isSpotlight else { return .zero }
+                let pad = isAnchorless ? 0 : CGFloat(config.overlay.cutout.padding) * canvasScale
+                return anchorRect.insetBy(dx: -pad, dy: -pad)
+            }()
+            let tapInside = config.tapInsideBehavior
+            // Window coordinates: what a UIKit host's `hitTest` compares a touch against.
+            let overlayOrigin = geo.frame(in: .global).origin
+            let passThroughRect: CGRect? = isSpotlight && tapInside == .passThrough
+                ? spotlightHole.offsetBy(dx: overlayOrigin.x, dy: overlayOrigin.y)
+                : nil
             let arrowSize = CGFloat(config.bubble.arrow.size)
             let arrowVisible = config.bubble.arrow.visible
             let gap = CGFloat(config.bubble.calloutGap) * canvasScale
@@ -223,15 +239,19 @@ private struct GuideStepOverlay: View {
                     GuideSpotlightScrim(
                         anchorRect: anchorRect,
                         cutout: config.overlay.cutout,
-                        cornerRadius: !isAnchorless
-                            ? CGFloat(config.overlay.cutout.cornerRadius) * canvasScale
-                            : cornerRadius,
+                        cornerRadius: cutoutRadius,
                         isAnchorless: isAnchorless,
                         geometryScale: canvasScale,
                         color: guideColor(config.overlay.color, fallback: .black),
                         alpha: config.overlay.alpha
                     )
-                    .contentShape(Rectangle())
+                    // `passThrough` leaves the cutout out of the scrim's hit area, so the tap
+                    // reaches the highlighted widget; `next` and `doNothing` keep it absorbed.
+                    .scrimHitArea(
+                        hole: tapInside == .passThrough ? spotlightHole : nil,
+                        shape: config.overlay.cutout.shape,
+                        cornerRadius: cutoutRadius
+                    )
                     .onTapGesture {
                         if isAnchorless {
                             if config.outsideTapBehavior == .next { onAdvance() }
@@ -271,7 +291,24 @@ private struct GuideStepOverlay: View {
                                 : cornerRadius
                         )
                     )
+                    // Decoration over the cutout: it must not swallow a `passThrough` tap.
+                    .allowsHitTesting(tapInside != .passThrough)
                     .position(x: anchorRect.midX, y: anchorRect.midY)
+                }
+
+                // `next` runs the outside-tap path on a tap inside the cutout. `doNothing`
+                // needs nothing here: the scrim already absorbs it, as before.
+                if isSpotlight, tapInside == .next, !spotlightHole.isEmpty {
+                    Color.clear
+                        .frame(width: spotlightHole.width, height: spotlightHole.height)
+                        .contentShape(
+                            GuideCutoutShape(
+                                shape: config.overlay.cutout.shape,
+                                cornerRadius: cutoutRadius
+                            )
+                        )
+                        .position(x: spotlightHole.midX, y: spotlightHole.midY)
+                        .onTapGesture { onOutsideTap() }
                 }
 
                 positionedBubble(
@@ -290,6 +327,11 @@ private struct GuideStepOverlay: View {
             .ignoresSafeArea()
             .opacity(isPresentationReady ? 1 : 0)
             .allowsHitTesting(isPresentationReady)
+            .onAppear { SDKInstance.shared.guideOrchestrator.tapInsidePassThroughRect = passThroughRect }
+            .onChange(of: passThroughRect) { rect in
+                SDKInstance.shared.guideOrchestrator.tapInsidePassThroughRect = rect
+            }
+            .onDisappear { SDKInstance.shared.guideOrchestrator.tapInsidePassThroughRect = nil }
         }
         .onAppear {
             if isPresentationReady { SDKInstance.shared.guideOrchestrator.reportGuideShown() }
@@ -672,6 +714,31 @@ private struct GuideSpotlightScrim: View {
                     )
                 }
             }
+        }
+    }
+}
+
+/// The scrim's whole area, or that area minus the cutout, for `tapInsideBehavior: passThrough`.
+private struct GuideScrimOutsideShape: Shape {
+    let hole: CGRect
+    let shape: String
+    let cornerRadius: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path(rect)
+        path.addPath(GuideCutoutShape(shape: shape, cornerRadius: cornerRadius).path(in: hole))
+        return path
+    }
+}
+
+private extension View {
+    /// The scrim hit area, with the cutout left out when `hole` is given (even-odd fill).
+    @ViewBuilder
+    func scrimHitArea(hole: CGRect?, shape: String, cornerRadius: CGFloat) -> some View {
+        if let hole {
+            contentShape(GuideScrimOutsideShape(hole: hole, shape: shape, cornerRadius: cornerRadius), eoFill: true)
+        } else {
+            contentShape(Rectangle())
         }
     }
 }

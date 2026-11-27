@@ -33,9 +33,16 @@ struct ActiveGuideState: Equatable {
 @MainActor
 final class GuideOrchestrator: ObservableObject {
     @Published private(set) var state: ActiveGuideState? {
-        didSet { onStateChanged?(state) }
+        didSet {
+            if state == nil { tapInsidePassThroughRect = nil }
+            onStateChanged?(state)
+        }
     }
     var onStateChanged: ((ActiveGuideState?) -> Void)?
+    /// The spotlight cutout a `tapInsideBehavior: passThrough` step lets taps through, in
+    /// window coordinates; `nil` when the cutout takes its own tap. Published by the
+    /// overlay as it draws, read by a UIKit host's `hitTest` so the touch reaches the app.
+    var tapInsidePassThroughRect: CGRect?
     private var tokenCounter: Int64 = 0
 
     /// Reporting context, set by `SDKInstance` at startup. Nil in standalone
