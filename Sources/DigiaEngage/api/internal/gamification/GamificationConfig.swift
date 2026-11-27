@@ -272,7 +272,8 @@ struct GamificationConfig: Equatable {
             return .inline(config)
         case .floating:
             var json = teaser
-            // `variables` / `contextVariables` sit on `templateConfig`; the entry resolves its text with them.
+            // The entry's `variables` / `contextVariables` sit beside the teaser on
+            // `templateConfig`, like the placement keys; without them its text resolves to "".
             for key in ["designWidth", "collapsed", "controls", "behavior", "variables", "contextVariables"]
             where json[key] == nil {
                 json[key] = templateConfig[key]
