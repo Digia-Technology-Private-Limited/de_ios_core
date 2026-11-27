@@ -5,23 +5,6 @@ enum GuideOutsideTapBehavior: String, Equatable {
     case nothing
 }
 
-/// What a tap on the highlighted cutout does (`tapInsideBehavior`, a sibling of
-/// `outsideTapBehavior` in the template). A missing or unknown value keeps the cutout
-/// inert, the behaviour before the field existed: it never drops the guide.
-enum GuideTapInsideBehavior: Equatable {
-    case passThrough
-    case next
-    case doNothing
-
-    init(wire: String?) {
-        switch wire?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
-        case "passthrough": self = .passThrough
-        case "next": self = .next
-        default: self = .doNothing
-        }
-    }
-}
-
 struct ArrowConfig: Equatable {
     let visible: Bool
     let preferredDirection: String
@@ -56,7 +39,6 @@ struct GuideStepWidgetConfig: Equatable {
     let bubble: BubbleConfig
     let overlay: OverlayConfig
     let outsideTapBehavior: GuideOutsideTapBehavior
-    let tapInsideBehavior: GuideTapInsideBehavior
     let layoutMode: String
     let canvas: CampaignCanvas?
 
@@ -111,7 +93,6 @@ struct GuideStepWidgetConfig: Equatable {
             outsideTapBehavior: GuideOutsideTapBehavior(
                 rawValue: json.string("outsideTapBehavior", default: "next")
             ) ?? .next,
-            tapInsideBehavior: GuideTapInsideBehavior(wire: json["tapInsideBehavior"] as? String),
             layoutMode: layoutMode,
             canvas: canvas
         )

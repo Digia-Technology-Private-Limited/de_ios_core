@@ -170,10 +170,11 @@ private struct GuideStepOverlay: View {
                 let pad = isAnchorless ? 0 : CGFloat(config.overlay.cutout.padding) * canvasScale
                 return anchorRect.insetBy(dx: -pad, dy: -pad)
             }()
-            let tapInside = config.tapInsideBehavior
+            let passThroughTap = step.passThroughTap
+            let advanceOnTap = step.advanceOnTap
             // Window coordinates: what a UIKit host's `hitTest` compares a touch against.
             let overlayOrigin = geo.frame(in: .global).origin
-            let passThroughRect: CGRect? = isSpotlight && tapInside == .passThrough
+            let passThroughRect: CGRect? = isSpotlight && passThroughTap
                 ? spotlightHole.offsetBy(dx: overlayOrigin.x, dy: overlayOrigin.y)
                 : nil
             let arrowSize = CGFloat(config.bubble.arrow.size)
@@ -245,10 +246,10 @@ private struct GuideStepOverlay: View {
                         color: guideColor(config.overlay.color, fallback: .black),
                         alpha: config.overlay.alpha
                     )
-                    // `passThrough` leaves the cutout out of the scrim's hit area, so the tap
-                    // reaches the highlighted widget; `next` and `doNothing` keep it absorbed.
+                    // `passThroughTap` leaves the cutout out of the scrim's hit area, so the tap
+                    // reaches the highlighted widget; otherwise the scrim absorbs it.
                     .scrimHitArea(
-                        hole: tapInside == .passThrough ? spotlightHole : nil,
+                        hole: passThroughTap ? spotlightHole : nil,
                         shape: config.overlay.cutout.shape,
                         cornerRadius: cutoutRadius
                     )
@@ -291,14 +292,14 @@ private struct GuideStepOverlay: View {
                                 : cornerRadius
                         )
                     )
-                    // Decoration over the cutout: it must not swallow a `passThrough` tap.
-                    .allowsHitTesting(tapInside != .passThrough)
+                    // Decoration over the cutout: it must not swallow a pass-through tap.
+                    .allowsHitTesting(!passThroughTap)
                     .position(x: anchorRect.midX, y: anchorRect.midY)
                 }
 
-                // `next` runs the outside-tap path on a tap inside the cutout. `doNothing`
-                // needs nothing here: the scrim already absorbs it, as before.
-                if isSpotlight, tapInside == .next, !spotlightHole.isEmpty {
+                // `advanceOnTap` without `passThroughTap`: the cutout absorbs the tap but runs
+                // the outside-tap path. With both, the observer below does it instead.
+                if isSpotlight, advanceOnTap, !passThroughTap, !spotlightHole.isEmpty {
                     Color.clear
                         .frame(width: spotlightHole.width, height: spotlightHole.height)
                         .contentShape(
@@ -309,6 +310,13 @@ private struct GuideStepOverlay: View {
                         )
                         .position(x: spotlightHole.midX, y: spotlightHole.midY)
                         .onTapGesture { onOutsideTap() }
+                }
+
+                // `advanceOnTap` with `passThroughTap`: the touch reaches the app and still
+                // advances, watched by a recognizer that never claims it.
+                if let passThroughRect, isPresentationReady, advanceOnTap {
+                    GuideCutoutTapObserver(windowRect: passThroughRect, onTap: onOutsideTap)
+                        .frame(width: 0, height: 0)
                 }
 
                 positionedBubble(
@@ -718,7 +726,7 @@ private struct GuideSpotlightScrim: View {
     }
 }
 
-/// The scrim's whole area, or that area minus the cutout, for `tapInsideBehavior: passThrough`.
+/// The scrim's whole area, or that area minus the cutout, for a step with `passThroughTap`.
 private struct GuideScrimOutsideShape: Shape {
     let hole: CGRect
     let shape: String
@@ -739,6 +747,96 @@ private extension View {
             contentShape(GuideScrimOutsideShape(hole: hole, shape: shape, cornerRadius: cornerRadius), eoFill: true)
         } else {
             contentShape(Rectangle())
+        }
+    }
+}
+
+/// Watches a tap inside a pass-through cutout without taking it, for a step with both
+/// `passThroughTap` and `advanceOnTap`: the recognizer is attached to the window, so no view has
+/// to be hit, and it neither cancels the app's touches nor delays their end.
+private struct GuideCutoutTapObserver: UIViewRepresentable {
+    let windowRect: CGRect
+    let onTap: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(windowRect: windowRect, onTap: onTap)
+    }
+
+    func makeUIView(context: Context) -> ObserverView {
+        let view = ObserverView()
+        view.isUserInteractionEnabled = false
+        view.onWindowChange = { [weak coordinator = context.coordinator] window in
+            coordinator?.attach(to: window)
+        }
+        return view
+    }
+
+    func updateUIView(_ uiView: ObserverView, context: Context) {
+        context.coordinator.windowRect = windowRect
+        context.coordinator.onTap = onTap
+        context.coordinator.attach(to: uiView.window)
+    }
+
+    static func dismantleUIView(_ uiView: ObserverView, coordinator: Coordinator) {
+        coordinator.detach()
+    }
+
+    final class ObserverView: UIView {
+        var onWindowChange: ((UIWindow?) -> Void)?
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            onWindowChange?(window)
+        }
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var windowRect: CGRect
+        var onTap: () -> Void
+        private weak var window: UIWindow?
+        private var recognizer: UITapGestureRecognizer?
+
+        init(windowRect: CGRect, onTap: @escaping () -> Void) {
+            self.windowRect = windowRect
+            self.onTap = onTap
+        }
+
+        func attach(to window: UIWindow?) {
+            guard let window, window !== self.window else { return }
+            detach()
+            let recognizer = UITapGestureRecognizer(target: self, action: #selector(handleTap))
+            recognizer.cancelsTouchesInView = false
+            recognizer.delaysTouchesEnded = false
+            recognizer.delegate = self
+            window.addGestureRecognizer(recognizer)
+            self.window = window
+            self.recognizer = recognizer
+        }
+
+        func detach() {
+            if let recognizer { window?.removeGestureRecognizer(recognizer) }
+            recognizer = nil
+            window = nil
+        }
+
+        @objc private func handleTap(_ recognizer: UITapGestureRecognizer) {
+            guard let view = recognizer.view, windowRect.contains(recognizer.location(in: view)) else { return }
+            onTap()
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            guard let view = gestureRecognizer.view else { return false }
+            return windowRect.contains(touch.location(in: view))
+        }
+
+        /// The app's own control may recognize the same tap; both must run, because this one only
+        /// observes it and never claims the touch.
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
+        ) -> Bool {
+            true
         }
     }
 }

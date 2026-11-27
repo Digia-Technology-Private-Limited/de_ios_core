@@ -39,9 +39,9 @@ final class GuideOrchestrator: ObservableObject {
         }
     }
     var onStateChanged: ((ActiveGuideState?) -> Void)?
-    /// The spotlight cutout a `tapInsideBehavior: passThrough` step lets taps through, in
-    /// window coordinates; `nil` when the cutout takes its own tap. Published by the
-    /// overlay as it draws, read by a UIKit host's `hitTest` so the touch reaches the app.
+    /// The spotlight cutout of a step that lets taps through (`passThroughTap`), in window
+    /// coordinates; `nil` when the cutout takes its own tap. Published by the overlay as it
+    /// draws, read by a UIKit host's `hitTest` so the touch reaches the app.
     var tapInsidePassThroughRect: CGRect?
     private var tokenCounter: Int64 = 0
 
