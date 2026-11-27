@@ -168,9 +168,7 @@ final class FloaterOrchestrator: ObservableObject {
 
     /// `true` while another campaign or a host modal covers the window. Playback
     /// pauses (if configured) and visible-time accounting stops, but the floater is
-    /// not dismissed. Not currently driven by any caller in this build — `setObscured`
-    /// exists for parity with the Flutter/Android source and is ready for a future
-    /// modal-coverage signal.
+    /// not dismissed. Driven by `SDKInstance.syncFloatersObscured`.
     private var obscured = false
     private var mediaEnded = false
     private var tokenCounter: Int64 = 0

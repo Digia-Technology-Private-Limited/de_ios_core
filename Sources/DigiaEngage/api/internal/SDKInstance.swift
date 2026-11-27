@@ -416,6 +416,16 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
         floaterOrchestrator.isCoveredByBlockingCampaign = coveredByBlocking
         floaterStoryOrchestrator.isCoveredByBlockingCampaign = coveredByBlocking
+        // A collapsed floater sits in an overlay above a nudge route, so nothing
+        // hides it for us the way a pushed route would: mark it obscured while a
+        // nudge, survey or guide is an occupant. `objectWillChange` fires before
+        // the new value lands, so read the state on the next main-queue turn —
+        // the "notified after the change" timing Flutter's ChangeNotifier gives.
+        controller.objectWillChange
+            .merge(with: surveyOrchestrator.objectWillChange, guideOrchestrator.objectWillChange)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in self?.syncFloatersObscured() }
+            .store(in: &cancellables)
         // The rewards views observe this instance, so the orchestrator's
         // updates are forwarded.
         gamification.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }
@@ -447,6 +457,16 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 self?.appWillEnterForeground()
             }
         }
+    }
+
+    /// Marks the floaters obscured while a nudge, survey or guide is an
+    /// occupant, so none is drawn under it or can be expanded beneath it.
+    /// Mirrors Flutter's `SDKInstance._syncFloatersObscured`.
+    private func syncFloatersObscured() {
+        let blocked = controller.activeNudge != nil || surveyOrchestrator.state != nil
+            || guideOrchestrator.state != nil
+        floaterOrchestrator.setObscured(blocked)
+        floaterStoryOrchestrator.setObscured(blocked)
     }
 
     /// How long `initialize()` may keep its caller waiting, measured from the call
