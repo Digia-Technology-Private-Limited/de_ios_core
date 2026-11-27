@@ -136,7 +136,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     private(set) var campaignsSuppressed = false
     var activeExternalGuide: ExternalGuide?
     private var screenUpdateRevision = 0
-    private var captureInFlight = false
+    /// Read by the YAML driver to await a capture; written only here.
+    /// Test-only readability, default behaviour unchanged.
+    private(set) var captureInFlight = false
     /// The design tokens the current campaign bundle was parsed with.
     ///
     /// Held because live test parses a campaign that never came through the
@@ -206,6 +208,14 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
 
     /// The clock waits are stored on. A seam so a test can move time by hand.
     var waitClock: () -> Int = MonotonicClock.nowMs
+    /// Test seam: device facts (`platform`, `os_version`, `app_version`,
+    /// `locale`) a test pins over the phone's own, as Flutter's
+    /// `staticContextForTesting` does. Always nil in a shipped app.
+    var deviceFactsForTesting: [String: Any]?
+
+    /// Test-only override for the 1 s pre-capture settle delay in `captureCurrentPage`.
+    /// Always nil in a shipped app (uses real `Task.sleep`).
+    var captureDelaySleepForTesting: ((UInt64) async throws -> Void)?
     /// The process started in the background, so `app_opened` waits for the
     /// first return to the foreground.
     var appOpenedDue = false
@@ -215,8 +225,11 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     var selfTriggerCount = 0
     private let defaults: UserDefaults
     private let legacyDefaults: UserDefaults
-    /// The session clock handed to `SDKServices`. Only tests replace it.
-    private let clock: () -> Int64
+    /// The wall clock handed to `SDKServices` (session timeout, frequency
+    /// windows, user-context expiry). Only tests replace it: settable so a
+    /// hosted test on `shared` can move time by hand before `initialize`,
+    /// mirroring Flutter's `SdkHarness.clock`. Production keeps the default.
+    var clock: () -> Int64
 
     let controller = DigiaOverlayController()
     let inlineController = InlineCampaignController()
@@ -403,6 +416,16 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
         floaterOrchestrator.isCoveredByBlockingCampaign = coveredByBlocking
         floaterStoryOrchestrator.isCoveredByBlockingCampaign = coveredByBlocking
+        // A collapsed floater sits in an overlay above a nudge route, so nothing
+        // hides it for us the way a pushed route would: mark it obscured while a
+        // nudge, survey or guide is an occupant. `objectWillChange` fires before
+        // the new value lands, so read the state on the next main-queue turn —
+        // the "notified after the change" timing Flutter's ChangeNotifier gives.
+        controller.objectWillChange
+            .merge(with: surveyOrchestrator.objectWillChange, guideOrchestrator.objectWillChange)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in self?.syncFloatersObscured() }
+            .store(in: &cancellables)
         // The rewards views observe this instance, so the orchestrator's
         // updates are forwarded.
         gamification.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }
@@ -434,6 +457,16 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 self?.appWillEnterForeground()
             }
         }
+    }
+
+    /// Marks the floaters obscured while a nudge, survey or guide is an
+    /// occupant, so none is drawn under it or can be expanded beneath it.
+    /// Mirrors Flutter's `SDKInstance._syncFloatersObscured`.
+    private func syncFloatersObscured() {
+        let blocked = controller.activeNudge != nil || surveyOrchestrator.state != nil
+            || guideOrchestrator.state != nil
+        floaterOrchestrator.setObscured(blocked)
+        floaterStoryOrchestrator.setObscured(blocked)
     }
 
     /// How long `initialize()` may keep its caller waiting, measured from the call
@@ -1196,7 +1229,11 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 captureInFlight = false
                 if wasVisible { debugOverlayController.setVisible(true) }
             }
+            if let sleep = captureDelaySleepForTesting {
+            try? await sleep(1_000_000_000)
+        } else {
             try? await Task.sleep(nanoseconds: 1_000_000_000)
+        }
 
             let profile = CaptureProfile(
                 includeText: captureTextEnabled,
@@ -1272,7 +1309,11 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             captureInFlight = false
             if wasVisible { debugOverlayController.setVisible(true) }
         }
-        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        if let sleep = captureDelaySleepForTesting {
+            try? await sleep(1_000_000_000)
+        } else {
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+        }
 
         let profile = CaptureProfile(
             includeText: includeText,
@@ -2427,6 +2468,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             coordinator.detach(owner: plugin.id)
             plugin.detach()
         }
+        coordinator.noteAppEnteredForeground()
         activePlugin = nil
         pendingAttach = nil
         _currentScreen = nil
@@ -2510,14 +2552,12 @@ struct CaptureDebugPage: Identifiable {
 // MARK: - Survey config metrics (Engage matrix props)
 
 extension SurveyConfigModel {
-    /// Configured questions = graph nodes whose block is an actual prompt (not
-    /// content chrome like welcome / text-media / result pages).
-    var questionCount: Int {
-        nodes.filter { node in
-            guard let block = blockFor(node) else { return false }
-            return !block.type.isContent
-        }.count
-    }
+    /// Every graph node, including content chrome (text-media / result pages).
+    /// Event `item_total` counts the whole showing, not just its prompts —
+    /// the submission's `totalCount` is the prompts-only count
+    /// (testkit/sdk-tests `SURVEY-COVERAGE-PLAN.md` B12; Flutter counts
+    /// `config.nodes.length`, Android tracks the same under F21).
+    var itemTotal: Int { nodes.count }
 
     var hasWelcome: Bool { welcomeBlock() != nil }
 

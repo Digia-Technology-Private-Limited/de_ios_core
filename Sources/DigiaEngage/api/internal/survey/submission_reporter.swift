@@ -56,7 +56,7 @@ final class SubmissionReporter: @unchecked Sendable {
             survey: survey,
             answers: answers,
             startedAt: startedAt,
-            now: Date(),
+            now: SurveyClock.now(),
             userId: userId,
             sessionId: sessionIdProvider()
         )
@@ -156,26 +156,27 @@ final class SubmissionReporter: @unchecked Sendable {
             "title": block.title.text,
         ]
 
-        switch block.type {
-        case .nps, .rating, .number:
+        if block.type == .nps || block.type == .rating || block.type == .number {
             if let n = answer.asNumber() {
                 if n.rounded() == n { obj["value"] = Int(n) } else { obj["value"] = n }
             } else {
                 obj["value"] = answer.values.first ?? ""
             }
-        case .multiSelect, .tierList, .upvote:
+        } else if block.type.isMultiSelect {
             obj["value"] = answer.values
             let labels = answer.values.compactMap { id in
                 block.options.first(where: { $0.id == id })?.label
             }
             if !labels.isEmpty { obj["valueLabel"] = labels }
-        case .singleSelect, .reaction, .thisOrThat:
+        } else if block.type.isChoice {
+            // Single-pick blocks — upvote included — submit one scalar value and
+            // one scalar label, as Android and Flutter do.
             let v = answer.values.first ?? ""
             obj["value"] = v
             if let label = block.options.first(where: { $0.id == v })?.label {
                 obj["valueLabel"] = label
             }
-        default:
+        } else {
             obj["value"] = answer.values.first ?? ""
         }
 

@@ -15,19 +15,18 @@
 		D10000000000000000000025 /* GoldenFonts.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000015 /* GoldenFonts.swift */; };
 		D10000000000000000000026 /* GoldenScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000016 /* GoldenScreen.swift */; };
 		D10000000000000000000003 /* SnapshotTesting in Frameworks */ = {isa = PBXBuildFile; productRef = D10000000000000000000002 /* SnapshotTesting */; };
+		D10000000000000000000032 /* Yams in Frameworks */ = {isa = PBXBuildFile; productRef = D10000000000000000000031 /* Yams */; };
 		F20000000000000000000100 /* MockNetworkClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000100 /* MockNetworkClient.swift */; };
 		F20000000000000000000101 /* SdkHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000101 /* SdkHarness.swift */; };
 		F20000000000000000000105 /* FloaterBehaviourSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000105 /* FloaterBehaviourSupport.swift */; };
 		F20000000000000000000106 /* InlineBehaviourSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000106 /* InlineBehaviourSupport.swift */; };
 		F20000000000000000000107 /* LegacySupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000107 /* LegacySupport.swift */; };
-		F20000000000000000000108 /* GuideAnchorsScreenSG.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000108 /* GuideAnchorsScreenSG.swift */; };
 		F20000000000000000000109 /* SurveyGuideSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000109 /* SurveyGuideSupport.swift */; };
 		F20000000000000000000110 /* SurveyCanvasSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000110 /* SurveyCanvasSupport.swift */; };
 		F20000000000000000000111 /* WorkspaceFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000111 /* WorkspaceFixtures.swift */; };
 		F20000000000000000000112 /* StubBackend.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000112 /* StubBackend.swift */; };
 		F20000000000000000000113 /* SdkHarness+Fixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000113 /* SdkHarness+Fixtures.swift */; };
 		F20000000000000000000114 /* CampaignBehaviour.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000114 /* CampaignBehaviour.swift */; };
-		F20000000000000000000115 /* GuideHostScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000115 /* GuideHostScreen.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -54,14 +53,12 @@
 		F10000000000000000000105 /* FloaterBehaviourSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixtureBehaviour/FloaterBehaviourSupport.swift; sourceTree = "<group>"; };
 		F10000000000000000000106 /* InlineBehaviourSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixtureBehaviour/InlineBehaviourSupport.swift; sourceTree = "<group>"; };
 		F10000000000000000000107 /* LegacySupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixtureBehaviour/LegacySupport.swift; sourceTree = "<group>"; };
-		F10000000000000000000108 /* GuideAnchorsScreenSG.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixtureBehaviour/GuideAnchorsScreenSG.swift; sourceTree = "<group>"; };
 		F10000000000000000000109 /* SurveyGuideSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixtureBehaviour/SurveyGuideSupport.swift; sourceTree = "<group>"; };
 		F10000000000000000000110 /* SurveyCanvasSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixtureBehaviour/SurveyCanvasSupport.swift; sourceTree = "<group>"; };
 		F10000000000000000000111 /* WorkspaceFixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampaignBehaviour/Support/WorkspaceFixtures.swift; sourceTree = "<group>"; };
 		F10000000000000000000112 /* StubBackend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampaignBehaviour/Support/StubBackend.swift; sourceTree = "<group>"; };
 		F10000000000000000000113 /* SdkHarness+Fixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CampaignBehaviour/Support/SdkHarness+Fixtures.swift"; sourceTree = "<group>"; };
 		F10000000000000000000114 /* CampaignBehaviour.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampaignBehaviour/Support/CampaignBehaviour.swift; sourceTree = "<group>"; };
-		F10000000000000000000115 /* GuideHostScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Support/GuideHostScreen.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -105,6 +102,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				D10000000000000000000003 /* SnapshotTesting in Frameworks */,
+				D10000000000000000000032 /* Yams in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -138,14 +136,12 @@
 				F10000000000000000000105 /* FloaterBehaviourSupport.swift */,
 				F10000000000000000000106 /* InlineBehaviourSupport.swift */,
 				F10000000000000000000107 /* LegacySupport.swift */,
-				F10000000000000000000108 /* GuideAnchorsScreenSG.swift */,
 				F10000000000000000000109 /* SurveyGuideSupport.swift */,
 				F10000000000000000000110 /* SurveyCanvasSupport.swift */,
 				F10000000000000000000111 /* WorkspaceFixtures.swift */,
 				F10000000000000000000112 /* StubBackend.swift */,
 				F10000000000000000000113 /* SdkHarness+Fixtures.swift */,
 				F10000000000000000000114 /* CampaignBehaviour.swift */,
-				F10000000000000000000115 /* GuideHostScreen.swift */,
 				D10000000000000000000011 /* ComponentTestHost.swift */,
 				D10000000000000000000012 /* FixtureLoader.swift */,
 				D10000000000000000000013 /* SnapshotTestingExtensions.swift */,
@@ -204,6 +200,7 @@
 			name = DigiaEngageSampleTests;
 			packageProductDependencies = (
 				D10000000000000000000002 /* SnapshotTesting */,
+				D10000000000000000000031 /* Yams */,
 			);
 			productName = DigiaEngageSampleTests;
 			productReference = C10000000000000000000001 /* DigiaEngageSampleTests.xctest */;
@@ -240,6 +237,7 @@
 			packageReferences = (
 				B10300000000000000000001 /* XCLocalSwiftPackageReference ".." */,
 				D10000000000000000000001 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */,
+				D10000000000000000000030 /* XCRemoteSwiftPackageReference "Yams" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = A10000000000000000000007 /* Products */;
@@ -286,14 +284,12 @@
 				F20000000000000000000105 /* FloaterBehaviourSupport.swift in Sources */,
 				F20000000000000000000106 /* InlineBehaviourSupport.swift in Sources */,
 				F20000000000000000000107 /* LegacySupport.swift in Sources */,
-				F20000000000000000000108 /* GuideAnchorsScreenSG.swift in Sources */,
 				F20000000000000000000109 /* SurveyGuideSupport.swift in Sources */,
 				F20000000000000000000110 /* SurveyCanvasSupport.swift in Sources */,
 				F20000000000000000000111 /* WorkspaceFixtures.swift in Sources */,
 				F20000000000000000000112 /* StubBackend.swift in Sources */,
 				F20000000000000000000113 /* SdkHarness+Fixtures.swift in Sources */,
 				F20000000000000000000114 /* CampaignBehaviour.swift in Sources */,
-				F20000000000000000000115 /* GuideHostScreen.swift in Sources */,
 				D10000000000000000000021 /* ComponentTestHost.swift in Sources */,
 				D10000000000000000000022 /* FixtureLoader.swift in Sources */,
 				D10000000000000000000023 /* SnapshotTestingExtensions.swift in Sources */,
@@ -583,6 +579,14 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		D10000000000000000000030 /* XCRemoteSwiftPackageReference "Yams" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/jpsim/Yams.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 5.4.0;
+			};
+		};
 		D10000000000000000000001 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/pointfreeco/swift-snapshot-testing.git";
@@ -598,6 +602,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = B10300000000000000000001 /* XCLocalSwiftPackageReference ".." */;
 			productName = DigiaEngage;
+		};
+		D10000000000000000000031 /* Yams */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D10000000000000000000030 /* XCRemoteSwiftPackageReference "Yams" */;
+			productName = Yams;
 		};
 		D10000000000000000000002 /* SnapshotTesting */ = {
 			isa = XCSwiftPackageProductDependency;

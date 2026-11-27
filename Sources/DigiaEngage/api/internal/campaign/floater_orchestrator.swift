@@ -76,13 +76,23 @@ enum FloaterDismissReason: Equatable {
         case .userClose: return .userClose
         case .ctaTaken: return .ctaAction
         case .screenExit: return .screenExit
-        case .autoTimeout, .mediaEnd: return .autoTimeout
+        case .autoTimeout: return .autoTimeout
+        case .mediaEnd: return .completed
         case .invalidated, .hostTeardown: return .cancelled
-        case .sessionEnd: return .screenExit
+        // A session that ended under a floater is a timeout by another name:
+        // nothing closed it, its time simply ran out. (Dead today — no caller
+        // emits `.sessionEnd` — unified with Android/Flutter regardless.)
+        case .sessionEnd: return .autoTimeout
         case .superseded: return .superseded
         case .completed: return .completed
         }
     }
+
+    /// Whether the showing reached its authored end: only a media end
+    /// completes. Mirrors Android's `FloaterDismissReason.completed` and
+    /// Flutter's `PipDismissReason.completed` — the CEP hears `completed`
+    /// with `completed: true`, and dashboards read the completed flag.
+    var completed: Bool { self == .mediaEnd }
 }
 
 struct FloaterMetrics: Equatable {
@@ -158,9 +168,7 @@ final class FloaterOrchestrator: ObservableObject {
 
     /// `true` while another campaign or a host modal covers the window. Playback
     /// pauses (if configured) and visible-time accounting stops, but the floater is
-    /// not dismissed. Not currently driven by any caller in this build — `setObscured`
-    /// exists for parity with the Flutter/Android source and is ready for a future
-    /// modal-coverage signal.
+    /// not dismissed. Driven by `SDKInstance.syncFloatersObscured`.
     private var obscured = false
     private var mediaEnded = false
     private var tokenCounter: Int64 = 0
@@ -179,6 +187,11 @@ final class FloaterOrchestrator: ObservableObject {
     private var autoDismissTask: Task<Void, Never>?
     private var exitTask: Task<Void, Never>?
     private var mediaReadyTask: Task<Void, Never>?
+    /// Test seam: how the auto-dismiss waits out its delay, in nanoseconds.
+    /// `nil` (always, in a shipped app) sleeps on the real clock. Tests set a
+    /// fake clock so they can move time and fire the timer instantly, like
+    /// `DigiaOverlayController.autoDismissSleepForTesting`.
+    static var autoDismissSleepForTesting: ((UInt64) async throws -> Void)?
     private(set) var lastStartFailureReason: String?
     /// `true` when the last start failed only because a floater already shows.
     private(set) var lastStartFailedBusy = false
@@ -273,14 +286,19 @@ final class FloaterOrchestrator: ObservableObject {
         // back to false afterwards.
         awaitingMedia = true
         prepareMedia(active)
-        // prepareMedia can give up synchronously — an unusable URL. The campaign
-        // never ran and there will be no terminal event, so report the drop rather
-        // than claim acceptance and leave the CEP holding its in-app slot forever.
-        let accepted = state?.token == active.token
-        if !accepted, lastStartFailureReason == nil {
-            lastStartFailureReason = "media was abandoned synchronously"
-        }
-        return accepted
+        if state?.token == active.token { return true }
+        // prepareMedia abandoned synchronously for an unusable URL. That path
+        // already ended the showing through the dismissal callback, which
+        // settled dropped/cancelled — the campaign was accepted and ended at
+        // once, so return acceptance and let that verdict stand rather than
+        // covering it with invalid_config (#245). `abandonMedia` is the only
+        // synchronous path that clears `state`, so a set failure reason means
+        // it ran.
+        if lastStartFailureReason != nil { return true }
+        // No terminal event ran: refusing is the only honest answer, or the
+        // CEP would hold its slot for a campaign that never ends.
+        lastStartFailureReason = "media was abandoned synchronously"
+        return false
     }
 
     /// The media is ready to paint. Idempotent — only the first call counts. `token`
@@ -500,7 +518,13 @@ final class FloaterOrchestrator: ObservableObject {
         autoDismissTask = nil
         guard let afterMs = state?.config.behavior.autoDismissAfterMs, surface != .expanded else { return }
         autoDismissTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(afterMs) * 1_000_000)
+            do {
+                if let sleep = Self.autoDismissSleepForTesting {
+                    try await sleep(UInt64(afterMs) * 1_000_000)
+                } else {
+                    try await Task.sleep(nanoseconds: UInt64(afterMs) * 1_000_000)
+                }
+            } catch { return }
             guard !Task.isCancelled else { return }
             self?.dismiss(.autoTimeout)
         }
@@ -640,7 +664,7 @@ final class FloaterOrchestrator: ObservableObject {
         let exit = active.config.collapsed.exitAnimation
         // Full screen fills the display, so animating it "out" to nothing looks like
         // a glitch — only the small window gets an exit.
-        let animates = exit.type != .none && surface == .collapsed && !obscured
+        let animates = exit.type != .none && surface == .collapsed && !obscured && !Self.disableExitAnimationForTesting
         guard animates else {
             finishDismiss()
             return
@@ -654,6 +678,9 @@ final class FloaterOrchestrator: ObservableObject {
             self?.finishDismiss()
         }
     }
+
+    /// Test-only: skip exit/expand animation sleeps so tests don't wait on wall-clock transitions.
+    static var disableExitAnimationForTesting = false
 
     private func finishDismiss() {
         exitTask?.cancel()

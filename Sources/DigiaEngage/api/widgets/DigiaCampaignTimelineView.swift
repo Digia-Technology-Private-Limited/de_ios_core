@@ -22,28 +22,86 @@ import SwiftUI
 /// platform note: Dart's twin is `DigiaCampaignTimelineScreen`.
 @MainActor
 struct DigiaCampaignTimelineView: View {
+    @Environment(\.dismiss) private var dismiss
     @ObservedObject private var timeline = ScreenSink.shared
 
     var body: some View {
         // `revision` is read so the view depends on it explicitly — the sink
         // bumps it on the next main-queue turn after a record lands, never
         // inline, so nothing here can be asked to rebuild mid-frame.
+        //
+        // The header below is in-content (a fixed 56pt row with its own back
+        // affordance), never the host navigation bar, so this screen looks
+        // identical no matter which host presents it. The host bar is hidden
+        // for this screen only — no global appearance is touched.
         let entries = TimelineEntry.group(timeline.snapshot(), revision: timeline.revision)
-        return Group {
-            if entries.isEmpty {
-                emptyState
-            } else {
-                List(entries) { entry in
-                    if entry.isDelivery {
-                        deliveryCard(entry.records)
-                    } else if let record = entry.records.first {
-                        flatRow(record)
+        return VStack(spacing: 0) {
+            header
+            Group {
+                if entries.isEmpty {
+                    emptyState
+                } else {
+                    // A plain stack of full-width rows with explicit cards,
+                    // like both other stacks: no list cells, no dividers.
+                    ScrollView {
+                        LazyVStack(spacing: 4) {
+                            ForEach(entries) { entry in
+                                if entry.isDelivery {
+                                    deliveryCard(entry.records)
+                                } else if let record = entry.records.first {
+                                    flatRow(record)
+                                }
+                            }
+                        }
+                        .padding(.vertical, 8)
                     }
                 }
             }
         }
-        .navigationTitle("Campaign timeline")
-        .navigationBarTitleDisplayMode(.inline)
+        .background(Color(hex: "FFFFFF") ?? .white)
+        .navigationBarHidden(true)
+    }
+
+    /// The screen's own header: 56pt, white, hairline divider, back arrow and
+    /// title as content. Identical on every stack (see the PR body for the spec).
+    private var header: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Button(action: { dismiss() }) {
+                    // The back chevron, drawn rather than set in type: Roboto
+                    // (the shared test font, and many host fonts) has no
+                    // U+2190, which rendered as tofu on Flutter while this
+                    // stack fell back to a system arrow — three different
+                    // glyphs for one affordance. One stroked path is identical
+                    // everywhere: a left-pointing chevron, 12 wide x 20 tall,
+                    // centred in the 48x48 target, 2.5 stroke with round caps
+                    // and joins, ink 212121 like the title. Same geometry is
+                    // drawn by the Flutter and Android twins.
+                    Path { path in
+                        path.move(to: CGPoint(x: 30, y: 14))
+                        path.addLine(to: CGPoint(x: 18, y: 24))
+                        path.addLine(to: CGPoint(x: 30, y: 34))
+                    }
+                    .stroke(
+                        Color(hex: "212121") ?? .primary,
+                        style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round)
+                    )
+                    .frame(width: 48, height: 48)
+                }
+                .accessibilityLabel("Back")
+                Text("Campaign timeline")
+                    .font(digiaFont(size: 20, weight: 600))
+                    .foregroundColor(Color(hex: "212121") ?? .primary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .frame(height: 56)
+            .padding(.leading, 4)
+            .padding(.trailing, 16)
+            (Color(hex: "E0E0E0") ?? .gray)
+                .frame(height: 1)
+        }
+        .background(Color(hex: "FFFFFF") ?? .white)
     }
 
     private var emptyState: some View {
@@ -53,48 +111,65 @@ struct DigiaCampaignTimelineView: View {
                 "Nothing recorded yet.\n\nUse the app as a user would. Anything Digia does "
                     + "with a campaign shows up here."
             )
+            .font(digiaFont(size: 14))
             .multilineTextAlignment(.center)
-            .foregroundColor(.secondary)
+            .foregroundColor(Color(hex: "757575") ?? .secondary)
             .padding(32)
             Spacer()
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     /// One showing of one campaign, its beats in the order they happened.
+    ///
+    /// An explicit flat card — full width minus the 12pt margin both stacks
+    /// use — with pinned colours, so it matches both other stacks exactly.
     private func deliveryCard(_ records: [TimelineRecord]) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(records.first?.campaignKey ?? "Campaign")
-                    .font(digiaFont(size: 15, weight: 600))
+                    .font(digiaFont(size: 14, weight: 600))
+                    .foregroundColor(Color(hex: "212121") ?? .primary)
                     .lineLimit(1)
                 Spacer()
                 Text(Self.clock(records.first?.timestamp ?? Date()))
                     .font(digiaFont(size: 12))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(Color(hex: "757575") ?? .secondary)
             }
             ForEach(Array(records.enumerated()), id: \.offset) { _, record in
                 HStack(alignment: .top, spacing: 10) {
                     dot(record.severity)
                     Text(Self.sentence(record))
-                        .font(digiaFont(size: 13))
+                        .font(digiaFont(size: 14))
+                        .foregroundColor(Color(hex: "212121") ?? .primary)
                     Spacer(minLength: 0)
                 }
+                .padding(.vertical, 2)
             }
         }
+        .padding(EdgeInsets(top: 10, leading: 12, bottom: 12, trailing: 12))
+        .background(Color(hex: "F5F5F5") ?? .white)
+        .cornerRadius(8)
+        .padding(.horizontal, 12)
         .padding(.vertical, 4)
     }
 
     /// A record that belongs to no delivery — the session, the fetch, a parse.
+    ///
+    /// A full-width plain row, no card and no dividers, like both stacks.
     private func flatRow(_ record: TimelineRecord) -> some View {
         HStack(alignment: .top, spacing: 10) {
             dot(record.severity)
             Text(Self.sentence(record))
-                .font(digiaFont(size: 13))
+                .font(digiaFont(size: 14))
+                .foregroundColor(Color(hex: "212121") ?? .primary)
             Spacer(minLength: 0)
             Text(Self.clock(record.timestamp))
                 .font(digiaFont(size: 12))
-                .foregroundColor(.secondary)
+                .foregroundColor(Color(hex: "757575") ?? .secondary)
         }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 6)
     }
 
     /// Severity as a colour, read before it is read as a word.
@@ -102,15 +177,15 @@ struct DigiaCampaignTimelineView: View {
         Circle()
             .fill(Self.color(severity))
             .frame(width: 8, height: 8)
-            .padding(.top, 5)
+            .padding(.top, 6)
     }
 
     private static func color(_ severity: DigiaLogSeverity) -> Color {
         switch severity {
-        case .error: return Color(red: 0.827, green: 0.184, blue: 0.184)
-        case .warn: return Color(red: 0.976, green: 0.659, blue: 0.145)
-        case .info: return Color(red: 0.098, green: 0.463, blue: 0.824)
-        case .debug: return Color(red: 0.620, green: 0.620, blue: 0.620)
+        case .error: return Color(hex: "D32F2F") ?? .red
+        case .warn: return Color(hex: "F9A825") ?? .orange
+        case .info: return Color(hex: "1976D2") ?? .blue
+        case .debug: return Color(hex: "9E9E9E") ?? .gray
         }
     }
 

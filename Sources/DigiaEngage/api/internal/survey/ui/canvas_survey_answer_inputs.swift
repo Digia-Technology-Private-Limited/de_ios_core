@@ -923,10 +923,26 @@ private struct ReactionScale: View {
                             .opacity(selected == nil || selected == value ? 1 : 0.45)
                     }
                     .buttonStyle(.plain)
+                    .reactionTestLabel(value)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         }
+    }
+}
+
+private extension View {
+    /// Debug builds only: the face's answer value ("1".."5") as its
+    /// accessibility label and identifier, so automated tests (testkit
+    /// `tapOn: { label: "3" }`) can find a face that shows no text. Release
+    /// builds are unchanged, like `TestView`.
+    @ViewBuilder
+    func reactionTestLabel(_ value: String) -> some View {
+        #if DEBUG
+        self.accessibilityLabel(value).accessibilityIdentifier(value)
+        #else
+        self
+        #endif
     }
 }
 

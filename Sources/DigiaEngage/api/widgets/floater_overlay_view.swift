@@ -303,6 +303,26 @@ private struct FloaterSessionView: View {
                     }
                 }
                 .frame(width: width, height: height)
+                // The window's own background, always opaque: the collapsed
+                // window shows it behind (or before) the video exactly like
+                // Flutter's `BoxDecoration color` and Android's `.background`
+                // do — a transparent collapsed window lets the host app show
+                // through the video area. Same rule as both: the expanded
+                // background color, else black. Ahead of `clipShape` so the
+                // rounded corners clip it.
+                .background(
+                    (config.expanded.backgroundColor.map {
+                        canvasTheme.color($0, isDark: isDark)
+                    } ?? .black)
+                    // The collapsed window must not claim touches: drags and
+                    // media taps belong to the interaction shield mounted
+                    // underneath it, and the chrome pills above it take their
+                    // own. The old transparent backing was untouchable by
+                    // rendering nothing; an opaque one hit-tests, so say so
+                    // explicitly. Expanded, the shield is gone and this must
+                    // keep blocking touches to the host app, as before.
+                    .allowsHitTesting(expanded)
+                )
                 .clipShape(ClampedRoundedRectangle(cornerRadius: cornerRadius))
                 // Flutter's `BoxShadow(color: Color(0x73000000), blurRadius: 24, offset:
                 // Offset(0, 8))`. Unlike Compose (no directly-offset drop-shadow modifier),
@@ -336,11 +356,6 @@ private struct FloaterSessionView: View {
                             lineWidth: (!expanded && config.collapsed.borderWidthDp > 0)
                                 ? config.collapsed.borderWidthDp : 0
                         )
-                )
-                .background(
-                    (config.expanded.backgroundColor.map { canvasTheme.color($0, isDark: isDark) }
-                        ?? .black)
-                        .opacity(expanded ? 1 : 0)
                 )
                 // Image/GIF/Lottie surfaces can be backed by library-owned render layers.
                 // Apply chrome as the final window overlay, with an explicit z-order, so the
@@ -393,9 +408,13 @@ private struct FloaterSessionView: View {
                 let willExpand = newSurface == .expanded
                 expandedContentVisible = false
                 if willExpand {
-                    let delay = Double(config.expanded.transitionMs) / 1000
-                    DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                        if orchestrator.surface == .expanded { expandedContentVisible = true }
+                    if FloaterOrchestrator.disableExitAnimationForTesting {
+                        expandedContentVisible = true
+                    } else {
+                        let delay = Double(config.expanded.transitionMs) / 1000
+                        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                            if orchestrator.surface == .expanded { expandedContentVisible = true }
+                        }
                     }
                 }
             }
@@ -1040,7 +1059,11 @@ private struct FloaterChromeView: View {
         let collapsedIconSize = config.controls.iconSize
         let collapsedMargin = config.controls.margin
         let showsProgress = config.controls.showProgress && config.media.kind.isPlayable
-        let bottomInset: CGFloat = showsProgress ? 8 : collapsedMargin.bottom
+        // Lifted clear of the progress bar so the two never overlap on a window
+        // this small: the authored bottom margin plus the bar's own 4pt, the same
+        // rule Flutter's `bottomInset` uses (`controlsMargin.bottom + 4`), so the
+        // chrome sits at the same height on every stack.
+        let bottomInset: CGFloat = showsProgress ? collapsedMargin.bottom + 4 : collapsedMargin.bottom
         let showsMute = config.controls.showMute && config.media.kind == .video
         let showsPlayPause = config.controls.showPlayPause && config.media.kind.isPlayable
 
@@ -1099,9 +1122,16 @@ private struct FloaterChromeView: View {
                     .padding(.bottom, bottomInset)
                 }
             }
-            .overlay {
+            .overlay(alignment: .bottom) {
                 if showsProgress {
                     FloaterProgressBarView(orchestrator: orchestrator)
+                        // The window border straddles the window's edge
+                        // (SwiftUI strokes centre on the path), so its inner
+                        // half would bury the bar's lower rows: lift the bar
+                        // above it, so the full 4pt reads exactly like
+                        // Flutter's, whose bar sits directly above its border
+                        // in the goldens.
+                        .padding(.bottom, config.collapsed.borderWidthDp / 2)
                 }
             }
     }
@@ -1410,16 +1440,19 @@ private struct FloaterProgressBarView: View {
     private let timer = Timer.publish(every: 0.2, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        VStack {
-            Spacer()
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Color.white.opacity(0.3)
-                    Color.white.opacity(0.9).frame(width: geo.size.width * fraction)
-                }
+        // Bottom-anchored explicitly (the overlay above requests it): a bare
+        // centred overlay sized this stack to its ideal size instead of the
+        // window's, so the bar never reached the bottom edge it belongs to.
+        // Geometry matches Flutter's indicator: a 4pt bar (its
+        // `LinearProgressIndicator` default height), white at 0.9 played over
+        // white at 0.3, full-bleed along the bottom edge.
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Color.white.opacity(0.3)
+                Color.white.opacity(0.9).frame(width: geo.size.width * fraction)
             }
-            .frame(height: 2)
         }
+        .frame(height: 4)
         .onReceive(timer) { _ in
             guard let player = orchestrator.player,
                 let duration = player.currentItem?.duration.seconds,

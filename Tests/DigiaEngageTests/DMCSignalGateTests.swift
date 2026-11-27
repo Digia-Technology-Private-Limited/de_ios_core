@@ -5,8 +5,7 @@ import Testing
 /// Port of Flutter `test/dmc_signal_gate_test.dart`.
 ///
 /// DMC spec R58: before the campaigns are ready every signal is held, replayed
-/// in arrival order with its original time, and dropped if loading fails or the
-/// app backgrounds first.
+/// in arrival order with its original time, and dropped if loading fails.
 @Suite("DMC signal gate")
 @MainActor
 struct DMCSignalGateTests {
@@ -57,7 +56,7 @@ struct DMCSignalGateTests {
     }
 
     // dmc-case: dmc.trigger.pre_ready_signals_replayed_then_cleared
-    @Test("held signals are gone when the app backgrounds before ready")
+    @Test("held signals are gone after an explicit drop")
     func dropHeld() {
         let harness = Harness()
         harness.gate.send(.appOpened)

@@ -33,7 +33,7 @@ struct StoryItemConfig: Equatable {
     var actions: [EngageAction] = []
 
     static func fromJson(_ json: [String: Any]) -> StoryItemConfig? {
-        guard let url = storyLiteral(json["url"]) as? String, !url.isEmpty else { return nil }
+        guard let url = json["url"] as? String, !url.isEmpty else { return nil }
         let ctaActionJson = json.object("ctaAction")
         let actions = ctaActionJson?["steps"] != nil
             ? EngageActionParser().parse(ctaActionJson)
@@ -82,14 +82,9 @@ struct StoryItemConfig: Equatable {
     }
 }
 
-/// Unwraps the dashboard's `{ "value": … }` property envelope.
-private func storyLiteral(_ raw: Any?) -> Any? {
-    if let map = raw as? [String: Any], let value = map["value"] { return storyLiteral(value) }
-    return raw
-}
-
+/// Accepts a JSON bool or the strings "true"/"false" (as Android's optBoolean does).
 private func storyBool(_ raw: Any?, default fallback: Bool) -> Bool {
-    switch storyLiteral(raw) {
+    switch raw {
     case let value as Bool: return value
     case let value as String:
         switch value.lowercased() {
@@ -221,7 +216,7 @@ struct StoryPreviewImageConfig: Equatable {
 
     static func fromJson(_ json: [String: Any]?) -> StoryPreviewImageConfig? {
         guard let json,
-              let url = storyLiteral(json["url"]) as? String,
+              let url = json["url"] as? String,
               !url.trimmingCharacters(in: .whitespaces).isEmpty
         else { return nil }
         func positive(_ key: String, _ fallback: Double, in map: [String: Any] = json) -> Double {

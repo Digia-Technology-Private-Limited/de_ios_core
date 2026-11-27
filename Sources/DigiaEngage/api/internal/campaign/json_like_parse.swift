@@ -85,8 +85,9 @@ extension Dictionary where Key == String, Value == Any {
     /// Array of non-blank strings.
     func stringArray(_ key: String) -> [String] {
         (self[key] as? [Any])?.compactMap { element -> String? in
-            guard let string = element as? String, !string.isEmpty else { return nil }
-            return string
+            guard let string = element as? String else { return nil }
+            let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
         } ?? []
     }
 }

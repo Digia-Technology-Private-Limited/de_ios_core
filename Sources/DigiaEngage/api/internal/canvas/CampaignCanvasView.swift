@@ -637,31 +637,33 @@ struct CampaignCanvasStage: View {
         }
         .frame(width: canvas.width, height: canvas.height, alignment: .topLeading)
         .clipShape(stageClipShape)
-        .fullScreenCover(
-            isPresented: Binding(
-                get: { storyOpenIndex != nil && story != nil },
-                set: { if !$0 { storyOpenIndex = nil } }
-            )
-        ) {
-            if case .story(
-                _, let pages, _, _, _, _, _, let restartOnCompleted, let startMuted, let chrome
-            ) = story, !pages.isEmpty {
-                CanvasStoryViewer(
-                    pages: pages,
-                    chrome: chrome,
-                    // Clamped rather than trusted: the authored number can outlive
-                    // the story it named if the author later deletes one.
-                    initialIndex: min(max(0, storyOpenIndex ?? 0), pages.count - 1),
-                    restartOnCompleted: restartOnCompleted,
-                    startMuted: startMuted,
-                    isDark: isDark,
-                    onAction: onAction,
-                    onDismiss: { storyOpenIndex = nil },
-                    safeAreaInsets: activeFloaterWindowSafeAreaInsets
+        .background(
+            CanvasStoryCoverPresenter(
+                isPresented: Binding(
+                    get: { storyOpenIndex != nil && story != nil },
+                    set: { if !$0 { storyOpenIndex = nil } }
                 )
-                .ignoresSafeArea()
+            ) {
+                if case .story(
+                    _, let pages, _, _, _, _, _, let restartOnCompleted, let startMuted, let chrome
+                ) = story, !pages.isEmpty {
+                    CanvasStoryViewer(
+                        pages: pages,
+                        chrome: chrome,
+                        // Clamped rather than trusted: the authored number can outlive
+                        // the story it named if the author later deletes one.
+                        initialIndex: min(max(0, storyOpenIndex ?? 0), pages.count - 1),
+                        restartOnCompleted: restartOnCompleted,
+                        startMuted: startMuted,
+                        isDark: isDark,
+                        onAction: onAction,
+                        onDismiss: { storyOpenIndex = nil },
+                        safeAreaInsets: activeFloaterWindowSafeAreaInsets
+                    )
+                    .ignoresSafeArea()
+                }
             }
-        }
+        )
     }
 }
 

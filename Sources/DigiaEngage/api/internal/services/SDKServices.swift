@@ -77,9 +77,12 @@ final class SDKServices {
         // `session` windows track the reported session.
         self.frequencyManager = FrequencyManager(
             storage: storage.scoped("frequency"),
-            sessionIdProvider: { [weak sessionManager] in sessionManager?.sessionId }
+            sessionIdProvider: { [weak sessionManager] in sessionManager?.sessionId },
+            // The session's wall clock, so a test that moves it moves cap windows too.
+            clock: clock
         )
-        self.userContextManager = UserContextManager(storage: storage.scoped("user"), networkClient: networkClient)
+        self.userContextManager = UserContextManager(
+            storage: storage.scoped("user"), networkClient: networkClient, nowMs: clock)
         let ac = config.analyticsConfig
         if ac.enabled {
             let analyticsConfig = DigiaEndpoints.isTestMode

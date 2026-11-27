@@ -34,7 +34,7 @@ final class SurveyReporter {
             state.payload,
             campaignKey: state.payload.campaignKey,
             viewed: SurveyEvent.Viewed(
-                itemTotal: state.config.questionCount,
+                itemTotal: state.config.itemTotal,
                 hasWelcome: state.config.hasWelcome,
                 hasThanks: state.config.hasThanks,
                 hasBranching: state.config.hasBranching,
@@ -69,7 +69,7 @@ final class SurveyReporter {
         guard let state = orchestrator.state else { return }
         guard let block = state.config.blockForNode(nodeId) else { return }
         if block.type.isContent { return }
-        questionViewedAt[Self.questionKey(token: state.token, nodeId: nodeId)] = Date()
+        questionViewedAt[Self.questionKey(token: state.token, nodeId: nodeId)] = SurveyClock.now()
         let typeWire = block.type.rawValue
         ctx.events.toDigia(
             SurveyEvent.QuestionViewed(
@@ -77,7 +77,7 @@ final class SurveyReporter {
                 questionTitle: Self.questionTitle(block),
                 questionType: typeWire,
                 itemIndex: itemIndex,
-                itemTotal: state.config.questionCount,
+                itemTotal: state.config.itemTotal,
                 blockType: typeWire,
                 blockId: block.id,
                 isRequired: block.required
@@ -112,7 +112,7 @@ final class SurveyReporter {
         let values = Self.stringArray(answer["values"])
         let viewedKey = Self.questionKey(token: state.token, nodeId: stepId)
         let timeToAnswerMs: Int64? = questionViewedAt[viewedKey].map {
-            Int64(Date().timeIntervalSince($0) * 1000)
+            Int64(SurveyClock.now().timeIntervalSince($0) * 1000)
         }
         questionViewedAt.removeValue(forKey: viewedKey)
         let scaleBounds = block.flatMap(Self.scaleBounds)
@@ -170,21 +170,17 @@ final class SurveyReporter {
 
         // Analytics "Completed" fires once per survey showing, regardless of
         // whether a submission is reported to the backend below.
-        let answeredCount = answers.isEmpty ? response.count : answers.count
+        let answeredCount = answers.isEmpty ? response.count : answers.values.filter { $0.isAnswered }.count
         ctx.events.toDigia(
             SurveyEvent.Completed(
-                itemTotal: state.config.questionCount,
+                itemTotal: state.config.itemTotal,
                 answeredCount: answeredCount,
-                timeToCompleteMs: Int64(Date().timeIntervalSince(state.startedAt) * 1000),
+                timeToCompleteMs: Int64(SurveyClock.now().timeIntervalSince(state.startedAt) * 1000),
                 response: Self.foundation(response)
             ),
             payload: state.payload
         )
 
-        if answers.isEmpty {
-            ctx.sdk.logVerbose("reportSurveyCompleted: skip submission — no answers")
-            return
-        }
         if isLiveTest {
             relayLiveTestSubmission(state: state, answers: answers)
             return
@@ -231,7 +227,7 @@ final class SurveyReporter {
             survey: state.config,
             answers: answers,
             startedAt: state.startedAt,
-            now: Date(),
+            now: SurveyClock.now(),
             userId: nil
         )
         guard let payload = body["payload"], let computed = body["computed"] else { return }
@@ -269,7 +265,7 @@ final class SurveyReporter {
             SurveyEvent.Dismissed(
                 dismissReason: reason.wire,
                 abandonedAtItem: completed ? nil : abandonedAtItem,
-                itemTotal: state.config.questionCount,
+                itemTotal: state.config.itemTotal,
                 answeredCount: answeredCount,
                 dwellMs: ctx.dwell.consumeDwellMs(state.payload.cepCampaignId)
             ),
@@ -319,14 +315,19 @@ final class SurveyReporter {
         return labels.joined(separator: ", ")
     }
 
-    /// Numeric scale bounds for scored blocks (Rating 1–5, NPS 0–10). Other
-    /// block types have no scale.
+    /// Scale bounds for scored blocks: the question's authored bounds when it
+    /// has them, else the block type's default range (Rating 1–5, NPS 0–10).
     private static func scaleBounds(_ block: SurveyBlock) -> (min: Int, max: Int)? {
+        let defaults: (min: Int, max: Int)
         switch block.type {
-        case .rating: return (1, 5)
-        case .nps, .npsEmoji, .npsSmiley: return (0, 10)
+        case .rating: defaults = (1, 5)
+        case .nps, .npsEmoji, .npsSmiley: defaults = (0, 10)
         default: return nil
         }
+        return (
+            min: block.scaleMin.map { Int($0.rounded()) } ?? defaults.min,
+            max: block.scaleMax.map { Int($0.rounded()) } ?? defaults.max
+        )
     }
 
     private static let openEndedQuestionTypes: Set<SurveyBlockType> = [

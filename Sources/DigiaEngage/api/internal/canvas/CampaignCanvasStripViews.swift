@@ -354,6 +354,7 @@ struct CanvasCarouselRenderer: View {
 
     @State private var scrollPosition: Int?
     @State private var timer: Timer?
+    @State private var autoPlayTask: Task<Void, Never>?
     /// True while the last page change came from the autoplay timer rather than the user's finger,
     /// which is the distinction the legacy carousel's `auto` flag draws.
     @State private var advancedAutomatically = false
@@ -491,7 +492,9 @@ struct CanvasCarouselRenderer: View {
                             .onChange(of: isTouching) { _, touching in
                                 motion.fingerDown = touching
                                 if touching {
-                                    stopAutoPlay()
+                                    if InlineCarouselRenderer.autoPlaySleepForTesting == nil {
+                                        stopAutoPlay()
+                                    }
                                     // Whatever the strip does next is the finger's doing.
                                     advancedAutomatically = false
                                 } else {
@@ -672,8 +675,35 @@ struct CanvasCarouselRenderer: View {
         slideCount: Int,
         loopEnabled: Bool
     ) {
-        stopAutoPlay()
-        guard autoPlay, slideCount > 1 else { return }
+        guard autoPlay, slideCount > 1 else {
+            stopAutoPlay()
+            return
+        }
+        if let sleep = InlineCarouselRenderer.autoPlaySleepForTesting {
+            guard autoPlayTask == nil else { return }
+            let intervalNs = UInt64(max(0.001, autoPlayInterval) * 1_000_000_000)
+            autoPlayTask = Task { @MainActor in
+                while !Task.isCancelled {
+                    do { try await sleep(intervalNs) } catch { return }
+                    guard !Task.isCancelled else { return }
+                    guard !motion.fingerDown else { continue }
+                    let current = motion.restingPage?.page ?? scrollPosition ?? (loopEnabled ? loopClones : 0)
+                    guard let next = carouselAutoPlayNextPage(
+                        current: current,
+                        displayCount: displayCount,
+                        loopClones: loopClones,
+                        loopEnabled: loopEnabled
+                    ) else { continue }
+                    advancedAutomatically = true
+                    if #available(iOS 18, *), let proxy = motion.proxy {
+                        proxy.scrollTo(next, anchor: .center)
+                    } else {
+                        scrollPosition = next
+                    }
+                }
+            }
+            return
+        }
         let timer = Timer(timeInterval: autoPlayInterval, repeats: true) { _ in
             Task { @MainActor in
                 // A finger holds the strip or it is still travelling: leave it.
@@ -709,6 +739,8 @@ struct CanvasCarouselRenderer: View {
     private func stopAutoPlay() {
         timer?.invalidate()
         timer = nil
+        autoPlayTask?.cancel()
+        autoPlayTask = nil
     }
 }
 
@@ -772,11 +804,13 @@ private extension View {
 /// Where a carousel strip is and whether it has stopped. Kept out of SwiftUI
 /// state so the per-frame scroll updates do not re-render the carousel.
 @MainActor
-private final class CarouselStripMotion {
+final class CarouselStripMotion {
     /// How long the strip must hold still to count as at rest. A drag, a fling
     /// and an animation all report every frame, so a gap this long means it
     /// has stopped.
     static let restDelay: TimeInterval = 0.12
+    /// Number of scheduled rest-check tasks still waiting to fire.
+    static var pendingRestChecks = 0
 
     var proxy: ScrollViewProxy?
     var isVisible = false
@@ -820,7 +854,9 @@ private final class CarouselStripMotion {
     ) {
         generation += 1
         let expected = generation
+        Self.pendingRestChecks += 1
         Task { @MainActor [weak self] in
+            defer { Self.pendingRestChecks = max(0, Self.pendingRestChecks - 1) }
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             guard let self, self.generation == expected else { return }
             onRest()
@@ -880,24 +916,46 @@ struct CanvasStoryRailRenderer: View {
                     }
                 }
             }
-            .fullScreenCover(isPresented: Binding(
-                get: { openIndex != nil },
-                set: { if !$0 { openIndex = nil } }
-            )) {
-                CanvasStoryViewer(
-                    pages: pages,
-                    chrome: chrome,
-                    initialIndex: openIndex ?? 0,
-                    restartOnCompleted: restartOnCompleted,
-                    startMuted: startMuted,
-                    isDark: isDark,
-                    onAction: onAction,
-                    onDismiss: { openIndex = nil },
-                    safeAreaInsets: activeFloaterWindowSafeAreaInsets
-                )
-                .ignoresSafeArea()
-            }
+            .background(
+                CanvasStoryCoverPresenter(
+                    isPresented: Binding(
+                        get: { openIndex != nil },
+                        set: { if !$0 { openIndex = nil } }
+                    )
+                ) {
+                    CanvasStoryViewer(
+                        pages: pages,
+                        chrome: chrome,
+                        initialIndex: openIndex ?? 0,
+                        restartOnCompleted: restartOnCompleted,
+                        startMuted: startMuted,
+                        isDark: isDark,
+                        onAction: onAction,
+                        onDismiss: { openIndex = nil },
+                        safeAreaInsets: activeFloaterWindowSafeAreaInsets
+                    )
+                    .ignoresSafeArea()
+                }
+            )
         )
+    }
+}
+
+/// Isolates `.fullScreenCover` so disabling cover animation in tests (via
+/// `CanvasStoryViewer.disableCoverAnimationForTesting`) does not mutate any
+/// other animations in the rail or canvas. Production keeps default animation.
+struct CanvasStoryCoverPresenter<Content: View>: View {
+    let isPresented: Binding<Bool>
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        Color.clear
+            .fullScreenCover(isPresented: isPresented, content: content)
+            .transaction {
+                if CanvasStoryViewer.disableCoverAnimationForTesting {
+                    $0.disablesAnimations = true
+                }
+            }
     }
 }
 
@@ -939,11 +997,34 @@ struct CanvasStoryViewer: View {
     /// the screen while authored page and chrome content stay inside these margins.
     var safeAreaInsets = EdgeInsets()
 
+    /// Extra headroom past a video's real duration before the stall backstop advances the page.
+    private static let videoEndBackstopSeconds: TimeInterval = 1.5
+
     @State private var index = 0
     @State private var progress: CGFloat = 0
     @State private var muted = true
     @State private var paused = false
+    @State private var appActive = UIApplication.shared.applicationState == .active
+    @GestureState private var isHolding = false
+    @State private var pressStartedAt: TimeInterval?
     @State private var ticker: Timer?
+    /// Test seam: how the authored page timer waits out its 1/30 s tick, in
+    /// nanoseconds. `nil` (always, in a shipped app) ticks on the real clock.
+    /// Tests set a fake clock so `advanceTime` fires page turns instantly,
+    /// like `FloaterOrchestrator.autoDismissSleepForTesting`.
+    static var tickSleepForTesting: ((UInt64) async throws -> Void)?
+    /// Test seam: monotonic uptime in seconds matching `tickSleepForTesting`.
+    /// `nil` in production, which reads `ProcessInfo.processInfo.systemUptime`.
+    static var uptimeForTesting: (() -> TimeInterval)?
+    /// Test seam: disables SwiftUI's `.fullScreenCover` presentation animation
+    /// under the YAML test host (matches `NudgeCoverPresenter`). Always `false`
+    /// in production so the native slide-up presentation is untouched.
+    static var disableCoverAnimationForTesting = false
+    @State private var tickTask: Task<Void, Never>?
+    @State private var lastTickUptime: TimeInterval = 0
+    @State private var videoBuffering = false
+    @State private var videoDurationSeconds: Double?
+    @State private var videoActiveElapsed: TimeInterval = 0
     @State private var playbackGeneration = 0
     @State private var displayedMediaKey = CanvasStoryMediaKey(index: 0, generation: 0)
 
@@ -987,20 +1068,6 @@ struct CanvasStoryViewer: View {
             // backdrop — a background draws behind its parent's content — and
             // hide the story's own media behind a black rectangle.
             ZStack(alignment: .top) {
-                // Navigation sits under the chrome and over the page, so a
-                // button the author placed on a page still wins the tap.
-                HStack(spacing: 0) {
-                    Color.clear.contentShape(Rectangle()).onTapGesture { step(-1) }
-                    Color.clear.contentShape(Rectangle()).onTapGesture { step(1) }
-                }
-                .simultaneousGesture(
-                    LongPressGesture(minimumDuration: 0.2)
-                        .onChanged { _ in pause() }
-                        .onEnded { _ in resume() }
-                )
-                .allowsHitTesting(showsOverlays)
-                .accessibilityHidden(!showsOverlays)
-
                 let safeHeight = max(
                     0, proxy.size.height - safeAreaInsets.top - safeAreaInsets.bottom
                 )
@@ -1086,6 +1153,45 @@ struct CanvasStoryViewer: View {
             // top-aligned chrome above the top edge and the bottom-anchored page
             // canvas below the bottom one.
             .frame(width: proxy.size.width, height: proxy.size.height)
+            .contentShape(Rectangle())
+            // One unified DragGesture(minimumDistance: 0) on the full-screen reader
+            // handles hold-to-pause and left/right taps on any non-interactive area
+            // (even over opaque page backgrounds), while child buttons (Mute, Close,
+            // CTAs) keep higher gesture priority.
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .updating($isHolding) { _, state, _ in
+                        state = true
+                    }
+                    .onChanged { _ in
+                        guard showsOverlays else { return }
+                        if pressStartedAt == nil {
+                            pressStartedAt = Self.currentUptime()
+                            pause()
+                        }
+                    }
+                    .onEnded { value in
+                        guard showsOverlays else { return }
+                        let started = pressStartedAt
+                        pressStartedAt = nil
+                        resume()
+                        let held = started.map { max(0, Self.currentUptime() - $0) } ?? 0
+                        let travel = hypot(value.translation.width, value.translation.height)
+                        if held < 0.2 && travel < 20 {
+                            step(value.location.x < proxy.size.width / 2 ? -1 : 1)
+                        } else if value.translation.height > 80
+                            && value.translation.height > abs(value.translation.width)
+                        {
+                            dismissWithReport()
+                        }
+                    }
+            )
+            .onChange(of: isHolding) { holding in
+                if !holding {
+                    pressStartedAt = nil
+                    resume()
+                }
+            }
             // The media goes here rather than in the stack for the same reason:
             // a background is measured against its parent and can never resize
             // it, however large the image inside turns out to be. It still
@@ -1105,6 +1211,12 @@ struct CanvasStoryViewer: View {
                                         guard mediaKey == currentMediaKey else { return }
                                         displayedMediaKey = mediaKey
                                     },
+                                    onDuration: { duration in
+                                        guard mediaKey == currentMediaKey,
+                                              duration.isFinite, duration > 0 else { return }
+                                        videoDurationSeconds = duration
+                                        startVideoBackstopIfReady()
+                                    },
                                     onProgress: {
                                         guard mediaKey == currentMediaKey,
                                               mediaKey == displayedMediaKey else { return }
@@ -1113,6 +1225,10 @@ struct CanvasStoryViewer: View {
                                     onEnded: {
                                         guard mediaKey == currentMediaKey else { return }
                                         step(1)
+                                    },
+                                    onBuffering: { buffering in
+                                        guard mediaKey == currentMediaKey else { return }
+                                        videoBuffering = buffering
                                     },
                                     onFailed: {
                                         guard mediaKey == currentMediaKey else { return }
@@ -1148,6 +1264,16 @@ struct CanvasStoryViewer: View {
         .onDisappear {
             lastReportedIndex = nil
             stop()
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: UIApplication.willResignActiveNotification
+        )) { _ in
+            appActive = false
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: UIApplication.didBecomeActiveNotification
+        )) { _ in
+            appActive = true
         }
     }
 
@@ -1255,12 +1381,17 @@ struct CanvasStoryViewer: View {
     private func stop() {
         ticker?.invalidate()
         ticker = nil
+        tickTask?.cancel()
+        tickTask = nil
     }
 
     private func start(retainingDisplayedMedia: Bool = true) {
         stop()
         progress = 0
         paused = false
+        videoBuffering = false
+        videoDurationSeconds = nil
+        videoActiveElapsed = 0
         playbackGeneration += 1
 
         let current = page
@@ -1281,19 +1412,92 @@ struct CanvasStoryViewer: View {
         return CGFloat(interval / max(0.1, duration))
     }
 
+    private static func currentUptime() -> TimeInterval {
+        uptimeForTesting?() ?? ProcessInfo.processInfo.systemUptime
+    }
+
+    private func startVideoBackstopIfReady() {
+        guard let duration = videoDurationSeconds,
+              duration.isFinite, duration > 0,
+              ticker == nil, tickTask == nil else { return }
+        let mediaKey = currentMediaKey
+        let deadline = duration + Self.videoEndBackstopSeconds
+        let interval = 1.0 / 30.0
+        lastTickUptime = Self.currentUptime()
+        if let sleep = Self.tickSleepForTesting {
+            let intervalNs = UInt64(interval * 1_000_000_000)
+            tickTask = Task { @MainActor in
+                do {
+                    while !Task.isCancelled {
+                        try await sleep(intervalNs)
+                        guard mediaKey == currentMediaKey else { return }
+                        let now = Self.currentUptime()
+                        let elapsed = max(0, now - lastTickUptime)
+                        lastTickUptime = now
+                        if !paused && appActive && !videoBuffering {
+                            videoActiveElapsed += elapsed
+                            if videoActiveElapsed >= deadline { step(1); return }
+                        }
+                    }
+                } catch { return }
+            }
+            return
+        }
+        ticker = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
+            Task { @MainActor in
+                guard mediaKey == currentMediaKey else { return }
+                let now = Self.currentUptime()
+                let elapsed = max(0, now - lastTickUptime)
+                lastTickUptime = now
+                if !paused && appActive && !videoBuffering {
+                    videoActiveElapsed += elapsed
+                    if videoActiveElapsed >= deadline { step(1) }
+                }
+            }
+        }
+    }
+
     private func startAuthoredTimer() {
         ticker?.invalidate()
+        ticker = nil
+        tickTask?.cancel()
+        tickTask = nil
         let current = page
         let mediaKey = currentMediaKey
 
         let interval = 1.0 / 30.0
+        lastTickUptime = Self.currentUptime()
+        if let sleep = Self.tickSleepForTesting {
+            let intervalNs = UInt64(interval * 1_000_000_000)
+            tickTask = Task { @MainActor in
+                do {
+                    while !Task.isCancelled {
+                        try await sleep(intervalNs)
+                        guard mediaKey == currentMediaKey else { return }
+                        let now = Self.currentUptime()
+                        let elapsed = max(0, now - lastTickUptime)
+                        lastTickUptime = now
+                        progress += Self.progressIncrement(
+                            interval: elapsed,
+                            duration: current.duration,
+                            isPaused: paused || !appActive
+                        )
+                        if progress >= 1 { step(1); return }
+                    }
+                } catch { return }
+            }
+            return
+        }
         ticker = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
             Task { @MainActor in
                 guard mediaKey == currentMediaKey else { return }
+                let now = Self.currentUptime()
+                let elapsed = max(0, now - lastTickUptime)
+                lastTickUptime = now
                 progress += Self.progressIncrement(
-                    interval: interval,
+                    interval: elapsed,
                     duration: current.duration,
-                    isPaused: paused
+                    isPaused: paused || !appActive
                 )
                 if progress >= 1 { step(1) }
             }

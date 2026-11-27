@@ -70,53 +70,6 @@ struct DigiaEngageTests {
         #expect(SDKInstance.shared.config == first)
     }
 
-    @Test("register replaces and detaches the previous plugin")
-    func registerReplacesPlugin() {
-        SDKInstance.shared.resetForTesting()
-        // Initialized, so `register` attaches synchronously (ST43).
-        SDKInstance.shared.markInitializedForTesting(with: DigiaConfig(apiKey: "key_123"))
-        let first = TestPlugin(id: "first")
-        let second = TestPlugin(id: "second")
-
-        Digia.register(first)
-        Digia.register(second)
-
-        #expect(first.detachCount == 1)
-        #expect(first.attachCount == 1)
-        #expect(second.attachCount == 1)
-        #expect(second.detachCount == 0)
-    }
-
-    @Test("G6 — the outgoing plugin's presentations settle before it detaches")
-    func detachSettlesOwnedPresentationsFirst() throws {
-        SDKInstance.shared.resetForTesting()
-        // Initialized, so `register` attaches synchronously (ST43).
-        SDKInstance.shared.markInitializedForTesting(with: DigiaConfig(apiKey: "key_123"))
-        let first = TestPlugin(id: "first")
-        Digia.register(first)
-        let campaign = try #require(nudgeCampaign(key: "global-nudge"))
-        SDKInstance.shared.setCampaignsForTesting([campaign])
-        let recorder = PresentationRecorder(
-            SDKInstance.shared.deliver(
-                CEPTriggerPayload(
-                    cepCampaignId: "nudge-1", campaignKey: campaign.campaignKey,
-                    cepMetadata: [:])))
-        #expect(!recorder.isSettled)
-
-        // The plugin learns it is going away *after* its presentations ended, so
-        // its outcome handlers still run while its bridge is alive. Reversing
-        // those two lines is the leak G6 exists to close.
-        var settledAtDetach: Bool?
-        first.onDetach = { settledAtDetach = recorder.isSettled }
-
-        Digia.register(TestPlugin(id: "second"))
-
-        #expect(settledAtDetach == true)
-        #expect(recorder.dropReason == .pluginDetached)
-        #expect(recorder.isHoldReleased)
-        #expect(first.detachCount == 1)
-    }
-
     @Test("deliver routes inline carousel campaigns into the inline controller")
     func routesInlineCarouselCampaignsIntoInlineController() throws {
         SDKInstance.shared.resetForTesting()

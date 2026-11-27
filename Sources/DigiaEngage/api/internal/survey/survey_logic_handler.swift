@@ -68,7 +68,7 @@ enum SurveyLogicHandler {
 
         if branching.type != .linear {
             for rule in branching.rules {
-                if evaluateExpr(rule.whenExpr, ownerNode: node, branching: branching, answers: answers) {
+                if evaluateExpr(rule.whenExpr, ownerNode: node, branching: branching, answers: answers, survey: survey) {
                     return resolveTarget(survey: survey, currentNodeId: currentNodeId, target: rule.target, answers: answers)
                 }
             }
@@ -77,9 +77,14 @@ enum SurveyLogicHandler {
     }
 
     /// Whether `block` passes its `showWhen` given the answers so far.
-    static func isVisible(block: SurveyBlock, ownerNodeId: String, answers: [String: SurveyAnswer]) -> Bool {
+    static func isVisible(
+        block: SurveyBlock,
+        ownerNodeId: String,
+        answers: [String: SurveyAnswer],
+        survey: SurveyConfigModel? = nil
+    ) -> Bool {
         guard let expr = block.showWhen else { return true }
-        return evaluateExprForNode(expr: expr, defaultAnswerNodeId: ownerNodeId, answers: answers)
+        return evaluateExprForNode(expr: expr, defaultAnswerNodeId: ownerNodeId, answers: answers, survey: survey)
     }
 
     // MARK: - Internal helpers
@@ -95,7 +100,7 @@ enum SurveyLogicHandler {
         while let node = current {
             if !visited.insert(node.id).inserted { return SURVEY_FINISHED }  // cycle guard
             let block = survey.blockFor(node)
-            if block == nil || isVisible(block: block!, ownerNodeId: node.id, answers: answers) {
+            if block == nil || isVisible(block: block!, ownerNodeId: node.id, answers: answers, survey: survey) {
                 return node.id
             }
             current = nextNodeAfter(survey: survey, node: node)
@@ -145,7 +150,8 @@ enum SurveyLogicHandler {
         _ expr: ConditionExpr,
         ownerNode: SurveyNode,
         branching: NodeBranching,
-        answers: [String: SurveyAnswer]
+        answers: [String: SurveyAnswer],
+        survey: SurveyConfigModel
     ) -> Bool {
         // by_parent rewrites a condition's nil nodeId to the configured parent;
         // by_condition (and linear fallback) treats nil nodeId as the owner.
@@ -154,19 +160,27 @@ enum SurveyLogicHandler {
         case .byParent: defaultAnswerNodeId = branching.parentNodeId ?? ownerNode.id
         default: defaultAnswerNodeId = ownerNode.id
         }
-        return evaluateExprForNode(expr: expr, defaultAnswerNodeId: defaultAnswerNodeId, answers: answers)
+        return evaluateExprForNode(
+            expr: expr,
+            defaultAnswerNodeId: defaultAnswerNodeId,
+            answers: answers,
+            survey: survey
+        )
     }
 
     private static func evaluateExprForNode(
         expr: ConditionExpr,
         defaultAnswerNodeId: String,
-        answers: [String: SurveyAnswer]
+        answers: [String: SurveyAnswer],
+        survey: SurveyConfigModel?
     ) -> Bool {
         let groupResults = expr.groups.map { group -> Bool in
             let conditionResults = group.conditions.map { condition -> Bool in
                 let answerNodeId = condition.nodeId ?? defaultAnswerNodeId
+                let isChoice = isChoiceAnswer(survey, answerNodeId)
                 return evaluate(operator: condition.operator, targets: condition.values,
-                                logicOp: group.operator, answer: answers[answerNodeId])
+                                logicOp: group.operator, answer: answers[answerNodeId],
+                                isChoice: isChoice)
             }
             switch group.operator {
             case .and: return conditionResults.allSatisfy { $0 }
@@ -183,7 +197,8 @@ enum SurveyLogicHandler {
         operator op: ConditionOperator,
         targets: [String],
         logicOp: BoolOp,
-        answer: SurveyAnswer?
+        answer: SurveyAnswer?,
+        isChoice: Bool
     ) -> Bool {
         let answered = answer?.isAnswered == true
         switch op {
@@ -196,35 +211,47 @@ enum SurveyLogicHandler {
         let values = answer.values
         let parts = values + (answer.comment.map { [$0] } ?? [])
         let text = parts.joined(separator: " ").lowercased()
+        let firstExpected = targets.first ?? ""
+        // Empty when the answer is only a comment.
+        let firstValue = values.first ?? ""
+        let leftValue: Any = values.count == 1 ? firstValue : values
 
         switch op {
-        case .equals, .isExactly:
-            return Set(values) == Set(targets)
+        case .equals:
+            return _equals(leftValue, firstExpected)
         case .notEquals:
-            return Set(values) != Set(targets)
+            return !_equals(leftValue, firstExpected)
+        case .isExactly:
+            return _setEquals(values, targets)
         case .includesAny:
             return targets.contains { values.contains($0) }
         case .includesAll:
             return targets.allSatisfy { values.contains($0) }
         case .contains:
-            return combine(logicOp: logicOp, targets: targets) { text.contains($0.lowercased()) }
+            // A choice answer is a set of option ids: membership, not substring.
+            return isChoice
+                ? combine(logicOp: logicOp, targets: targets) { values.contains($0) }
+                : combine(logicOp: logicOp, targets: targets) { text.contains($0.lowercased()) }
         case .notContains:
-            return !combine(logicOp: logicOp, targets: targets) { text.contains($0.lowercased()) }
+            return isChoice
+                ? !combine(logicOp: logicOp, targets: targets) { values.contains($0) }
+                : !combine(logicOp: logicOp, targets: targets) { text.contains($0.lowercased()) }
         case .greaterThan:
-            guard let n = answer.asNumber(), let t = targets.first.flatMap(Double.init) else { return false }
-            return n > t
+            return _compare(firstValue, firstExpected) { $0 > $1 }
         case .lessThan:
-            guard let n = answer.asNumber(), let t = targets.first.flatMap(Double.init) else { return false }
-            return n < t
+            return _compare(firstValue, firstExpected) { $0 < $1 }
         case .isBetween:
-            guard let n = answer.asNumber(),
-                  let low = targets.first.flatMap(Double.init),
-                  targets.count > 1,
-                  let high = Double(targets[1]) else { return false }
-            return n >= min(low, high) && n <= max(low, high)
+            return _between(firstValue, targets)
         case .isAnswered, .isNotAnswered:
             return true
         }
+    }
+
+    private static func isChoiceAnswer(_ survey: SurveyConfigModel?, _ nodeId: String) -> Bool {
+        guard let survey,
+              let node = survey.nodeById(nodeId),
+              let block = survey.blockFor(node) else { return false }
+        return block.type.isChoice
     }
 
     private static func combine(logicOp: BoolOp, targets: [String], predicate: (String) -> Bool) -> Bool {
@@ -233,5 +260,59 @@ enum SurveyLogicHandler {
         case .and: return targets.allSatisfy(predicate)
         case .or: return targets.contains(where: predicate)
         }
+    }
+
+    /// Numeric view of a token, or nil when it is not a number.
+    private static func _number(_ value: Any?) -> Double? {
+        if let number = value as? NSNumber { return number.doubleValue }
+        if let string = value as? String {
+            return Double(string.trimmingCharacters(in: .whitespaces))
+        }
+        return nil
+    }
+
+    /// Equality with numeric normalisation: "3" equals "3.00" equals 3.0.
+    private static func _equals(_ left: Any?, _ right: Any?) -> Bool {
+        let leftNum = _number(left)
+        let rightNum = _number(right)
+        if let leftNum, let rightNum { return leftNum == rightNum }
+        return String(describing: left ?? "") == String(describing: right ?? "")
+    }
+
+    private static func _setEquals(_ left: [String], _ right: [String]) -> Bool {
+        let leftSet = Set(left)
+        let rightSet = Set(right)
+        return leftSet.count == rightSet.count && leftSet.isSuperset(of: rightSet)
+    }
+
+    private static func _compare(
+        _ answer: String,
+        _ expected: String,
+        _ numeric: (Double, Double) -> Bool
+    ) -> Bool {
+        if _isDate(answer), _isDate(expected) {
+            return numeric(answer < expected ? -1 : (answer > expected ? 1 : 0), 0)
+        }
+        guard let left = _number(answer), let right = _number(expected) else { return false }
+        return numeric(left, right)
+    }
+
+    private static func _between(_ answer: String, _ expected: [String]) -> Bool {
+        guard expected.count >= 2 else { return false }
+        let lower = expected[0]
+        let upper = expected[1]
+        if _isDate(answer), _isDate(lower), _isDate(upper) {
+            let low = lower <= upper ? lower : upper
+            let high = lower <= upper ? upper : lower
+            return answer >= low && answer <= high
+        }
+        guard let value = _number(answer),
+              let left = _number(lower),
+              let right = _number(upper) else { return false }
+        return value >= min(left, right) && value <= max(left, right)
+    }
+
+    private static func _isDate(_ value: String) -> Bool {
+        value.range(of: #"^\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil
     }
 }

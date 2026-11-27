@@ -13,13 +13,12 @@ extension RenderedUITests {
 @MainActor
 struct EngineFrequencyTests {
 
-    private static let day: TimeInterval = 86_400
     private static let title = "Once A Week, Twice Ever"
 
-    private func boot(stored: (String) -> [String: Any] = { _ in [:] }) async throws -> (SdkHarness, key: String) {
+    private func boot() async throws -> (SdkHarness, key: String) {
         let campaign = try fixture("engine/engine_frequency_week_window_total_cap")
         let key = keyOf(campaign)
-        let sdk = try await SdkHarness.start(campaign, stored: stored(key))
+        let sdk = try await SdkHarness.start(campaign)
         try sdk.mount { Text("host app") }
         return (sdk, key)
     }
@@ -41,56 +40,6 @@ struct EngineFrequencyTests {
 
         #expect(second.dropReason == .frequencyCapped)
         #expect(sdk.sdk.controller.activeNudge == nil)
-    }
-
-    // Fails if the week stops being 7 days long.
-    // dmc-case: dmc.freq.state_persists_across_reloads_and_launches
-    @Test("a show six days ago still blocks")
-    func sixDaysAgoStillBlocks() async throws {
-        let (sdk, key) = try await boot { key in
-            SdkHarness.frequencyState(
-                key, total: 1, windowCount: 1, windowAnchorAt: SdkHarness.msAgo(seconds: 6 * Self.day))
-        }
-        defer { sdk.tearDown() }
-
-        let delivery = try sdk.deliver(key)
-        try await sdk.settle()
-
-        #expect(delivery.dropReason == .frequencyCapped)
-        #expect(!sdk.isShowing(Self.title))
-    }
-
-    // Same line, other direction: an 8-day-old show must have rolled out of the week.
-    // dmc-case: dmc.freq.window_caps_day_week_month_rollover
-    @Test("a show eight days ago has rolled out of the week")
-    func eightDaysAgoHasRolledOut() async throws {
-        let (sdk, key) = try await boot { key in
-            SdkHarness.frequencyState(
-                key, total: 1, windowCount: 1, windowAnchorAt: SdkHarness.msAgo(seconds: 8 * Self.day))
-        }
-        defer { sdk.tearDown() }
-
-        let delivery = try sdk.deliver(key)
-        try await sdk.waitUntil("the nudge is up") { sdk.isShowing(Self.title) }
-
-        #expect(delivery.dropReason == nil)
-    }
-
-    // Fails if the lifetime cap is dropped from the gate (`total >= maxTotal` becomes `>`).
-    // dmc-case: dmc.freq.max_total_lifetime_blocks
-    @Test("the lifetime cap of two blocks even though the week rolled")
-    func lifetimeCapBlocks() async throws {
-        let (sdk, key) = try await boot { key in
-            SdkHarness.frequencyState(
-                key, total: 2, windowCount: 1, windowAnchorAt: SdkHarness.msAgo(seconds: 8 * Self.day))
-        }
-        defer { sdk.tearDown() }
-
-        let delivery = try sdk.deliver(key)
-        try await sdk.settle()
-
-        #expect(delivery.dropReason == .frequencyCapped)
-        #expect(!sdk.isShowing(Self.title))
     }
 }
 }

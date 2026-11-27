@@ -9,13 +9,19 @@ private let log = DigiaLogger()
 /// `SDKInstance.resetForTesting` puts `live` back.
 @MainActor
 struct ActionPlatform {
-    var open: (URL) -> Void
+    var open: (String) -> Void
     var copy: (String) -> Void
     var share: (String) -> Void
     var requestReview: () -> Void
 
     static let live = ActionPlatform(
-        open: { UIApplication.shared.open($0) },
+        open: {
+            guard let url = URL(string: $0) else {
+                log.w("openUrl ignored — not a valid URL")
+                return
+            }
+            UIApplication.shared.open(url)
+        },
         copy: { UIPasteboard.general.string = $0 },
         share: {
             ViewControllerUtil.present(
@@ -129,8 +135,7 @@ final class HostActionExecutor {
     private let openURL: (String) -> Void
 
     init(openURL: @escaping (String) -> Void = {
-        guard let url = URL(string: $0) else { return }
-        ActionPlatform.current.open(url)
+        ActionPlatform.current.open($0)
     }) {
         self.openURL = openURL
     }

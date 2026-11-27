@@ -15,13 +15,16 @@ import Testing
 @MainActor
 struct SurveyCanvasBranchingOperatorTests {
 
-    private func survey(operator op: String, value: String) throws -> SurveyConfigModel {
+    private func survey(operator op: String, value: String, text: Bool = false) throws -> SurveyConfigModel {
+        // D1: contains / not_contains are a substring on a text question and exact membership on a choice question.
+        let input = text
+            ? #"{ "type": "short_text", "required": false }"#
+            : #"{ "type": "multi_select", "required": false, "options": [ { "id": "a", "label": "A" }, { "id": "b", "label": "B" }, { "id": "c", "label": "C" } ] }"#
         let json = """
         { "templateType": "survey", "layoutMode": "canvas", "schemaVersion": 1,
           "scenes": [
             { "id": "scene_q", "kind": "question",
-              "input": { "type": "multi_select", "required": false,
-                         "options": [ { "id": "a", "label": "A" }, { "id": "b", "label": "B" }, { "id": "c", "label": "C" } ] } },
+              "input": \(input) },
             { "id": "scene_yes", "kind": "result" },
             { "id": "scene_no", "kind": "result" }
           ],
@@ -41,8 +44,8 @@ struct SurveyCanvasBranchingOperatorTests {
     }
 
     /// Where [answer] on the first question leads: true for the rule's target, false for the fallback.
-    private func matches(_ op: String, _ value: String, answer: SurveyAnswer?) throws -> Bool {
-        let survey = try survey(operator: op, value: value)
+    private func matches(_ op: String, _ value: String, answer: SurveyAnswer?, text: Bool = false) throws -> Bool {
+        let survey = try survey(operator: op, value: value, text: text)
         let answers = answer.map { ["node_q": $0] } ?? [:]
         let next = SurveyLogicHandler.nextStep(survey: survey, currentNodeId: "node_q", answers: answers).nextNodeId
         #expect(next == "node_yes" || next == "node_no", "unexpected \(next)")
@@ -78,14 +81,24 @@ struct SurveyCanvasBranchingOperatorTests {
     }
 
     // Fails if: survey_logic_handler.swift `.contains` / `.notContains` stop lower-casing both
-    // sides, or stop reading the answer's comment along with its values.
-    @Test("contains and does-not-contain ignore case and read the comment too")
+    // sides on a text answer, or stop reading the answer's comment along with its values.
+    @Test("contains and does-not-contain on a text answer ignore case and read the comment too")
     func containsIgnoresCase() throws {
-        #expect(try matches("contains", #""DELIVERY""#, answer: values("Fast delivery")))
-        #expect(try matches("answer_contains", #""late""#, answer: SurveyAnswer(values: ["other"], comment: "Came LATE")))
-        #expect(try !matches("contains", #""refund""#, answer: values("Fast delivery")))
-        #expect(try matches("not_contains", #""slow""#, answer: values("Fast delivery")))
-        #expect(try !matches("answer_does_not_contain", #""fast""#, answer: values("Fast delivery")))
+        #expect(try matches("contains", #""DELIVERY""#, answer: values("Fast delivery"), text: true))
+        #expect(try matches("answer_contains", #""late""#, answer: SurveyAnswer(values: ["other"], comment: "Came LATE"), text: true))
+        #expect(try !matches("contains", #""refund""#, answer: values("Fast delivery"), text: true))
+        #expect(try matches("not_contains", #""slow""#, answer: values("Fast delivery"), text: true))
+        #expect(try !matches("answer_does_not_contain", #""fast""#, answer: values("Fast delivery"), text: true))
+    }
+
+    // Fails if: survey_logic_handler.swift `.contains` / `.notContains` go back to a substring
+    // match on a choice answer (D1: an option id is an exact member, "a" does not match "ab").
+    @Test("contains and does-not-contain on a choice answer are exact membership")
+    func containsIsMembershipOnChoice() throws {
+        #expect(try matches("contains", #""a""#, answer: values("a", "c")))
+        #expect(try !matches("contains", #""a""#, answer: values("ab")))
+        #expect(try matches("not_contains", #""a""#, answer: values("ab")))
+        #expect(try !matches("not_contains", #""a""#, answer: values("a")))
     }
 
     // Fails if: survey_logic_handler.swift `.isBetween` stops ordering its bounds

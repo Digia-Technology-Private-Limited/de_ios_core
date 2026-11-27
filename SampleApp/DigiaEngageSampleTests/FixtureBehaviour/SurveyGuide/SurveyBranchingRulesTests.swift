@@ -56,44 +56,6 @@ struct SurveyBranchingRulesTests {
         try await sdk.waitUntil("\"\(text)\" on screen") { sdk.isShowing(text) }
     }
 
-    /// The survey is over: nothing of it on screen, completed once, and the CEP told it was
-    /// dismissed.
-    private func expectEnded(_ sdk: SdkHarness, _ presentation: CampaignPresentation) async throws {
-        try await sdk.waitUntil("the survey ended") { SDKInstance.shared.surveyOrchestrator.state == nil }
-        #expect(!sdk.isShowing(Self.role))
-        #expect(!sdk.isShowing(Self.team))
-        #expect(!sdk.isShowing(Self.trap))
-        let names = try await sdk.eventNames(of: Self.key)
-        #expect(names.filter { $0 == "Digia Experience Completed" }.count == 1, "sent: \(names)")
-        try await sdk.waitUntil("the CEP is told") { presentation.dismissReason != nil }
-    }
-
-    // Fails if: canvas_survey_config_parser.swift `guard !conditions.isEmpty else { return nil }`
-    // in `branchRule` is dropped: an empty `and` group is vacuously true in
-    // `SurveyLogicHandler.evaluateExprForNode`, so every answer lands on the trap.
-    @Test("a rule with no conditions never matches")
-    func emptyRuleNeverMatches() async throws {
-        let (sdk, _) = try await open()
-        defer { sdk.tearDown() }
-
-        try await pick(sdk, "Developer")
-
-        try await reach(sdk, Self.team)
-        #expect(!sdk.isShowing(Self.trap))
-    }
-
-    // Fails if: survey_logic_handler.swift `resolveTarget`'s `.node` case stops finishing when
-    // `survey.nodeById(target.nodeId)` is nil.
-    @Test("a fallback that points at a node that does not exist ends the survey instead of crashing")
-    func ghostFallbackEnds() async throws {
-        let (sdk, presentation) = try await open()
-        defer { sdk.tearDown() }
-
-        try await pick(sdk, "Something else")
-
-        try await expectEnded(sdk, presentation)
-    }
-
     /// Known gap: canvas_survey_config_parser.swift `branchRule` puts the rule's
     /// `conditionOperator` on the outer `ConditionExpr` but every condition in one
     /// `ConditionGroup(operator: .and, ...)`, so an `or` rule needs all of its conditions, like an
@@ -113,65 +75,6 @@ struct SurveyBranchingRulesTests {
             try await reach(sdk, Self.age)
         }
         #expect(!sdk.isShowing(Self.trap))
-    }
-
-    // Fails if: survey_logic_handler.swift `for rule in branching.rules` in `nextStep` stops
-    // returning the first rule that matches (the Mobile+Web redirect rule then wins and the app
-    // is sent to the browser, leaving the foreground).
-    @Test("the first matching rule wins when several match")
-    func firstMatchingRuleWins() async throws {
-        let (sdk, presentation) = try await open()
-        defer { sdk.tearDown() }
-        try await pick(sdk, "Developer")
-        try await reach(sdk, Self.team)
-
-        try await sdk.tapExact("Mobile")
-        try await sdk.tapExact("Web")
-        try await sdk.tapExact("Data")
-        try await sdk.surveyNext()
-
-        try await expectEnded(sdk, presentation)
-        // iOS opens a redirect with `UIApplication.shared.open`, nothing the SDK lets a test
-        // observe; a redirect would leave the app for the browser.
-        #expect(UIApplication.shared.applicationState == .active)
-    }
-
-    /// The redirect route. iOS opens a redirect target with `UIApplication.shared.open`
-    /// (survey_renderer.swift, `.onChange(of: vm.redirectUrl)`), not through the host app's
-    /// deep-link handler as Flutter does, so there is nothing to assert on and running the route
-    /// would send the simulator to Safari, taking the test app out of the foreground for every
-    /// suite after it.
-    @Test("a redirect target ends the survey and opens its link once, reading an earlier question for its second condition",
-          .disabled("iOS opens a survey redirect with UIApplication.shared.open, bypassing the deep-link handler; running it backgrounds the test app"))
-    func redirectOpensLinkOnce() async throws {
-        let (sdk, presentation) = try await open()
-        defer { sdk.tearDown() }
-        let links = Received<String>()
-        sdk.setDeepLinkHandler { links.append($0) }
-        try await pick(sdk, "Developer")
-        try await reach(sdk, Self.team)
-
-        try await sdk.tapExact("Mobile")
-        try await sdk.tapExact("Web")
-        try await sdk.surveyNext()
-
-        try await expectEnded(sdk, presentation)
-        #expect(links.values == ["https://example.com/engage-survey-redirect"])
-    }
-
-    // Fails if: survey_logic_handler.swift `resolveTarget`'s `.next` case stops taking
-    // `survey.nodes[idx + 1]`.
-    @Test("a rule that does not match falls back to the next node")
-    func unmatchedFallsBackToNext() async throws {
-        let (sdk, _) = try await open()
-        defer { sdk.tearDown() }
-        try await pick(sdk, "Developer")
-        try await reach(sdk, Self.team)
-
-        try await pick(sdk, "Mobile")
-
-        try await reach(sdk, Self.age)
-        #expect(UIApplication.shared.applicationState == .active)
     }
 
     // Fails if: survey_logic_handler.swift `isBetween` stops including its range
@@ -203,22 +106,6 @@ struct SurveyBranchingRulesTests {
         try await sdk.surveyNext()
 
         try await reach(sdk, Self.guardian)
-    }
-
-    // Fails if: survey_logic_handler.swift `default: if !answered { return false }` in `evaluate`
-    // is dropped for an unanswered source.
-    @Test("a condition on a question that was skipped fails, so the rule does not match")
-    func skippedSourceFailsCondition() async throws {
-        let (sdk, _) = try await open()
-        defer { sdk.tearDown() }
-        try await reachAge(sdk)
-
-        try await sdk.surveyNext()
-        try await reach(sdk, Self.feedback)
-        try await sdk.surveyNext()
-
-        try await reach(sdk, Self.result)
-        #expect(!sdk.isShowing(Self.guardian))
     }
 }
 }

@@ -469,13 +469,30 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         }
     }
 
+    /// Test-only: replaces `Task.sleep` in `startReadinessTimeout` when the
+    /// anchor is `.missing` (never registered) so missing-anchor watchdogs run
+    /// on a fake clock without racing real-time auto-scrolls.
+    @MainActor static var readinessSleepForTesting: ((UInt64) async throws -> Void)?
+
     private func startReadinessTimeout(
         for key: String,
         failureReason: AnchorUnavailableReason = .notReadyTimeout
     ) {
         guard readinessTask == nil else { return }
+        let useFakeClock: Bool
+        if case .missing = resolution(for: key), Self.readinessSleepForTesting != nil {
+            useFakeClock = true
+        } else {
+            useFakeClock = false
+        }
         readinessTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            do {
+                if useFakeClock, let sleep = Self.readinessSleepForTesting {
+                    try await sleep(2_000_000_000)
+                } else {
+                    try await Task.sleep(nanoseconds: 2_000_000_000)
+                }
+            } catch { return }
             guard !Task.isCancelled, let self, self.activeKey == key,
                   !self.activeAnchorWasAvailable
             else { return }

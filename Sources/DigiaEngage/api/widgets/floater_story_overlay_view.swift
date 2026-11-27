@@ -282,7 +282,7 @@ private struct FloaterStorySessionView: View {
             viewerMounted = true
             orchestrator.setStoryOverlayActive(true)
             storyOverlaysVisible = false
-            if expand.isInstant {
+            if expand.isInstant || FloaterStoryOrchestrator.disableExitAnimationForTesting {
                 storyPhase = 1
                 storyOverlaysVisible = true
                 return
@@ -297,7 +297,7 @@ private struct FloaterStorySessionView: View {
         }
         let collapse = config.behavior.collapseTransition
         storyOverlaysVisible = false
-        if collapse.isInstant {
+        if collapse.isInstant || FloaterStoryOrchestrator.disableExitAnimationForTesting {
             storyPhase = 0
             viewerMounted = false
             orchestrator.setStoryOverlayActive(false)

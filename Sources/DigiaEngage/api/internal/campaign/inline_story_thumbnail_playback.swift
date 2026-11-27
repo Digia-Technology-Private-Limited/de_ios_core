@@ -89,6 +89,14 @@ enum InlineStoryRailPlaybackEvent {
 /// Owns every decision about which thumbnail is eligible, scheduled, and allowed to play.
 /// Geometry collection stays in SwiftUI; the resulting measurement enters through one event.
 struct InlineStoryRailPlaybackCoordinator {
+    /// Test-only: the YAML driver sets this for the whole run so goldens never
+    /// depend on thumbnail playback timing (mirrors Android blanking story
+    /// video TextureViews). Thumbnails stay on their static placeholder.
+    /// Default false: production behaviour unchanged. Set and read on the main
+    /// actor only (the driver sets it at boot/teardown; the rail reads it
+    /// while composing).
+    nonisolated(unsafe) static var thumbnailPlaybackDisabledForTesting = false
+
     private(set) var state = InlineStoryRailPlaybackState()
     private var items: [StoryItemConfig]
     private var mode: ThumbnailVideoPlaybackMode
@@ -130,7 +138,7 @@ struct InlineStoryRailPlaybackCoordinator {
     func playbackState(for index: Int) -> ThumbnailPlaybackViewState {
         let playable = playableIndices
         let eligible = playable.contains(index)
-        let scheduled = eligible && isScheduled(index)
+        let scheduled = eligible && isScheduled(index) && !Self.thumbnailPlaybackDisabledForTesting
         return ThumbnailPlaybackViewState(
             eligible: eligible,
             scheduled: scheduled,

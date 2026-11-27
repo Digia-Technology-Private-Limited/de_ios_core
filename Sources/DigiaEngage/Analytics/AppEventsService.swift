@@ -30,6 +30,8 @@ final class AppEventsService {
 
     func flush() { service.flush() }
 
+    var isDispatching: Bool { service.isDispatching }
+
     func clear() { service.clear() }
 
     /// Test-only: the queued entries' payloads, oldest first.

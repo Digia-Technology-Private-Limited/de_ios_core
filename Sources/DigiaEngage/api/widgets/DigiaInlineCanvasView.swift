@@ -14,6 +14,10 @@ private struct TimerRenderIdentity: Equatable {
 /// what Hide means here.
 @MainActor
 struct DigiaInlineCanvasView: View {
+    /// Test-only seam: when set, replaces `Task.sleep` in the timer tick loop.
+    /// Defaults to nil (real wall-clock sleep).
+    static var tickSleepForTesting: ((UInt64) async throws -> Void)? = nil
+
     let config: InlineCanvasConfig
     let payload: CEPTriggerPayload
     let stepGate: CarouselStepGate
@@ -72,7 +76,11 @@ struct DigiaInlineCanvasView: View {
                 tick &+= 1
                 let now = runtime.timeAnchor.nowMs()
                 let wait = UInt64(max(1, min(1_000, 1_000 - (now % 1_000))))
-                try? await Task.sleep(nanoseconds: wait * 1_000_000)
+                if let sleep = Self.tickSleepForTesting {
+                    try? await sleep(wait * 1_000_000)
+                } else {
+                    try? await Task.sleep(nanoseconds: wait * 1_000_000)
+                }
             }
         }
     }

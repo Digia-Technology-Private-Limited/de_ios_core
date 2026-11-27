@@ -27,9 +27,9 @@ enum TouchSynthesizer {
 
         try session.send(location, .down)
         // A finger stays down for a moment; a zero-length press is not what a recognizer sees.
-        drainRunLoop(for: 0.05)
+        drainRunLoop(for: 0.02)
         try session.send(location, .up)
-        drainRunLoop(for: 0.15)
+        drainRunLoop(for: 0.05)
     }
 
     /// Drags from `start` by `translation` (window points) over `duration`, in `steps` moves, then

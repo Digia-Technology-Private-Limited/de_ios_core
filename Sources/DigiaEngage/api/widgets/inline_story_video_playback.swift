@@ -32,6 +32,7 @@ struct StoryVideoPlaybackState: Equatable {
 
 struct StoryVideoPlaybackEvents {
     var onReady: @MainActor () -> Void = {}
+    var onDuration: @MainActor (Double) -> Void = { _ in }
     var onProgress: @MainActor (Double) -> Void = { _ in }
     var onEnded: @MainActor () -> Void = {}
     var onBuffering: @MainActor (Bool) -> Void = { _ in }
@@ -292,7 +293,12 @@ final class StoryVideoPlayback: ObservableObject {
         durationObserver = item.observe(\.duration, options: [.initial, .new]) {
             [weak self] item, _ in
             Task { @MainActor in
-                self?.revalidateStartAgainstKnownDuration(item.duration)
+                guard let self else { return }
+                let seconds = item.duration.seconds
+                if seconds.isFinite, seconds > 0 {
+                    self.events.onDuration(seconds)
+                }
+                self.revalidateStartAgainstKnownDuration(item.duration)
             }
         }
         bufferingObserver = player.observe(\.timeControlStatus, options: [.initial, .new]) {
@@ -327,6 +333,10 @@ final class StoryVideoPlayback: ObservableObject {
 
     private func prepareStart() {
         guard !startPrepared, let player, let item = player.currentItem else { return }
+        let seconds = item.duration.seconds
+        if seconds.isFinite, seconds > 0 {
+            events.onDuration(seconds)
+        }
         effectiveStartMs = configuredStartMs(for: item.duration)
         startPrepared = true
         seekToStart(retryAtZero: isThumbnail) { [weak self] in
@@ -356,6 +366,7 @@ final class StoryVideoPlayback: ObservableObject {
         revealPlayerIfReady(positionMs: positionMs)
         let duration = player.currentItem?.duration.seconds ?? 0
         if duration.isFinite, duration > 0 {
+            events.onDuration(duration)
             events.onProgress(min(max(time.seconds / duration, 0), 1))
         }
         if case let .thumbnail(item) = purpose,
@@ -463,6 +474,9 @@ final class StoryVideoPlayback: ObservableObject {
         showPlayerLayer = true
         if !readyReported {
             readyReported = true
+            if let seconds = player?.currentItem?.duration.seconds, seconds.isFinite, seconds > 0 {
+                events.onDuration(seconds)
+            }
             events.onReady()
         }
     }

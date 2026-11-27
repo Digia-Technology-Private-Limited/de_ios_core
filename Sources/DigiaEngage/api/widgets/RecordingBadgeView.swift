@@ -10,6 +10,9 @@ import SwiftUI
 /// Also re-checks `DigiaDebugDetection.isDebugBuild()` — defense in depth.
 @MainActor
 struct RecordingBadgeView: View {
+    /// Test seam: stops the connecting/error dot's repeatForever pulse so
+    /// golden snapshots are deterministic. Always `false` in production.
+    static var disablePulseForTesting = false
     @ObservedObject private var overlay = SDKInstance.shared.debugOverlayControllerSnapshot()
 
     var body: some View {
@@ -22,9 +25,7 @@ struct RecordingBadgeView: View {
 @MainActor
 private struct DraggableBadge: View {
     private static let margin: CGFloat = 8
-    // Cleared well below a typical nav bar, not just the status bar — a
-    // host's headerShown nav bar would otherwise sit right in that gap.
-    private static let defaultTopClearance: CGFloat = 100
+    private static let defaultTopClearance: CGFloat = 8
 
     @State private var offset: CGSize?
     @State private var dragStartOffset: CGSize?
@@ -170,8 +171,12 @@ private struct BadgeContent: View {
         // connecting). `pulse`'s oscillating value is only ever *read*
         // conditionally via `isPulsing`, matching Android/Flutter's pattern.
         .onAppear {
-            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+            if RecordingBadgeView.disablePulseForTesting {
                 pulse = true
+            } else {
+                withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                    pulse = true
+                }
             }
         }
         .onChange(of: sdk.captureStatusMessage) { message in
