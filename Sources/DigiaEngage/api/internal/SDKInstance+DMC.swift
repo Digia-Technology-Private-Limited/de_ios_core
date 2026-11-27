@@ -197,8 +197,8 @@ extension SDKInstance {
     func appDidEnterBackground() {
         engine.pause()
         inBackground = true
-        // Held signals are of the app that was on screen.
-        if !engine.isReady { engine.dropHeld() }
+        // Nothing is dropped: a signal held for the campaigns or for the user context
+        // outlives the background and is decided when its hold settles (#211).
     }
 
     func appWillEnterForeground() {

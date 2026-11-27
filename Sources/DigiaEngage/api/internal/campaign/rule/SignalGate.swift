@@ -59,7 +59,7 @@ final class SignalGate {
         held.removeAll()
     }
 
-    /// The app went to the background before ready: drops what was held.
+    /// Drops what was held; the gate keeps its open or closed state.
     func dropHeld() {
         held.removeAll()
     }

@@ -210,21 +210,6 @@ struct DMCDecisionEngineTests {
         #expect(recorder.payloads.first?.detail == ["signal": "event:cart_landed"])
     }
 
-    // dmc-case: dmc.trigger.pre_ready_signals_replayed_then_cleared
-    @Test("signals are dropped when the app backgrounds before ready")
-    func droppedOnBackground() {
-        defer { finish() }
-        facts.ready = false
-        facts.add(Self.campaign("home_tip", screen: "home"))
-
-        engine.send(.screenViewed("home"))
-        engine.dropHeld()
-        facts.ready = true
-        engine.ready()
-
-        #expect(routedKeys.isEmpty)
-    }
-
     @Test("a session reset before ready keeps the app open and drops every other held signal")
     func resetKeepsAppOpened() {
         defer { finish() }
@@ -239,20 +224,6 @@ struct DMCDecisionEngineTests {
         engine.ready()
 
         #expect(routedKeys == ["welcome"])
-    }
-
-    @Test("dropHeld still drops the app open")
-    func dropHeldDropsAppOpened() {
-        defer { finish() }
-        facts.ready = false
-        facts.add(Self.campaign("welcome", triggers: [["type": "app_opened"]]))
-
-        engine.send(.appOpened)
-        engine.dropHeld()
-        facts.ready = true
-        engine.ready()
-
-        #expect(routedKeys.isEmpty)
     }
 
     // dmc-case: dmc.trigger.pre_ready_signals_replayed_then_cleared

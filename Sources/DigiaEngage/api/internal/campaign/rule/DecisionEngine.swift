@@ -101,12 +101,6 @@ final class DecisionEngine {
         contextGate.open()
     }
 
-    /// The app went to the background before ready: drops what was held.
-    func dropHeld() {
-        gate.dropHeld()
-        contextGate.dropHeld()
-    }
-
     /// The app left the screen: waits keep counting but do not fire.
     func pause() {
         waits.pause()
