@@ -577,7 +577,9 @@ struct CampaignModel: Equatable {
                     autoDelayMs: stepJson["autoDelayMs"] != nil ? stepJson.int("autoDelayMs", default: 0) : nil,
                     delayInMs: displayStyle != nil && stepJson["delayInMs"] != nil
                         ? stepJson.int("delayInMs", default: 0)
-                        : nil
+                        : nil,
+                    passThroughTap: strictBool(stepJson["passThroughTap"]),
+                    advanceOnTap: strictBool(stepJson["advanceOnTap"])
                 )
             )
         }
@@ -601,6 +603,14 @@ struct CampaignModel: Equatable {
             variableSchemas: variableSchemas
         )
     }
+}
+
+/// A JSON boolean, strictly: a number (`1`), a string or anything else is `false`.
+private func strictBool(_ value: Any?) -> Bool {
+    guard let number = value as? NSNumber,
+          CFGetTypeID(number) == CFBooleanGetTypeID()
+    else { return false }
+    return number.boolValue
 }
 
 // MARK: - [String: Any] → JSONValue bridge (survey config)
