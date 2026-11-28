@@ -430,6 +430,10 @@ final class GameSurface {
         timing: GameOpenTiming = GameOpenTiming(intentAt: MonotonicClock.nowSeconds())
     ) -> GameOpenRequest {
         let campaignKey = campaign.campaignKey
+        // Resolved once per open from this payload's CEP values and their fallbacks, so
+        // the skin only ever receives finished text in `init`.
+        let variableContext = buildVariableContext(
+            schemas: campaign.variableSchemas, cepVars: payload.variables)
         // The funnel counts a shown game: `shown` arms the failure Dismissed,
         // so a game that never displayed reports only its open failure, never
         // a Dismissed without a Viewed.
@@ -618,8 +622,8 @@ final class GameSurface {
             entry: entryValue,
             themeFontFamily: config.themeFontFamily,
             themeFonts: config.themeFonts,
-            values: config.values,
-            slots: config.slots,
+            values: resolveGameValues(config.values, context: variableContext),
+            slots: resolveGameSlots(config.slots, context: variableContext),
             timing: timing
         )
     }
